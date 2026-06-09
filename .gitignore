@@ -6,3 +6,7 @@ desktop.ini
 
 # Noita writes a per-mod settings cache at runtime; keep source settings.lua, ignore generated state
 mod_config.xml
+
+# Python bytecode (from tools/)
+__pycache__/
+*.pyc
