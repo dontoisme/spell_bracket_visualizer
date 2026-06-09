@@ -130,17 +130,21 @@ end
 -- renders taller) and your window aspect changes the mapping. We bracket every
 -- wand box (each from its own wand's cards), which sidesteps "which is selected".
 local PIXEL = "mods/testMod/files/ui/pixel.png"
+-- Calibrated against GUI 640x360 (px = 2.5*GUI). Boxes 1 & 2 land dead-on;
+-- the SELECTED box renders ~12 GUI taller and its row sits ~12 lower, which we
+-- can't detect (no selection API) -- so the box you're editing reads slightly
+-- high. Slot geometry (slot0_x/pitch) measured from the box spell row.
 local BOX = {
 	top0    = 0.137, -- first wand box's spell-row top, fraction of GUI height
 	height  = 0.179, -- per-box vertical step (assumed uniform), fraction of height
 	row_off = 0.121, -- box top -> spell row, fraction of height
-	slot0_x = 0.139, -- first slot center, fraction of GUI width
-	pitch   = 0.026, -- slot-to-slot spacing, fraction of width
-	halfw   = 0.013, -- half slot width, fraction of width
+	slot0_x = 0.119, -- first slot center, fraction of GUI width (GUI ~76)
+	pitch   = 0.032, -- slot-to-slot spacing, fraction of width (GUI ~20.5)
+	halfw   = 0.016, -- half slot width, fraction of width (GUI ~10)
 }
-local LEVEL_GAP = 7      -- px between nesting bracket levels
-local TICK = 4           -- px height of the end ticks
-local DEBUG_RULER = true -- draw GUI dims + a 10% grid for calibration
+local LEVEL_GAP = 7       -- px between nesting bracket levels
+local TICK = 4            -- px height of the end ticks
+local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
 	a = a or 1

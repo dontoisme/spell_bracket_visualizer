@@ -54,7 +54,7 @@ A wand-readability mod with two features:
 - ✅ Confirmed accurate in-game (correctly parsed a real multicast+trigger wand).
 - Robust and resolution-independent. This is the **reliable fallback**.
 
-### Slot brackets — the hard part (EXPERIMENTAL, being calibrated)
+### Slot brackets — the hard part (EXPERIMENTAL, calibrated 2026-06-09)
 
 Goal: draw the brackets directly on a wand's **own box** spell row (the build
 surface), per the user.
@@ -64,42 +64,54 @@ is held* but **not** which wand a box is showing, nor where any box/slot is
 drawn. Verified against `Inventory2Component`, `InventoryGuiComponent`,
 `ControlsComponent`, and the full Lua API — only the raw mouse position exists.
 
-**Current approach** (`draw_box_brackets`): enumerate every carried wand
+**Approach** (`draw_box_brackets`): enumerate every carried wand
 (`GameGetAllInventoryItems`, ordered by slot), read each one's cards, and draw
 brackets under each box's spell row using a **hand-calibrated stacking model**
 (`BOX` table = GUI-screen-fraction constants). Bracketing *every* box sidesteps
 "which is selected".
 
-**Known fragility (accepted):**
-- Box heights aren't uniform — the **selected box renders taller** (~304px vs
-  ~243px measured), and there's no API to detect which is selected → that box
-  will misalign.
-- Window **aspect ratio** changes the pixel↔GUI mapping between sessions.
-- Calibrated to a specific 3-wand layout; drifts as wand count/heights differ.
+**Calibration result** (from the debug-grid screenshot):
+- GUI canvas is **640×360**; on that capture `pixel = 2.5 × GUI`.
+- Measured wand-box spell rows at GUI y ≈ 94 / 157 / 234; the model predicts
+  93 / 157 / 222 → **boxes 1 & 2 land dead-on.**
+- Box 3 was the **selected** box: it renders ~12 GUI taller, so its row sits ~12
+  lower than the uniform model and the bracket reads ~12 high. **No API exposes
+  which box is selected, so this can't be corrected** — it's the irreducible
+  error. The box you're actively editing is, annoyingly, the one most affected.
+- Slot geometry corrected to the measured row: `slot0_x≈GUI 76`, `pitch≈20.5`.
+- `DEBUG_RULER` now `false`.
 
-**Calibration aids in place** (`DEBUG_RULER = true` in `grouping_overlay.lua`):
-on-screen GUI-dimension readout + a 10% grid, so the screenshot-pixel ↔
-GUI-coordinate mapping can be measured exactly. Remove before release.
+**Net:** brackets align well on **non-selected** wand boxes; the **selected**
+box reads slightly high. Also still subject to: variable wand counts/heights,
+window aspect changes (GUI may not always be 640×360), and the assumption that
+each wand's cards start at slot 0 (leading empty slots would shift it).
 
 ## Expected next steps
 
-1. **Calibrate the slot brackets** (next action): from one full-window screenshot
-   showing the debug grid + GUI-dims readout, measure the true wand-box spell-row
-   positions and tune the `BOX` constants in `grouping_overlay.lua`.
-2. **Assess the stacking model honestly.** If the selected-box drift and
-   per-wand height variance make it too unreliable, decide between:
-   - investing in a height model driven by each wand's capacity (read at runtime), or
-   - accepting box brackets only for the non-selected boxes, or
-   - falling back to the companion panel as the primary feature.
-3. **Turn off `DEBUG_RULER`** once calibrated.
-4. **Edge cases:** always-cast cards (currently sorted in with the rest),
-   mod-added spells (unknown → leaf, fine), shuffle wands (deck order randomizes
-   at cast — panel shows static slot order; document it), `cast count` > 1.
+1. **Re-test the calibrated build** (next action): restart, open the inventory,
+   confirm brackets sit on the non-selected wand-box rows and span the right
+   slots. Expect the selected box to read ~12 GUI high (see above).
+2. **Decision point — is the box overlay worth keeping?** Calibration confirmed
+   it's fundamentally limited: the box you edit (selected) is exactly the one it
+   can't align, and it breaks with different wand counts / window sizes. Options:
+   - **Recommended:** make the **companion panel the primary feature** (it's
+     accurate and robust) and keep box brackets as an off-by-default experimental
+     extra. Consider defaulting `show_slot_brackets` to false.
+   - Try a capacity-driven height model so the selected box's extra height is
+     predicted from the wand's stats (partial fix; still can't detect selection).
+   - Drop the box overlay entirely.
+3. **Handle leading empty slots:** map brackets to each card's real
+   `inventory_slot.x`, not the sequential token index (currently assumes cards
+   start at slot 0).
+4. **Edge cases:** always-cast cards (sorted in with the rest), mod-added spells
+   (unknown → leaf, fine), shuffle wands (deck order randomizes at cast — panel
+   shows static slot order; document it), `cast count` > 1.
 5. **Polish:** connector glyphs / spacing on the panel; optional position setting.
-6. **Merge to `main`** once the grouping feature is at a satisfying, stable state;
-   update the top-level `README.md`.
-7. **Resolution robustness:** confirm behavior at a couple of window sizes; if the
-   fraction model is too shaky, switch slot geometry to absolute GUI units.
+6. **Merge to `main`** once the feature is satisfying and stable; update the
+   top-level `README.md`.
+7. **Resolution robustness:** GUI was 640×360 here, but it can differ; if the
+   fraction model is shaky across window sizes, anchor slot geometry to absolute
+   GUI units and re-measure.
 
 ## Caveats for whoever picks this up
 

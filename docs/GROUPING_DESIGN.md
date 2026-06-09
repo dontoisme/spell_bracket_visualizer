@@ -103,12 +103,13 @@ an enhancement we can tune against a real screen.
    may want a separate section), mod-added spells (unknown → leaf, OK),
    shuffle wands (deck order randomizes at cast — panel shows static slot order;
    note this), `cast count` > 1 (panel shows whole deck, not per-shot split).
-3. **Phase 2 — native-slot overlay** (the exact original vision): *in progress.*
-   `draw_slot_brackets` draws a bracket under the SPELLS slot row for each group,
-   spanning `node.first..node.last` (token order == slot order), nested levels
-   stacked downward, colored by group type. Slot geometry (`SLOT` table in
-   grouping_overlay.lua) is fractions of the GUI screen, **tuned empirically** —
-   first guess pending screenshot calibration. Toggle: `show_slot_brackets`.
-   Panel stays as the reliable fallback.
+3. **Phase 2 — wand-box slot overlay** (the build-aid vision): *calibrated, but
+   fundamentally limited.* `draw_box_brackets` enumerates every carried wand and
+   draws grouping brackets under each wand box's spell row (`BOX` table = GUI-
+   fraction geometry). Calibrated against GUI 640×360 (px = 2.5×GUI): non-selected
+   boxes align; the **selected box renders ~12 GUI taller and can't be detected**,
+   so the box you're editing reads slightly high. Toggle: `show_slot_brackets`.
+   See `STATUS.md` for the decision point (likely make the panel primary). Panel
+   remains the reliable fallback.
 4. **Polish:** friendlier names via the `$action_*` translations instead of
    prettified ids; optional connector glyphs.
