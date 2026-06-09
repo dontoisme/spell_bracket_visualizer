@@ -227,6 +227,8 @@ local TICK_W  = 3   -- GUI length of the top/bottom hooks
 local STACK_X = 1.5 -- horizontal step between closing brackets stacked on one card
 local STACK_Y = 1   -- vertical growth per stack level: outer brackets are taller,
                     -- so their hooks wrap around the inner bracket's
+local CLOSE_NUDGE = 1.5 -- the card frame's right edge sits ~1.5 GUI left of the
+                        -- pitch-derived edge (measured from screenshot)
 local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
@@ -244,30 +246,19 @@ local function bracket(gui, idc, x, top, bot, dir, c)
 	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx, bot - 1, TICK_W, 1, c)
 end
 
--- Draw [ ] bracket glyphs for one group, ON the boundary cards' frame edges,
--- rainbow-colored by nesting depth (SLIME rainbow parens).
+-- Collect one wand's group delimiters (all casts) for two-pass rendering.
+-- Two passes because closing brackets need the per-column TOTAL before any
+-- can be placed: the OUTERMOST sits on the card's right edge and inner ones
+-- step left over the card art (inner -> outer reads left -> right, like
+-- nested parens on paper). Parents are collected before their children, so
+-- per column the collection order is outer -> inner.
 -- The span starts at the group's OWN card (node.head): leading modifiers sit
 -- outside the parens, Lisp-style, matching the panel's "[mods] name" layout.
--- Closing brackets that land on the same card stack LEFTWARD over the card
--- art (innermost ON the card edge -- children draw first), staying contained
--- within the card, and each outer one is slightly TALLER so its hooks wrap
--- around the inner bracket's, like nested parens on paper.
--- `closes` counts brackets placed per column.
 -- `xs` maps deck index -> real slot column (handles empty slots in the wand).
-local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs, closes)
+local function collect_delims(nodes, depth, xs, out)
 	for _, node in ipairs(nodes) do
 		if node.children and #node.children > 0 and node.last then
-			draw_delims(gui, node.children, sw, top, bot, depth + 1, idc, xs, closes)
-
 			local head = node.head or node.first
-			local ca = xs[head] or (head - 1) -- 0-based slot columns
-			local cb = xs[node.last] or (node.last - 1)
-			local c = node.wrap and WRAP_COLOR or nest_color(depth)
-
-			-- open: [ on the card frame's left edge
-			local lx = sw * (BOX.slot0_x + ca * BOX.pitch - BOX.halfw)
-			bracket(gui, idc, lx, top, bot, 1, c)
-
 			local lbl
 			if node.kind == "multicast" then
 				lbl = "x" .. ((node.group == -1) and "all" or tostring(node.group))
@@ -275,17 +266,37 @@ local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs, closes)
 				lbl = "trig " .. tostring(node.payload)
 			end
 			if node.wrap then lbl = lbl .. " ~wrap" end
-			GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
-			GuiText(gui, lx, top - 9, lbl)
-
-			-- close: ] on the card frame's right edge, stacking LEFT onto the
-			-- card (overlaying the art keeps the brackets within the card)
-			local off = closes[cb] or 0
-			closes[cb] = off + 1
-			local rx = sw * (BOX.slot0_x + cb * BOX.pitch + BOX.halfw)
-				- BAR_W - off * STACK_X
-			bracket(gui, idc, rx, top - off * STACK_Y, bot + off * STACK_Y, -1, c)
+			out[#out + 1] = {
+				ca = xs[head] or (head - 1), -- 0-based slot columns
+				cb = xs[node.last] or (node.last - 1),
+				c = node.wrap and WRAP_COLOR or nest_color(depth),
+				lbl = lbl,
+			}
+			collect_delims(node.children, depth + 1, xs, out)
 		end
+	end
+end
+
+local function draw_delims(gui, groups, sw, top, bot, idc)
+	local counts, seen = {}, {}
+	for _, g in ipairs(groups) do counts[g.cb] = (counts[g.cb] or 0) + 1 end
+	for _, g in ipairs(groups) do
+		-- open: [ on the card frame's left edge, label above
+		local lx = sw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw)
+		bracket(gui, idc, lx, top, bot, 1, g.c)
+		GuiColorSetForNextWidget(gui, g.c[1], g.c[2], g.c[3], 1)
+		GuiText(gui, lx, top - 9, g.lbl)
+
+		-- close: outermost ] ON the card's right edge (s = 0: collected
+		-- first, placed rightmost, tallest so its hooks wrap the inner
+		-- ones); inner brackets step LEFT over the card art, so the stack
+		-- reads inner -> outer left-to-right and stays within the card
+		local s = seen[g.cb] or 0
+		seen[g.cb] = s + 1
+		local grow = (counts[g.cb] - 1 - s) * STACK_Y
+		local rx = sw * (BOX.slot0_x + g.cb * BOX.pitch + BOX.halfw)
+			- BAR_W - CLOSE_NUDGE - s * STACK_X
+		bracket(gui, idc, rx, top - grow, bot + grow, -1, g.c)
 	end
 end
 
@@ -327,10 +338,11 @@ local function draw_box_brackets(gui, sw, sh)
 			local cfg = read_config(wd.e)
 			local sim = wand_structure.simulate(tokens, meta,
 				{ spells_per_cast = cfg.spells_per_cast })
-			local closes = {} -- per-wand: stacked closing strips share columns
+			local groups = {} -- all casts together: closes stack per column
 			for _, cast in ipairs(sim.casts) do
-				draw_delims(gui, cast.nodes, sw, top, bot, 0, idc, xs, closes)
+				collect_delims(cast.nodes, 0, xs, groups)
 			end
+			draw_delims(gui, groups, sw, top, bot, idc)
 		end
 	end
 end
