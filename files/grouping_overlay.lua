@@ -120,17 +120,29 @@ function M.update()
 	if gui == nil then gui = GuiCreate() end
 	GuiStartFrame(gui)
 
-	local sw, _sh = GuiGetScreenDimensions(gui)
-	local x = sw - 132
-	local y0 = 30
+	local title = "Wand structure"
 	local line_h = 10
-	local panel_h = (#lines + 1) * line_h + 8
+	local pad = 4
+
+	-- Auto-size to the widest line so we can right-anchor cleanly.
+	local max_w = (GuiGetTextDimensions(gui, title))
+	for _, ln in ipairs(lines) do
+		local w = (GuiGetTextDimensions(gui, ln.text))
+		if w > max_w then max_w = w end
+	end
+
+	local panel_w = max_w + pad * 2
+	local panel_h = (#lines + 1) * line_h + pad * 2
+
+	local sw, _sh = GuiGetScreenDimensions(gui)
+	local x = sw - panel_w - 6   -- hug the right edge with a small margin
+	local y0 = 58                -- below the top-right vitals HUD (health/hearts/gold)
 
 	GuiZSet(gui, 2)
-	GuiImageNinePiece(gui, 90210, x - 4, y0 - 4, 130, panel_h, 0.55)
+	GuiImageNinePiece(gui, 90210, x - pad, y0 - pad, panel_w, panel_h, 0.85)
 
 	GuiZSet(gui, 1)
-	GuiText(gui, x, y0, "Wand structure")
+	GuiText(gui, x, y0, title)
 	local y = y0 + line_h + 2
 	for _, ln in ipairs(lines) do
 		GuiColorSetForNextWidget(gui, ln.r, ln.g, ln.b, 1)
