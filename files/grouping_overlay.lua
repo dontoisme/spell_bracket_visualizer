@@ -229,6 +229,7 @@ local STACK_Y = 1   -- vertical growth per stack level: outer brackets are talle
                     -- so their hooks wrap around the inner bracket's
 local CLOSE_NUDGE = 1.5 -- the card frame's right edge sits ~1.5 GUI left of the
                         -- pitch-derived edge (measured from screenshot)
+local OPEN_NUDGE  = 1   -- open [ sits just OFF the card, over the slot's left edge
 local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
@@ -281,8 +282,8 @@ local function draw_delims(gui, groups, sw, top, bot, idc)
 	local counts, seen = {}, {}
 	for _, g in ipairs(groups) do counts[g.cb] = (counts[g.cb] or 0) + 1 end
 	for _, g in ipairs(groups) do
-		-- open: [ on the card frame's left edge, label above
-		local lx = sw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw)
+		-- open: [ just left of the card, over the slot's left edge, label above
+		local lx = sw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
 		bracket(gui, idc, lx, top, bot, 1, g.c)
 		GuiColorSetForNextWidget(gui, g.c[1], g.c[2], g.c[3], 1)
 		GuiText(gui, lx, top - 9, g.lbl)
