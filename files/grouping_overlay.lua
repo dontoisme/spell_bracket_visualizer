@@ -233,18 +233,24 @@ local BOX = {
 	row_off = 3,      -- units: slot-row bottom sits this far above the box bottom
 	                  -- (user-tuned in-game; the screenshot fits said 2)
 	slot_h  = 12,     -- units: card frame height
-	slot0_x = 0.056,  -- first slot CENTER, fraction of GUI width (22.4u)
-	pitch   = 0.0325, -- slot-to-slot spacing, fraction of width (13u)
-	halfw   = 0.015,  -- half width of the card FRAME, fraction of width (6u)
+	-- Horizontal: the slot grid is 16 art-px cells at 4x = 64 screen px pitch
+	-- (0.032 of width), frames 60px with ~2px inset, first cell at 80px. The
+	-- earlier 65px pitch estimate drifted ~1px per column INTO the cards --
+	-- invisible at columns 0..4 (inside the frame inset), spotted by the user
+	-- at columns 6..8 as "opens walking into the spell card".
+	slot0_x = 0.055,  -- first slot CENTER, fraction of GUI width (110px)
+	pitch   = 0.032,  -- slot-to-slot spacing, fraction of width (64px)
+	halfw   = 0.015,  -- half width of the card FRAME, fraction of width
 }
 local BAR_W   = 1   -- GUI width of a bracket's vertical bar
 local TICK_W  = 3   -- GUI length of the top/bottom hooks
 local STACK_X = 1.5 -- horizontal step between closing brackets stacked on one card
 local STACK_Y = 1   -- vertical growth per stack level: outer brackets are taller,
                     -- so their hooks wrap around the inner bracket's
-local CLOSE_NUDGE = 1.5 -- the card frame's right edge sits ~1.5 GUI left of the
-                        -- pitch-derived edge (measured from screenshot)
-local OPEN_NUDGE  = 1   -- open [ sits just OFF the card, over the slot's left edge
+-- With the corrected 64px pitch the cell edges (center +- halfw) already sit
+-- ~2px outside the visible frame, so no extra nudges are needed.
+local CLOSE_NUDGE = 0 -- extra left shift of closing brackets
+local OPEN_NUDGE  = 0 -- extra left shift of opening brackets
 local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
@@ -402,6 +408,14 @@ local function draw_box_brackets(gui, sw, sh)
 			local w = sw * 0.35
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, top, w, 1, { 0.2, 1, 0.2 }, 0.8)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, bot, w, 1, { 1, 0.2, 0.2 }, 0.8)
+			-- per-column frame-edge ticks: any pitch/origin error shows as
+			-- ticks walking off the card edges as the column index grows
+			for col = 0, 12 do
+				local exl = sw * (BOX.slot0_x + col * BOX.pitch - BOX.halfw)
+				local exr = sw * (BOX.slot0_x + col * BOX.pitch + BOX.halfw)
+				idc.n = idc.n + 1; line(gui, 70000 + idc.n, exl, top - 3, 1, 3, { 0.2, 1, 0.2 }, 0.9)
+				idc.n = idc.n + 1; line(gui, 70000 + idc.n, exr - 1, top - 3, 1, 3, { 1, 0.2, 0.2 }, 0.9)
+			end
 			GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
 			GuiText(gui, w + 4, bot - 10, string.format("#%d s=%d H=%d top=%d %s",
 				i, s, box_h, box_top, tostring(sfile):gsub(".*/", "")))
