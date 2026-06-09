@@ -159,6 +159,8 @@ each wand's cards start at slot 0 (leading empty slots would shift it).
   box overlay still works and gained: per-wand spells/cast simulation, wrap
   coloring (orange + "~wrap" label), and real `inventory_slot.x` mapping (fixes
   leading/interior empty slots — old next-step 3).
+  *(Reversed after the v5 iteration the same day: brackets user-approved →
+  default **true**, "experimental" label dropped.)*
 - **Always-cast cards** are read via `permanently_attached` and excluded from
   the deck sim (they also no longer corrupt slot mapping) — old next-step 4.
 - **Shuffle wands** are flagged in the panel title ("order varies!") — the

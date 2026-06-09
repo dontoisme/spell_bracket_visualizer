@@ -12,9 +12,9 @@ mod_settings = {
 	},
 	{
 		id = "show_slot_brackets",
-		ui_name = "Slot Brackets (experimental)",
-		ui_description = "Also draw grouping brackets directly under the spell slots in\nthe wand UI. Alignment is hand-calibrated and drifts with\nresolution / the selected box; the panel is the reliable view.",
-		value_default = false,
+		ui_name = "Slot Brackets",
+		ui_description = "Rainbow nesting brackets on the spell cards in the wand UI,\nSLIME-style: each group's span, multicast/trigger labels, and\nwand wrapping in orange.",
+		value_default = true,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 }

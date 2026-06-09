@@ -204,7 +204,7 @@ end
 
 -- ---- phase 2: paren-style delimiters on each WAND BOX's spell row -----------
 --
--- EXPERIMENTAL (off by default). The engine doesn't expose where it draws the
+-- The engine doesn't expose where it draws the
 -- wand boxes, so the layout below is a hand-calibrated stacking model in
 -- GUI-screen fractions (re-measured 2026-06-09 from a 2000x1125 screenshot,
 -- GUI 640x360). Instead of long underlines spanning the whole group (ugly
@@ -410,7 +410,7 @@ function M.update()
 
 	local get = (type(ModSettingGet) == "function") and ModSettingGet or function() return nil end
 	local show_panel = get("testMod.show_grouping") ~= false
-	local show_slots = get("testMod.show_slot_brackets") == true
+	local show_slots = get("testMod.show_slot_brackets") ~= false
 	if not show_panel and not show_slots then return end
 
 	if gui == nil then gui = GuiCreate() end

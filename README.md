@@ -39,8 +39,7 @@ selected (taller) box via the held wand.
 ## Settings (in the in-game mod settings menu)
 
 - **Wand Structure Panel** — on/off (runtime; applies immediately).
-- **Slot Brackets (experimental)** — the in-UI rainbow strips (runtime; off by
-  default).
+- **Slot Brackets** — the in-UI rainbow brackets (runtime; on by default).
 
 ## Project layout
 
