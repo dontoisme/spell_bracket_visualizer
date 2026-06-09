@@ -63,13 +63,18 @@ local function get_active_wand()
 end
 
 -- spells/cast + shuffle from the wand's AbilityComponent.gun_config.
+-- pcall-guarded: these reads are not yet verified in-game, and an error here
+-- would otherwise disable the whole panel (init.lua kills it on first error).
+-- On failure we degrade to 1/cast, no shuffle -- the pre-cast-model display.
 local function read_config(wand)
 	local cfg = { spells_per_cast = 1, shuffle = false }
+	if type(ComponentObjectGetValue2) ~= "function" then return cfg end
 	local ab = EntityGetFirstComponentIncludingDisabled(wand, "AbilityComponent")
 	if not ab then return cfg end
-	local spc = ComponentObjectGetValue2(ab, "gun_config", "actions_per_round")
-	if tonumber(spc) and tonumber(spc) > 0 then cfg.spells_per_cast = tonumber(spc) end
-	cfg.shuffle = ComponentObjectGetValue2(ab, "gun_config", "shuffle_deck_when_empty") == true
+	local ok, spc = pcall(ComponentObjectGetValue2, ab, "gun_config", "actions_per_round")
+	if ok and tonumber(spc) and tonumber(spc) > 0 then cfg.spells_per_cast = tonumber(spc) end
+	local ok2, sh = pcall(ComponentObjectGetValue2, ab, "gun_config", "shuffle_deck_when_empty")
+	cfg.shuffle = ok2 and sh == true
 	return cfg
 end
 
@@ -88,7 +93,9 @@ local function read_deck(wand)
 			if ic then
 				local vx, vy = ComponentGetValue2(ic, "inventory_slot")
 				sx, sy = vx or 0, vy or 0
-				perm = ComponentGetValue2(ic, "permanently_attached") == true
+				-- pcall: not yet verified in-game; degrade to "not always-cast"
+				local ok, p = pcall(ComponentGetValue2, ic, "permanently_attached")
+				perm = ok and p == true
 			end
 			if aid and aid ~= "" then
 				if perm then
