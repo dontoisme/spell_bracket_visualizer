@@ -17,9 +17,9 @@ A wand-readability mod with two features:
 
 ## Where the code lives
 
-- Repo: `…/Noita/mods/testMod` (git, branches `main` + `grouping-brackets`).
-- `main`: icon recolor only — done and verified in-game.
-- `grouping-brackets`: everything below; **not yet merged**.
+- Repo: `…/Noita/mods/testMod` (git). Branch `grouping-brackets` was **merged
+  to `main` 2026-06-09** after in-game verification — `main` now has both
+  features (icon recolor + grouping panel).
 
 ## Feature 1 — icon recolor (DONE)
 
