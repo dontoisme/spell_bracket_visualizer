@@ -4,8 +4,9 @@
 which cards a multicast gathers, and what a trigger's payload is — as nested
 brackets, the way SLIME shows Lisp expression structure.
 
-Branch: `grouping-brackets`. Status: foundation landed; renderer pending a
-decision (see [Open decision](#open-decision-rendering)).
+Branch: `grouping-brackets`. Status: foundation + **companion panel implemented**
+(decision below = hybrid C: panel first, native overlay later). Not yet verified
+in-game (can't launch the GUI game from WSL here).
 
 ## How Noita actually builds a shot (verified from data.wak)
 
@@ -82,15 +83,29 @@ forces a choice in how we present the brackets:
 can't be blocked by the slot-position problem), then treat the native overlay as
 an enhancement we can tune against a real screen.
 
+## Implemented (panel — phase 1)
+
+- **`files/grouping_overlay.lua`** — reads the active wand (`Inventory2Component.
+  mActiveItem`) and its cards (`ItemActionComponent.action_id`, ordered by
+  `ItemComponent.inventory_slot`), builds the tree, flattens it to indented
+  color-coded lines, and draws a panel via our own `Gui` while
+  `GameIsInventoryOpen()`.
+- **`init.lua`** — `OnWorldPostUpdate` calls it, lazily loaded and `pcall`-guarded
+  so any failure disables the panel instead of breaking the game.
+- **`settings.lua`** — `show_grouping` toggle (RUNTIME scope).
+- Colors reuse the per-type palette from `main`.
+
 ## Remaining work
 
-1. **Renderer** (depends on the decision above): walk the tree, draw brackets +
-   spell icons/colors. Reuse `main`'s per-type colors.
-2. **Runtime glue:** an `OnWorldPostUpdate`/GUI loop gated on
-   `GameIsInventoryOpen()`, reading the active wand's deck and feeding
-   `wand_structure.build`.
-3. **Settings:** a toggle for the grouping view (independent of the icon recolor).
-4. **Edge cases:** always-cast cards, mod-added spells (unknown → leaf),
-   shuffle wands (deck order is randomized at cast — show static slot order and
-   note it), per-cast `cast count` > 1.
-5. **Verify in-game** (needs a real run; can't launch the GUI game from WSL here).
+1. **Verify in-game** (needs a real run) — confirm `mActiveItem` reads, slot
+   ordering, and panel placement; tune position/width/legibility.
+2. **Edge cases:** always-cast cards (currently sorted by slot like the rest —
+   may want a separate section), mod-added spells (unknown → leaf, OK),
+   shuffle wands (deck order randomizes at cast — panel shows static slot order;
+   note this), `cast count` > 1 (panel shows whole deck, not per-shot split).
+3. **Phase 2 — native-slot overlay** (the exact original vision): once the panel
+   is solid, attempt drawing brackets onto the real slot row using measured
+   GUI-space slot origin + pitch. Treat as best-effort; keep the panel as the
+   reliable fallback.
+4. **Polish:** friendlier names via the `$action_*` translations instead of
+   prettified ids; optional connector glyphs.

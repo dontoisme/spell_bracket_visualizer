@@ -7,3 +7,21 @@
 function OnModInit()
 	ModLuaFileAppend("data/scripts/gun/gun_actions.lua", "mods/testMod/files/recolor_actions.lua")
 end
+
+-- Grouping/structure panel (Lisp/SLIME-style). Drawn every frame while the
+-- inventory is open. Loaded lazily so a load error can't break OnModInit.
+local grouping = nil
+local grouping_failed = false
+
+function OnWorldPostUpdate()
+	if grouping_failed then return end
+	if grouping == nil then
+		grouping = dofile_once("mods/testMod/files/grouping_overlay.lua")
+		if type(grouping) ~= "table" then grouping_failed = true; return end
+	end
+	local ok, err = pcall(grouping.update)
+	if not ok then
+		grouping_failed = true
+		print("[Spell Bracket Visualizer] grouping panel disabled: " .. tostring(err))
+	end
+end
