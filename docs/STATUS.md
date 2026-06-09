@@ -62,16 +62,23 @@ A wand-readability mod with two features:
   via `ComponentObjectGetValue2`, `ItemComponent.permanently_attached`
   (always-cast detection).
 
-### Companion panel (WORKS in-game; cast/wrap display NOT yet re-verified)
+### Companion panel (✅ VERIFIED in-game, casts + wrapping included)
 
 - `files/grouping_overlay.lua` → `draw_panel`: a "Wand structure" text tree with
   rainbow nesting spines, colored by type, localized names. Center-top placement.
-- ✅ Confirmed accurate in-game (correctly parsed a real multicast+trigger wand)
-  *before* the cast/wrap upgrade; the upgraded rendering needs a fresh check.
-- Now shows: title with spells/cast + shuffle warning, an "always:" line for
+- Shows: title with spells/cast + shuffle warning, an "always:" line for
   always-cast cards, per-cast headers when the wand has multiple casts, and a
   loud orange "cast N -- WRAPS! -> recharge" banner with "~" markers on the
   wrapped-in cards. This is the **primary feature**.
+- ✅ Verified in-game 2026-06-09 (screenshot): a shuffle 1/cast wand with deck
+  `[Light, Bomb, Double scatter, Spark bolt]` rendered exactly the engine
+  behavior — cast 1 `[Light] Bomb`; cast 2 `Double scatter x2` gathering
+  `Spark bolt` + a forced draw that **wrapped** in `~ [Light] Bomb`, with the
+  orange banner. Title showed `(1/cast, shuffle: order varies!)`, confirming
+  the `gun_config` reads. Slot brackets also drew the wrap span in orange and
+  sat correctly on a wand with a leading empty slot (the `inventory_slot.x`
+  fix). Not yet observed in-game: the "always:" line (no always-cast wand on
+  hand; the read is pcall-guarded and fails soft).
 
 ### Slot brackets — the hard part (EXPERIMENTAL, calibrated 2026-06-09)
 
@@ -121,19 +128,16 @@ each wand's cards start at slot 0 (leading empty slots would shift it).
 
 ## Expected next steps
 
-1. **Verify in-game** (next action): restart a run, open the inventory and check
-   the panel on (a) a plain multi-`spells/cast` wand → per-cast headers group
-   the right spells, (b) THE classic rapid-fire wrap wand (e.g.
-   `[bolt, bolt, trigger]` with payload pulling past the deck end) → orange
-   "WRAPS! -> recharge" banner and "~" on wrapped-in cards, (c) a wand with an
-   always-cast → "always:" line, (d) a shuffle wand → title warning. Also
-   confirm the two new component reads (`gun_config.actions_per_round`,
-   `permanently_attached`) return what we expect.
-2. **Polish:** connector glyphs / spacing on the panel; optional position
-   setting; maybe dim spells that never fire this cycle (after a wrap).
-3. **Merge to `main`** once verified; update the top-level `README.md`
-   (it still describes the icon-recolor feature only and its "no grouping"
+1. ~~Verify in-game~~ ✅ done 2026-06-09 (see panel section above). Casts,
+   wrap banner, shuffle warning, gun_config reads and slot-x mapping all
+   confirmed against a real wrap wand. Outstanding small checks: the
+   "always:" line (need an always-cast wand) and a multi-`spells/cast` wand's
+   per-cast headers (only 1/cast wands were on hand).
+2. **Merge to `main`** + update the top-level `README.md` (its "no grouping"
    limitation no longer holds).
+3. **Polish (later):** connector glyphs / spacing on the panel; optional
+   position setting; maybe dim spells that never fire this cycle (after a
+   wrap).
 4. **Resolution robustness** (only if box overlay graduates): GUI was 640×360
    here, but it can differ; anchor slot geometry to absolute GUI units and
    re-measure if the fraction model is shaky across window sizes.

@@ -1,8 +1,34 @@
 # Spell Bracket Visualizer
 
-A [Noita](https://noitagame.com/) mod that frames every spell with a colored
-border based on its **action type**, so you can read a wand's layout at a glance —
-which cards are projectiles, which are modifiers, which draw more cards, etc.
+A [Noita](https://noitagame.com/) mod that makes wands readable, two ways:
+
+1. **Spell icon recolor** — frames every spell with a colored border based on
+   its **action type**, so you can read a wand's layout at a glance — which
+   cards are projectiles, which are modifiers, which draw more cards, etc.
+2. **Wand structure panel** — while the inventory is open, a Lisp/SLIME-style
+   tree of the held wand's **cast structure**: which spells fire
+   **simultaneously** in each cast, which modifiers feed which projectile,
+   what a multicast gathers, what a trigger's payload is — and, crucially for
+   rapid-fire wands, **when the wand WRAPS** (a forced draw past the deck's
+   end pulls cards from the wand's start and forces the recharge). Wrapping
+   casts get a loud orange `WRAPS! -> recharge` banner and the wrapped-in
+   cards are marked `~`.
+
+## The structure panel
+
+The panel simulates the engine's exact draw rules (verified from `gun.lua`):
+each cast draws the wand's *spells/cast* expressions; modifiers (and every
+other card that force-draws one replacement, like Alpha) prefix-attach;
+multicasts gather N cards; triggers open nested payloads; and forced draws on
+an empty deck wrap the discard back in, in slot order. Always-cast spells are
+listed separately (they join every cast). Shuffle wands get an
+"order varies!" warning — the simulation shows the slot-order outcome, which
+is one possible draw order of many.
+
+An experimental **Slot Brackets** overlay can additionally draw the grouping
+brackets directly under each wand box's spell row (off by default: the
+engine doesn't expose where it draws the boxes, so alignment is hand-
+calibrated and drifts with resolution and the selected box).
 
 Border color by action type:
 
@@ -59,20 +85,28 @@ python3 tools/gen_icons.py
 - **Colored Brackets** — on/off. Off restores the vanilla icons.
 - **Bracket Style** — *Corner brackets* (subtle L's in each corner) or *Full frame*
   (a solid 1px border).
+- **Wand Structure Panel** — on/off (runtime; applies immediately).
+- **Slot Brackets (experimental)** — the in-UI bracket overlay (runtime; off by
+  default).
 
-Both are `MOD_SETTING_SCOPE_NEW_GAME`: change them in the menu, then start or
-restart a run for the new spell list to pick them up.
+The icon settings are `MOD_SETTING_SCOPE_NEW_GAME`: change them in the menu,
+then start or restart a run for the new spell list to pick them up.
 
 ## Project layout
 
 ```
-init.lua                  # OnModInit: appends recolor_actions.lua onto gun_actions.lua
-settings.lua              # mod settings menu (on/off, corners vs frame)
-files/recolor_actions.lua # the recolor pass; runs in gun_actions.lua's scope
-files/known_ids.lua       # generated set of vanilla spell ids we have art for
-files/icons/corners/*.png # generated corner-bracket icons, colored by type
-files/icons/frame/*.png   # generated full-frame icons, colored by type
-tools/gen_icons.py        # regenerates the icons + known_ids.lua from data.wak
+init.lua                     # OnModInit: icon recolor hook; OnWorldPostUpdate: panel
+settings.lua                 # mod settings menu
+files/recolor_actions.lua    # the recolor pass; runs in gun_actions.lua's scope
+files/known_ids.lua          # generated set of vanilla spell ids we have art for
+files/icons/corners/*.png    # generated corner-bracket icons, colored by type
+files/icons/frame/*.png      # generated full-frame icons, colored by type
+files/structure_meta.lua     # generated per-spell structural metadata (draws/group/payload)
+files/wand_structure.lua     # pure deck simulator: casts, chaining, multicasts, wrap
+files/grouping_overlay.lua   # reads the live wand + draws the panel / slot brackets
+tools/gen_icons.py           # regenerates the icons + known_ids.lua from data.wak
+tools/gen_structure_meta.py  # regenerates structure_meta.lua from data.wak
+tools/test_wand_structure.py # Python mirror of wand_structure.lua + tests
 mod.xml, compatibility.xml
 ```
 
@@ -88,11 +122,14 @@ Unsafe Lua APIs are not requested (`request_no_api_restrictions="0"` in `mod.xml
 
 ## Known limitations
 
-- **Per-type coloring, not per-group.** Borders encode each spell's *type*, not the
-  dynamic projectile/modifier *grouping* within a specific wand. True grouping
-  brackets would require a custom GUI overlay tracking the engine-drawn slot
-  positions — fragile across resolutions; out of scope for now.
 - Only the standard spell set (`gun_actions.lua`) is covered. The
   limited/petri/unlimited alternate action sets used by some special game modes
-  are not recolored.
-- Settings apply at run start (NEW_GAME scope), not instantly mid-run.
+  are not recolored, and mod-added spells appear in the panel as plain leaves.
+- Icon settings apply at run start (NEW_GAME scope), not instantly mid-run.
+- The panel can't know your mana or spell uses, so a cast that fizzles on mana
+  (or skips a depleted spell) may differ from the simulation.
+- Shuffle wands: the panel shows the slot-order outcome with a warning; the
+  real draw order randomizes each cycle.
+- The experimental slot-bracket overlay is hand-calibrated against GUI 640×360;
+  the selected (taller) wand box reads slightly high and other window aspects
+  may drift — the panel is the reliable view.

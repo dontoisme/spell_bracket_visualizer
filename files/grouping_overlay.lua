@@ -14,7 +14,6 @@ local wand_structure = dofile_once("mods/testMod/files/wand_structure.lua")
 
 local M = {}
 local gui = nil
-local panel_flagged = false -- breadcrumb: panel drew at least once this run
 
 -- type -> RGB (0..1), matching the icon-recolor palette on `main`.
 local COLOR = {
@@ -64,9 +63,9 @@ local function get_active_wand()
 end
 
 -- spells/cast + shuffle from the wand's AbilityComponent.gun_config.
--- pcall-guarded: these reads are not yet verified in-game, and an error here
--- would otherwise disable the whole panel (init.lua kills it on first error).
--- On failure we degrade to 1/cast, no shuffle -- the pre-cast-model display.
+-- Verified in-game 2026-06-09. Still pcall-guarded: an error here would
+-- disable the whole panel (init.lua kills it on first error), so a future
+-- game update changing these fields degrades to 1/cast, no shuffle.
 local function read_config(wand)
 	local cfg = { spells_per_cast = 1, shuffle = false }
 	if type(ComponentObjectGetValue2) ~= "function" then return cfg end
@@ -371,14 +370,6 @@ function M.update()
 						.. "/cast, shuffle: order varies!)"
 				end
 				draw_panel(gui, sim_rows(sim, cfg, always), title, sw)
-				if not panel_flagged then
-					-- one-time "the panel rendered" marker, readable outside
-					-- the game as a file in save00/persistent/flags/
-					panel_flagged = true
-					if type(GameAddFlagPersistent) == "function" then
-						pcall(GameAddFlagPersistent, "sbv_panel_drawn")
-					end
-				end
 			end
 		end
 	end

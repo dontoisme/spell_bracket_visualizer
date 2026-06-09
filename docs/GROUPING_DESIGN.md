@@ -4,9 +4,10 @@
 which cards a multicast gathers, and what a trigger's payload is — as nested
 brackets, the way SLIME shows Lisp expression structure.
 
-Branch: `grouping-brackets`. Status: foundation + **companion panel implemented**
-(decision below = hybrid C: panel first, native overlay later). Not yet verified
-in-game (can't launch the GUI game from WSL here).
+Branch: `grouping-brackets`. Status: **done and verified in-game 2026-06-09** —
+companion panel with cast grouping + wrap detection confirmed against a real
+wrap wand (decision below = hybrid C: panel primary, native overlay optional,
+off by default).
 
 ## How Noita actually builds a shot (verified from data.wak)
 
