@@ -1,8 +1,8 @@
 <Mod
 	name="Spell Bracket Visualizer"
-	description="Frames every spell with a colored border based on its action type - projectile, modifier, material and more.\nRead your wands at a glance!"
-	request_no_api_restrictions="0" 
-> 
+	description="Lisp/SLIME-style wand structure: rainbow nesting brackets on the wand UI and a cast-structure panel.\nSee what fires together each cast - and when your wand WRAPS."
+	request_no_api_restrictions="0"
+>
 </Mod>
 
  <!--

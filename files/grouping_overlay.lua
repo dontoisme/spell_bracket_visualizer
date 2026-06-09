@@ -15,7 +15,7 @@ local wand_structure = dofile_once("mods/testMod/files/wand_structure.lua")
 local M = {}
 local gui = nil
 
--- type -> RGB (0..1), matching the icon-recolor palette on `main`.
+-- type -> RGB (0..1) for panel row labels (the retired icon-recolor palette).
 local COLOR = {
 	PROJECTILE        = { 0.82, 0.25, 0.25 },
 	STATIC_PROJECTILE = { 0.25, 0.78, 0.30 },
@@ -214,17 +214,15 @@ end
 -- box IS the held wand (Inventory2Component.mActiveItem), so we correct for it.
 local PIXEL = "mods/testMod/files/ui/pixel.png"
 local BOX = {
-	bottom0   = 0.295,  -- box 1 slot-row BOTTOM, fraction of GUI height
+	bottom0   = 0.293,  -- box 1 card-frame BOTTOM, fraction of GUI height
 	step      = 0.170,  -- per-box vertical step (non-selected), fraction of height
-	sel_extra = 0.051,  -- extra shift for the selected box and every box below it
-	slot_h    = 0.058,  -- slot height, fraction of GUI height (~21 GUI)
+	sel_extra = 0.046,  -- extra shift for the selected box and every box below it
+	slot_h    = 0.0533, -- card FRAME height, fraction of GUI height (~60px)
 	slot0_x   = 0.056,  -- first slot CENTER, fraction of GUI width (~36 GUI)
 	pitch     = 0.0325, -- slot-to-slot spacing, fraction of width (~21 GUI)
-	-- half width of the spell FRAME, not the slot pitch: the frame graphic is
-	-- ~60px of the 65px pitch, so delimiters hug the spell instead of the gap.
-	halfw     = 0.015,
+	halfw     = 0.015,  -- half width of the card FRAME (~60px of the 65px pitch)
 }
-local DELIM_GAP = 0.5     -- GUI px between the card frame and its delimiter
+local STRIP_W = 0.5       -- GUI width of one delimiter strip
 local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
@@ -233,19 +231,19 @@ local function line(gui, id, x, y, w, h, c, a)
 	GuiImage(gui, id, x, y, PIXEL, a, w, h)
 end
 
--- Draw [ ] delimiters for one group: a vertical bar with two small ticks
--- pointing into the group, slot height, 1px off the boundary cards' frames.
+-- Draw delimiter strips for one group: thin vertical bars ON the boundary
+-- cards' frame edges (frame height), rainbow-colored by nesting depth.
 -- The span starts at the group's OWN card (node.head): leading modifiers sit
 -- outside the parens, Lisp-style, matching the panel's "[mods] name" layout.
--- Color cycles through RAINBOW by nesting depth (SLIME rainbow parens).
--- Coincident delimiters (a parent closing where its last child closes) stack
--- at the SAME spot with no offset: children draw first, so the outer group's
--- color lands on top and the rainbow tells you which level you're seeing.
+-- Closing strips that land on the same card fan out RIGHTWARD, each strip
+-- STRIP_W wide and flush against the previous one -- innermost on the card
+-- edge, outer groups next to it (children draw first) -- so every level's
+-- rainbow color stays visible. `closes` counts strips placed per column.
 -- `xs` maps deck index -> real slot column (handles empty slots in the wand).
-local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs)
+local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs, closes)
 	for _, node in ipairs(nodes) do
 		if node.children and #node.children > 0 and node.last then
-			draw_delims(gui, node.children, sw, top, bot, depth + 1, idc, xs)
+			draw_delims(gui, node.children, sw, top, bot, depth + 1, idc, xs, closes)
 
 			local head = node.head or node.first
 			local ca = xs[head] or (head - 1) -- 0-based slot columns
@@ -253,10 +251,9 @@ local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs)
 			local c = node.wrap and WRAP_COLOR or nest_color(depth)
 			local h = bot - top
 
-			local lx = sw * (BOX.slot0_x + ca * BOX.pitch - BOX.halfw) - DELIM_GAP - 1
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, top, 1, h, c)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, top, 3, 1, c)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, bot - 1, 3, 1, c)
+			-- open: one strip on the card frame's left edge
+			local lx = sw * (BOX.slot0_x + ca * BOX.pitch - BOX.halfw)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, top, STRIP_W, h, c)
 
 			local lbl
 			if node.kind == "multicast" then
@@ -268,10 +265,12 @@ local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs)
 			GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
 			GuiText(gui, lx, top - 9, lbl)
 
-			local rx = sw * (BOX.slot0_x + cb * BOX.pitch + BOX.halfw) + DELIM_GAP
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, top, 1, h, c)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx - 2, top, 3, 1, c)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx - 2, bot - 1, 3, 1, c)
+			-- close: strips fan rightward from the card frame's right edge
+			local off = closes[cb] or 0
+			closes[cb] = off + 1
+			local rx = sw * (BOX.slot0_x + cb * BOX.pitch + BOX.halfw)
+				- STRIP_W + off * STRIP_W
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, top, STRIP_W, h, c)
 		end
 	end
 end
@@ -314,8 +313,9 @@ local function draw_box_brackets(gui, sw, sh)
 			local cfg = read_config(wd.e)
 			local sim = wand_structure.simulate(tokens, meta,
 				{ spells_per_cast = cfg.spells_per_cast })
+			local closes = {} -- per-wand: stacked closing strips share columns
 			for _, cast in ipairs(sim.casts) do
-				draw_delims(gui, cast.nodes, sw, top, bot, 0, idc, xs)
+				draw_delims(gui, cast.nodes, sw, top, bot, 0, idc, xs, closes)
 			end
 		end
 	end

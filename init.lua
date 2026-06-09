@@ -1,15 +1,13 @@
 -- Spell Bracket Visualizer
--- The spell inventory is drawn by the engine (no Lua draw hook exists), so we
--- can't paint over it. Instead we swap each vanilla spell's icon for a version
--- with a type-colored border. gun_actions.lua owns the `actions` table that
--- defines every spell's sprite, so we append our recolor pass onto it.
+-- Lisp/SLIME-style wand structure: a companion panel and in-UI rainbow
+-- brackets showing what fires together each cast and when the wand wraps.
+--
+-- (The original icon-recolor feature -- type-colored borders baked into every
+-- spell icon -- was retired 2026-06-09: the rainbow brackets made it redundant
+-- visual noise. See git history / docs/STATUS.md to revive it.)
 
-function OnModInit()
-	ModLuaFileAppend("data/scripts/gun/gun_actions.lua", "mods/testMod/files/recolor_actions.lua")
-end
-
--- Grouping/structure panel (Lisp/SLIME-style). Drawn every frame while the
--- inventory is open. Loaded lazily so a load error can't break OnModInit.
+-- Grouping/structure panel. Drawn every frame while the inventory is open.
+-- Loaded lazily so a load error can't break mod startup.
 local grouping = nil
 local grouping_failed = false
 

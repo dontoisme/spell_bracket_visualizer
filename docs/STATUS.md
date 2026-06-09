@@ -6,9 +6,11 @@ _A Noita wand-building aid. Last updated 2026-06-09 (casts + wrapping landed)._
 
 A wand-readability mod with two features:
 
-1. **Spell icon recolor** (shipped, on `main`) — every spell's icon gets a border
-   colored by its **action type** (projectile, modifier, multicast, material, …),
-   so you can read a wand at a glance. Works everywhere spells are drawn.
+1. **Spell icon recolor** (RETIRED 2026-06-09) — every spell's icon got a border
+   colored by its action type. Removed at the user's request once the rainbow
+   brackets landed: the borders became redundant visual noise next to them.
+   Code/assets live in git history (`recolor_actions.lua`, `known_ids.lua`,
+   `files/icons/`, the `OnModInit` hook); `tools/gen_icons.py` remains.
 2. **Grouping brackets** (✅ shipped, merged to `main` 2026-06-09) — shows a
    wand's **cast structure** (which modifiers feed which projectile, what a
    multicast gathers, what a trigger's payload is) as nested Lisp/SLIME-style
@@ -21,7 +23,7 @@ A wand-readability mod with two features:
   to `main` 2026-06-09** after in-game verification — `main` now has both
   features (icon recolor + grouping panel).
 
-## Feature 1 — icon recolor (DONE)
+## Feature 1 — icon recolor (RETIRED; history below)
 
 - `init.lua` appends `files/recolor_actions.lua` onto the game's
   `gun_actions.lua`; it repoints each vanilla spell's `sprite` to a pre-bordered

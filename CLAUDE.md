@@ -4,18 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A [Noita](https://noitagame.com/) mod ("Spell Bracket Visualizer") that makes wands
-easier to read. Two features:
+A [Noita](https://noitagame.com/) mod ("Spell Bracket Visualizer") showing a wand's
+**cast structure** Lisp/SLIME-style: a companion panel + in-UI rainbow bracket
+strips showing which spells fire simultaneously each cast, which modifiers feed
+which projectile, what a multicast gathers, a trigger's payload — and when the
+wand **wraps** (the rapid-fire mechanic).
 
-1. **Icon recolor** (shipped, lives on `main`): every vanilla spell's icon gets a
-   border colored by its **action type** (projectile / modifier / multicast /
-   material / …).
-2. **Grouping brackets** (in progress, branch `grouping-brackets`): a companion
-   panel + experimental in-UI brackets showing a wand's **cast structure** — which
-   modifiers feed which projectile, what a multicast gathers, a trigger's payload.
+A first feature — recoloring every spell icon with a type-colored border — was
+**retired 2026-06-09** (redundant next to the rainbow brackets). Its code
+(`recolor_actions.lua`, `known_ids.lua`, `files/icons/`, the `OnModInit`
+`ModLuaFileAppend` hook) lives in git history; `tools/gen_icons.py` remains.
 
 The mod directory IS the install location (`…/Noita/mods/testMod`), so edits here
-are live in the game on next run.
+are live in the game on next run-load (quit to menu → Continue).
 
 ## Commands
 
@@ -23,16 +24,15 @@ There is no build/lint/test for the Lua mod — it loads directly. The Python to
 regenerate committed data files from the game's `data.wak`:
 
 ```bash
-python3 tools/gen_icons.py            # regenerate files/icons/{corners,frame}/*.png + files/known_ids.lua
 python3 tools/gen_structure_meta.py   # regenerate files/structure_meta.lua
 python3 tools/test_wand_structure.py  # run the parser/simulator tests (Python mirror)
+python3 tools/gen_icons.py            # (retired feature) regenerate bordered icons
 ```
 
-Both are pure stdlib (no Pillow/deps). They locate `data.wak` at `../../data/data.wak`
+All pure stdlib (no Pillow/deps). They locate `data.wak` at `../../data/data.wak`
 relative to the mod; override with `$NOITA_WAK` or argv[1] if the install differs.
-Re-run after a Noita update or when changing colors/border style. The generated
-outputs (`files/icons/`, `files/known_ids.lua`, `files/structure_meta.lua`) are
-committed — don't hand-edit them; change the generator and re-run.
+Re-run the meta generator after a Noita update. `files/structure_meta.lua` is
+committed and generated — don't hand-edit it; change the generator and re-run.
 
 Testing is manual, in-game (the GUI game can't be launched headlessly from WSL):
 enable the mod in Noita's mod menu, start/restart a run, open a wand or shop.
@@ -40,24 +40,21 @@ enable the mod in Noita's mod menu, start/restart a run, open a wand or shop.
 ## Architecture — the key constraint
 
 **Noita renders the spell inventory in the engine, not Lua.** There is no Lua draw
-hook to paint over the spell-slot UI. Two consequences shape the whole design:
+hook to paint over the spell-slot UI, and the engine never exposes where it drew
+the wand boxes or slots. Consequences:
 
-- **Recoloring** can't overlay borders, so it instead **swaps each spell's icon**
-  for a pre-bordered copy. `init.lua`'s `OnModInit` uses `ModLuaFileAppend` to
-  append `files/recolor_actions.lua` onto the game's `data/scripts/gun/gun_actions.lua`.
-  That file is `dofile`d at the end of `gun_actions.lua`, so the vanilla `actions`
-  table is **in scope** — the recolor pass repoints each known spell's `action.sprite`
-  to `files/icons/<style>/<id>.png`. Because it runs inside the engine's spell-loading
-  file, an error there breaks spell loading, so `recolor_actions.lua` is wrapped in
-  `pcall` and fails open (vanilla icons stay).
-
-- **Grouping brackets** can't read engine slot positions either. The companion panel
-  (`files/grouping_overlay.lua`, driven every frame from `OnWorldPostUpdate`) draws
-  with its own `GuiCreate()` at coordinates it fully controls. The experimental
-  in-UI "slot brackets" (`draw_box_brackets`/`BOX` table) are a **hand-calibrated
-  guess** at where the engine draws wand boxes (GUI-fraction constants tuned for
-  640×360); they drift across resolutions and can't detect which box is selected.
-  Treat that geometry as best-effort, not reliable.
+- The companion panel (`files/grouping_overlay.lua`, driven every frame from
+  `OnWorldPostUpdate`) draws with its own `GuiCreate()` at coordinates it fully
+  controls — always correct, resolution-proof. It is the primary feature.
+- The in-UI "slot brackets" (`draw_delims`/`BOX` table) overlay rainbow strips on
+  a **hand-calibrated model** of the wand-box layout (GUI-fraction constants,
+  calibrated from screenshots at GUI 640×360). The selected box renders taller
+  and shifts everything below it — detectable because the selected box is the
+  held wand (`Inventory2Component.mActiveItem`). Other resolutions may still
+  drift; treat the geometry as best-effort and recalibrate from screenshots.
+- (The retired icon-recolor worked around the same constraint by swapping each
+  spell's `action.sprite` via `ModLuaFileAppend` onto `gun_actions.lua` — see
+  git history if reviving.)
 
 ## The cast-structure model
 
@@ -90,23 +87,23 @@ deck, `draws=-1`). See `docs/GROUPING_DESIGN.md` for the verified details.
 
 ```
 init.lua
- ├─ OnModInit          → append recolor_actions.lua onto gun_actions.lua (icon swap)
- └─ OnWorldPostUpdate  → grouping_overlay.update() each frame
-                          reads active wand → wand_structure.build → draws panel + brackets
+ └─ OnWorldPostUpdate  → grouping_overlay.update() each frame (pcall; first error
+                          disables the overlay + GamePrints it)
+                          reads active wand + gun_config → wand_structure.simulate
+                          → draws panel + slot-bracket strips
 ```
 
-Settings (`settings.lua`): `show_colors`, `bracket_style` (NEW_GAME scope — apply at
-run start), `show_grouping`, `show_slot_brackets` (RUNTIME scope). `recolor_actions.lua`
-and `grouping_overlay.lua` read them via `ModSettingGet("testMod.<id>")`, defaulting
-on if the API isn't reachable.
+Settings (`settings.lua`): `show_grouping` (default on), `show_slot_brackets`
+(default off) — both RUNTIME scope, read via `ModSettingGet("testMod.<id>")`.
 
 ## Conventions
 
-- The action-type → color palette is duplicated in two places that must stay in
-  sync: `TYPE_COLOR` (0–255 RGB) in `tools/gen_icons.py` and `COLOR` (0–1 RGB) in
-  `files/grouping_overlay.lua`. Update both together.
-- Other mods' spells are deliberately left untouched: recolor only acts on ids in
-  `files/known_ids.lua`; the parser falls back to `type="OTHER"` for unknown ids.
+- Mod-added spells are deliberately untouched: the parser falls back to
+  `type="OTHER"` (plain leaf) for ids missing from `structure_meta.lua`.
+- Mod Lua reloads only when a run loads — after editing, quit to menu →
+  Continue. In-game look verification happens via user screenshots; geometry
+  calibration constants in `BOX` are derived from them (note the screenshot's
+  pixel-to-GUI scale first).
 - `docs/STATUS.md` (overall project state) and `docs/GROUPING_DESIGN.md` (grouping
   rationale + verified engine behavior) are the design record; keep STATUS.md current
   when feature state changes.
