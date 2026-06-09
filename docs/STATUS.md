@@ -9,11 +9,11 @@ A wand-readability mod with two features:
 1. **Spell icon recolor** (shipped, on `main`) — every spell's icon gets a border
    colored by its **action type** (projectile, modifier, multicast, material, …),
    so you can read a wand at a glance. Works everywhere spells are drawn.
-2. **Grouping brackets** (in progress, on branch `grouping-brackets`) — show a
+2. **Grouping brackets** (✅ shipped, merged to `main` 2026-06-09) — shows a
    wand's **cast structure** (which modifiers feed which projectile, what a
    multicast gathers, what a trigger's payload is) as nested Lisp/SLIME-style
-   brackets. The end goal: help build rapid-fire / complex wands by showing when
-   a spell is being "wrapped".
+   brackets, grouped per cast (simultaneity), with rapid-fire **wrap**
+   detection ("WRAPS! -> recharge" banner + "~" on wrapped-in cards).
 
 ## Where the code lives
 
