@@ -215,16 +215,18 @@ end
 local PIXEL = "mods/testMod/files/ui/pixel.png"
 -- The wand boxes are laid out in engine-UI units (5 screen px each at
 -- 2000x1125 = 0.0025 of GUI width; slots are 13u pitch / 12u frames). Box
--- HEIGHT is per-wand: 29u + the wand sprite's pixel height (the "selected
--- box is taller" theory was wrong -- a tall wand sprite was the real cause,
--- which is why brackets jumped when selecting another wand or a potion).
--- All four boxes of the 4-wand screenshot fit this within 1u, selection
--- contributing nothing.
+-- HEIGHT is per-wand: 16u + 2u per pixel of the wand sprite's height (wand
+-- art is 3..17 px tall; the engine reserves 2 units per art px). Selection
+-- contributes NOTHING -- the old "selected box is taller" theory was a tall
+-- wand sprite in disguise, which is why brackets used to jump when selecting
+-- another wand or a potion. Fits all boxes of the 4-wand screenshots +-1u.
 local U = 0.0025 -- one engine-UI unit, as a fraction of GUI width
 local BOX = {
 	top0    = 30,     -- units: top of wand box 1
-	base_h  = 29,     -- units: box height minus the wand sprite's height
-	row_gap = 5,      -- units: slot-row bottom sits this far above next box top
+	h_pad   = 16,     -- units: box height = h_pad + s_scale * sprite_h
+	s_scale = 2,      -- units of box height per wand-sprite pixel
+	gap     = 2,      -- units between consecutive boxes
+	row_off = 4,      -- units: slot-row bottom sits this far above the box bottom
 	slot_h  = 12,     -- units: card frame height
 	slot0_x = 0.056,  -- first slot CENTER, fraction of GUI width (22.4u)
 	pitch   = 0.0325, -- slot-to-slot spacing, fraction of width (13u)
@@ -309,18 +311,18 @@ local function draw_delims(gui, groups, sw, top, bot, idc)
 	end
 end
 
--- A wand box's height tracks its sprite: 29u + the sprite's pixel height.
--- Read the height of this wand's art (pcall-guarded; 12 is a typical wand).
+-- Read the height of this wand's art in px (pcall-guarded; vanilla wand art
+-- is 3..17 px tall, 9 is a common middle; cap guards against odd mod art).
 local function wand_sprite_h(gui, wand)
 	local sc = EntityGetFirstComponentIncludingDisabled(wand, "SpriteComponent")
 	if sc then
 		local ok, f = pcall(ComponentGetValue2, sc, "image_file")
 		if ok and type(f) == "string" and f ~= "" then
 			local ok2, _, h = pcall(GuiGetImageDimensions, gui, f, 1)
-			if ok2 and tonumber(h) and h > 0 and h < 60 then return h end
+			if ok2 and tonumber(h) and h > 0 and h < 30 then return h end
 		end
 	end
-	return 12
+	return 9
 end
 
 -- Enumerate carried wands (in quick-slot order) and delimit each one's box row.
@@ -343,10 +345,10 @@ local function draw_box_brackets(gui, sw, sh)
 	local idc = { n = 0 }
 	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
 	for _, wd in ipairs(wands) do
-		local box_h = BOX.base_h + wand_sprite_h(gui, wd.e)
-		local bot = (box_top + box_h - BOX.row_gap) * U * sw
+		local box_h = BOX.h_pad + BOX.s_scale * wand_sprite_h(gui, wd.e)
+		local bot = (box_top + box_h - BOX.row_off) * U * sw
 		local top = bot - BOX.slot_h * U * sw
-		box_top = box_top + box_h
+		box_top = box_top + box_h + BOX.gap
 
 		local tokens, _, xs = read_deck(wd.e)
 		if #tokens > 0 then
