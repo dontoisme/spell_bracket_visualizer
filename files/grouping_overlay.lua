@@ -248,9 +248,10 @@ end
 -- rainbow-colored by nesting depth (SLIME rainbow parens).
 -- The span starts at the group's OWN card (node.head): leading modifiers sit
 -- outside the parens, Lisp-style, matching the panel's "[mods] name" layout.
--- Closing brackets that land on the same card stack rightward (innermost ON
--- the card edge -- children draw first) and each outer one is slightly TALLER
--- so its hooks wrap around the inner bracket's, like nested parens on paper.
+-- Closing brackets that land on the same card stack LEFTWARD over the card
+-- art (innermost ON the card edge -- children draw first), staying contained
+-- within the card, and each outer one is slightly TALLER so its hooks wrap
+-- around the inner bracket's, like nested parens on paper.
 -- `closes` counts brackets placed per column.
 -- `xs` maps deck index -> real slot column (handles empty slots in the wand).
 local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs, closes)
@@ -277,11 +278,12 @@ local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs, closes)
 			GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
 			GuiText(gui, lx, top - 9, lbl)
 
-			-- close: ] on the card frame's right edge, stacking right + taller
+			-- close: ] on the card frame's right edge, stacking LEFT onto the
+			-- card (overlaying the art keeps the brackets within the card)
 			local off = closes[cb] or 0
 			closes[cb] = off + 1
 			local rx = sw * (BOX.slot0_x + cb * BOX.pitch + BOX.halfw)
-				- BAR_W + off * STACK_X
+				- BAR_W - off * STACK_X
 			bracket(gui, idc, rx, top - off * STACK_Y, bot + off * STACK_Y, -1, c)
 		end
 	end
