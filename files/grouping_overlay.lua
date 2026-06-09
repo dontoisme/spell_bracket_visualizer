@@ -122,47 +122,91 @@ local function walk(rows, node, ancestor_colors)
 	end
 end
 
--- ---- phase 2: brackets drawn under the engine's SPELLS slot row -------------
+-- ---- phase 2: brackets under each WAND BOX's spell row ---------------------
 --
--- The engine never exposes where it draws the spell slots, so the slot geometry
--- below is expressed as fractions of the GUI screen and tuned empirically. The
--- card order in the SPELLS row equals our token order, so node.first/last (1-
--- based token indices) map straight onto slot indices.
+-- EXPERIMENTAL. The engine exposes neither which wand a box shows nor where any
+-- box is drawn, so the layout below is a hand-calibrated stacking model in GUI-
+-- screen fractions. It WILL drift: box heights aren't uniform (the selected box
+-- renders taller) and your window aspect changes the mapping. We bracket every
+-- wand box (each from its own wand's cards), which sidesteps "which is selected".
 local PIXEL = "mods/testMod/files/ui/pixel.png"
-local SLOT = {
-	cx0   = 0.3377, -- center x of slot 0, as a fraction of GUI screen width
-	pitch = 0.0635, -- slot-to-slot spacing, fraction of width
-	halfw = 0.0185, -- half slot width, fraction of width
-	row_y = 0.126,  -- y just below the slot row, fraction of GUI screen height
+local BOX = {
+	top0    = 0.137, -- first wand box's spell-row top, fraction of GUI height
+	height  = 0.179, -- per-box vertical step (assumed uniform), fraction of height
+	row_off = 0.121, -- box top -> spell row, fraction of height
+	slot0_x = 0.139, -- first slot center, fraction of GUI width
+	pitch   = 0.026, -- slot-to-slot spacing, fraction of width
+	halfw   = 0.013, -- half slot width, fraction of width
 }
-local LEVEL_GAP = 9 -- px between nesting bracket levels
-local TICK = 4      -- px height of the end ticks
+local LEVEL_GAP = 7      -- px between nesting bracket levels
+local TICK = 4           -- px height of the end ticks
+local DEBUG_RULER = true -- draw GUI dims + a 10% grid for calibration
 
-local function line(gui, id, x, y, w, h, c)
-	GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
-	GuiImage(gui, id, x, y, PIXEL, 1, w, h)
+local function line(gui, id, x, y, w, h, c, a)
+	a = a or 1
+	GuiColorSetForNextWidget(gui, c[1], c[2], c[3], a)
+	GuiImage(gui, id, x, y, PIXEL, a, w, h)
 end
 
-local function draw_slot_brackets(gui, nodes, sw, sh, depth, idc)
+-- Draw a bracket for every group node, under the row at `row_y`, nesting down.
+local function draw_groups(gui, nodes, sw, row_y, depth, idc)
 	for _, node in ipairs(nodes) do
 		if node.children and #node.children > 0 and node.first and node.last then
 			local a, b = node.first - 1, node.last - 1 -- 0-based slot indices
-			local lx = sw * SLOT.cx0 + a * sw * SLOT.pitch - sw * SLOT.halfw
-			local rx = sw * SLOT.cx0 + b * sw * SLOT.pitch + sw * SLOT.halfw
-			local yt = sh * SLOT.row_y + depth * LEVEL_GAP
+			local lx = sw * BOX.slot0_x + a * sw * BOX.pitch - sw * BOX.halfw
+			local rx = sw * BOX.slot0_x + b * sw * BOX.pitch + sw * BOX.halfw
+			local yt = row_y + depth * LEVEL_GAP
 			local c = type_color(node.atype)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, yt, rx - lx, 1, c)         -- horizontal
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, yt - TICK, 1, TICK + 1, c) -- left end tick
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, yt - TICK, 1, TICK + 1, c) -- right end tick
-
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, yt, rx - lx, 1, c)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, yt - TICK, 1, TICK + 1, c)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, yt - TICK, 1, TICK + 1, c)
 			local lbl = (node.kind == "multicast") and ("x" .. tostring(node.group))
 				or ("trig " .. tostring(node.payload))
 			local lw = (GuiGetTextDimensions(gui, lbl))
 			GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
 			GuiText(gui, (lx + rx) / 2 - lw / 2, yt + 1, lbl)
-
-			draw_slot_brackets(gui, node.children, sw, sh, depth + 1, idc)
+			draw_groups(gui, node.children, sw, row_y, depth + 1, idc)
 		end
+	end
+end
+
+-- Enumerate carried wands (in quick-slot order) and bracket each one's box row.
+local function draw_box_brackets(gui, sw, sh)
+	local players = EntityGetWithTag("player_unit")
+	if not players or #players == 0 then return end
+	local items = GameGetAllInventoryItems(players[1]) or {}
+
+	local wands = {}
+	for _, it in ipairs(items) do
+		if EntityHasTag(it, "wand") then
+			local sx = 0
+			local ic = EntityGetFirstComponentIncludingDisabled(it, "ItemComponent")
+			if ic then sx = ComponentGetValue2(ic, "inventory_slot") or 0 end
+			wands[#wands + 1] = { e = it, slot = sx }
+		end
+	end
+	table.sort(wands, function(p, q) return p.slot < q.slot end)
+
+	local idc = { n = 0 }
+	for idx, wd in ipairs(wands) do
+		local row_y = sh * BOX.top0 + (idx - 1) * sh * BOX.height + sh * BOX.row_off
+		local tokens = read_deck(wd.e)
+		if #tokens > 0 then
+			draw_groups(gui, wand_structure.build(tokens, meta), sw, row_y, 0, idc)
+		end
+	end
+end
+
+-- Temporary calibration aid: prints GUI dimensions and a 10% grid so the
+-- screenshot-pixel <-> GUI-coordinate mapping can be measured exactly.
+local function draw_debug(gui, sw, sh)
+	GuiColorSetForNextWidget(gui, 1, 1, 0, 1)
+	GuiText(gui, 4, 2, "GUI " .. math.floor(sw + 0.5) .. "x" .. math.floor(sh + 0.5))
+	for f = 1, 9 do
+		line(gui, 80000 + f, sw * f / 10, 0, 1, sh, { 0.3, 0.6, 1 }, 0.35)
+		GuiColorSetForNextWidget(gui, 0.3, 0.6, 1, 1); GuiText(gui, sw * f / 10 + 1, 12, tostring(f * 10))
+		line(gui, 80100 + f, 0, sh * f / 10, sw, 1, { 0.3, 1, 0.4 }, 0.35)
+		GuiColorSetForNextWidget(gui, 0.3, 1, 0.4, 1); GuiText(gui, 2, sh * f / 10, tostring(f * 10))
 	end
 end
 
@@ -219,24 +263,24 @@ function M.update()
 	local show_slots = get("testMod.show_slot_brackets") ~= false
 	if not show_panel and not show_slots then return end
 
-	local wand = get_active_wand()
-	if not wand then return end
-
-	local tokens = read_deck(wand)
-	if #tokens == 0 then return end
-
-	local tree = wand_structure.build(tokens, meta)
-
 	if gui == nil then gui = GuiCreate() end
 	GuiStartFrame(gui)
 	local sw, sh = GuiGetScreenDimensions(gui)
 
-	if show_slots then
+	if show_slots then -- brackets on every wand box (independent of active wand)
 		GuiZSet(gui, 1)
-		draw_slot_brackets(gui, tree, sw, sh, 0, { n = 0 })
+		draw_box_brackets(gui, sw, sh)
+		if DEBUG_RULER then draw_debug(gui, sw, sh) end
 	end
-	if show_panel then
-		draw_panel(gui, tree, sw)
+
+	if show_panel then -- companion tree for the active/held wand
+		local wand = get_active_wand()
+		if wand then
+			local tokens = read_deck(wand)
+			if #tokens > 0 then
+				draw_panel(gui, wand_structure.build(tokens, meta), sw)
+			end
+		end
 	end
 end
 
