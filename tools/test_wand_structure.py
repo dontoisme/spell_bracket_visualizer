@@ -90,7 +90,8 @@ def simulate(tokens, meta, spells_per_cast=None):
 
         first = card["i"] if first is None else min(first, card["i"])
         last = card["i"] if last is None else max(last, card["i"])
-        node = {"id": card["id"], "atype": m["type"], "modifiers": mods}
+        node = {"id": card["id"], "atype": m["type"], "modifiers": mods,
+                "head": card["i"]}
 
         if is_multicast(m):
             node["kind"] = "multicast"
@@ -253,6 +254,16 @@ def main():
         failures += 1
     print("%s wrap span reaches slot 1 (first=%s last=%s)" %
           ("PASS" if span_ok else "FAIL", node["first"], node["last"]))
+
+    # head excludes the leading-modifier prefix: [DAMAGE] BURST_2 (...) has
+    # first=1 (Damage) but head=2 (the multicast card itself).
+    sim = simulate(["DAMAGE", "BURST_2", "LIGHT_BULLET", "MAGIC_SHOT"], meta, None)
+    node = sim["casts"][0]["nodes"][0]
+    head_ok = node["first"] == 1 and node["head"] == 2 and node["last"] == 4
+    if not head_ok:
+        failures += 1
+    print("%s head excludes modifier prefix (first=%s head=%s last=%s)" %
+          ("PASS" if head_ok else "FAIL", node["first"], node["head"], node["last"]))
 
     print("\n%d failure(s)" % failures)
     sys.exit(1 if failures else 0)

@@ -25,7 +25,9 @@
 --   { casts = { { nodes = {...}, wrapped = bool }, ... }, wrapped = bool }
 -- Node shapes (first/last = min/max 1-based slot index the expression touched,
 -- including wrapped-in cards, so a wrapping node's span reaches back to the
--- wand's start):
+-- wand's start; head = the node's OWN card's index, i.e. the span excluding
+-- the leading modifier prefix -- Lisp-wise the modifiers sit outside the
+-- group's parens):
 --   leaf      { kind="leaf",      id, atype, modifiers={ids} }
 --   multicast { kind="multicast", id, atype, group=N (-1 = rest of deck),
 --               children={...}, modifiers={ids} }
@@ -101,7 +103,7 @@ function M.simulate(tokens, meta, opts)
 
 		if first == nil or card.i < first then first = card.i end
 		if last == nil or card.i > last then last = card.i end
-		local node = { id = card.id, atype = m.type, modifiers = mods }
+		local node = { id = card.id, atype = m.type, modifiers = mods, head = card.i }
 
 		if is_multicast(m) then
 			node.kind = "multicast"
