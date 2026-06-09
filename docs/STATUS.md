@@ -82,7 +82,25 @@ A wand-readability mod with two features:
   fix). Not yet observed in-game: the "always:" line (no always-cast wand on
   hand; the read is pcall-guarded and fails soft).
 
-### Slot brackets v2 — paren-style delimiters (recalibrated 2026-06-09)
+### Slot brackets — final form (v5, user-approved 2026-06-09)
+
+Iterated v2→v5 against in-game screenshots + a user mockup. Final design:
+
+- **[ ] glyphs** (1-GUI bar + 3-GUI hooks pointing into the group), card-frame
+  height, SLIME **rainbow by nesting depth** (`RAINBOW`/`nest_color`); wrap
+  groups override to orange. Label (`x2`/`trig N`) above the opening bracket.
+- Open `[` sits 1 GUI left of the group's own card (`OPEN_NUDGE`), over the
+  slot's left edge. **Leading modifiers sit outside the parens** (span starts
+  at `node.head`, not `node.first`), matching the panel's `[mods] name` text.
+- Closes stack on the END card: two-pass render (`collect_delims` counts per
+  column first), outermost `]` ON the card's right edge (`CLOSE_NUDGE`) and
+  TALLEST (hooks wrap the inner ones), inner ones step 1.5 GUI left over the
+  card art — reads inner→outer left-to-right, contained within the card.
+- Drawn at **z = -10**: in front of the engine's spell-frame layer ("lower z
+  = front"; z 1 lost to the frames).
+- User: "This look super good."
+
+### Slot brackets v2 history — paren-style delimiters (superseded)
 
 User feedback on v1: long underline brackets misaligned (sat ~2 slots right and
 above the row) and ugly when a group's cards have empty slots between them.
