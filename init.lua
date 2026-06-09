@@ -13,7 +13,23 @@ end
 local grouping = nil
 local grouping_failed = false
 
+-- TEMPORARY: one-shot in-game self-check (files/self_check.lua) that reports
+-- whether the new gun_config / permanently_attached reads work on real wands.
+-- false = disabled (errored or finished loading wrong); remove after verify.
+local self_check = nil
+
 function OnWorldPostUpdate()
+	if self_check ~= false then
+		if self_check == nil then
+			local okl, m = pcall(dofile_once, "mods/testMod/files/self_check.lua")
+			self_check = (okl and type(m) == "table") and m or false
+		end
+		if self_check then
+			local okr = pcall(self_check.run)
+			if not okr or self_check.done then self_check = false end
+		end
+	end
+
 	if grouping_failed then return end
 	if grouping == nil then
 		grouping = dofile_once("mods/testMod/files/grouping_overlay.lua")
@@ -23,5 +39,11 @@ function OnWorldPostUpdate()
 	if not ok then
 		grouping_failed = true
 		print("[Spell Bracket Visualizer] grouping panel disabled: " .. tostring(err))
+		if type(GameAddFlagPersistent) == "function" then
+			pcall(GameAddFlagPersistent, "sbv_panel_error")
+		end
+		if type(GamePrint) == "function" then
+			pcall(GamePrint, "[Spell Bracket Visualizer] panel error: " .. tostring(err))
+		end
 	end
 end

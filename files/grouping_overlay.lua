@@ -14,6 +14,7 @@ local wand_structure = dofile_once("mods/testMod/files/wand_structure.lua")
 
 local M = {}
 local gui = nil
+local panel_flagged = false -- breadcrumb: panel drew at least once this run
 
 -- type -> RGB (0..1), matching the icon-recolor palette on `main`.
 local COLOR = {
@@ -370,6 +371,14 @@ function M.update()
 						.. "/cast, shuffle: order varies!)"
 				end
 				draw_panel(gui, sim_rows(sim, cfg, always), title, sw)
+				if not panel_flagged then
+					-- one-time "the panel rendered" marker, readable outside
+					-- the game as a file in save00/persistent/flags/
+					panel_flagged = true
+					if type(GameAddFlagPersistent) == "function" then
+						pcall(GameAddFlagPersistent, "sbv_panel_drawn")
+					end
+				end
 			end
 		end
 	end
