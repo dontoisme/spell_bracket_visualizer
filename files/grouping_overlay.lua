@@ -213,14 +213,22 @@ end
 -- The selected box renders taller and shifts everything below it; the selected
 -- box IS the held wand (Inventory2Component.mActiveItem), so we correct for it.
 local PIXEL = "mods/testMod/files/ui/pixel.png"
+-- The wand boxes are laid out in engine-UI units (5 screen px each at
+-- 2000x1125 = 0.0025 of GUI width; slots are 13u pitch / 12u frames). Box
+-- HEIGHT is per-wand: 29u + the wand sprite's pixel height (the "selected
+-- box is taller" theory was wrong -- a tall wand sprite was the real cause,
+-- which is why brackets jumped when selecting another wand or a potion).
+-- All four boxes of the 4-wand screenshot fit this within 1u, selection
+-- contributing nothing.
+local U = 0.0025 -- one engine-UI unit, as a fraction of GUI width
 local BOX = {
-	bottom0   = 0.293,  -- box 1 card-frame BOTTOM, fraction of GUI height
-	step      = 0.170,  -- per-box vertical step (non-selected), fraction of height
-	sel_extra = 0.046,  -- extra shift for the selected box and every box below it
-	slot_h    = 0.0533, -- card FRAME height, fraction of GUI height (~60px)
-	slot0_x   = 0.056,  -- first slot CENTER, fraction of GUI width (~36 GUI)
-	pitch     = 0.0325, -- slot-to-slot spacing, fraction of width (~21 GUI)
-	halfw     = 0.015,  -- half width of the card FRAME (~60px of the 65px pitch)
+	top0    = 30,     -- units: top of wand box 1
+	base_h  = 29,     -- units: box height minus the wand sprite's height
+	row_gap = 5,      -- units: slot-row bottom sits this far above next box top
+	slot_h  = 12,     -- units: card frame height
+	slot0_x = 0.056,  -- first slot CENTER, fraction of GUI width (22.4u)
+	pitch   = 0.0325, -- slot-to-slot spacing, fraction of width (13u)
+	halfw   = 0.015,  -- half width of the card FRAME, fraction of width (6u)
 }
 local BAR_W   = 1   -- GUI width of a bracket's vertical bar
 local TICK_W  = 3   -- GUI length of the top/bottom hooks
@@ -301,6 +309,20 @@ local function draw_delims(gui, groups, sw, top, bot, idc)
 	end
 end
 
+-- A wand box's height tracks its sprite: 29u + the sprite's pixel height.
+-- Read the height of this wand's art (pcall-guarded; 12 is a typical wand).
+local function wand_sprite_h(gui, wand)
+	local sc = EntityGetFirstComponentIncludingDisabled(wand, "SpriteComponent")
+	if sc then
+		local ok, f = pcall(ComponentGetValue2, sc, "image_file")
+		if ok and type(f) == "string" and f ~= "" then
+			local ok2, _, h = pcall(GuiGetImageDimensions, gui, f, 1)
+			if ok2 and tonumber(h) and h > 0 and h < 60 then return h end
+		end
+	end
+	return 12
+end
+
 -- Enumerate carried wands (in quick-slot order) and delimit each one's box row.
 local function draw_box_brackets(gui, sw, sh)
 	local players = EntityGetWithTag("player_unit")
@@ -318,22 +340,14 @@ local function draw_box_brackets(gui, sw, sh)
 	end
 	table.sort(wands, function(p, q) return p.slot < q.slot end)
 
-	-- the selected (taller) box is the held wand's box
-	local sel_idx = nil
-	local inv = EntityGetFirstComponentIncludingDisabled(players[1], "Inventory2Component")
-	local active = inv and ComponentGetValue2(inv, "mActiveItem")
-	if active and active ~= 0 then
-		for idx, wd in ipairs(wands) do
-			if wd.e == active then sel_idx = idx end
-		end
-	end
-
 	local idc = { n = 0 }
-	for idx, wd in ipairs(wands) do
-		local bottom = BOX.bottom0 + (idx - 1) * BOX.step
-		if sel_idx and idx >= sel_idx then bottom = bottom + BOX.sel_extra end
-		local bot = sh * bottom
-		local top = bot - sh * BOX.slot_h
+	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
+	for _, wd in ipairs(wands) do
+		local box_h = BOX.base_h + wand_sprite_h(gui, wd.e)
+		local bot = (box_top + box_h - BOX.row_gap) * U * sw
+		local top = bot - BOX.slot_h * U * sw
+		box_top = box_top + box_h
+
 		local tokens, _, xs = read_deck(wd.e)
 		if #tokens > 0 then
 			local cfg = read_config(wd.e)

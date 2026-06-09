@@ -100,6 +100,17 @@ Iterated v2→v5 against in-game screenshots + a user mockup. Final design:
   = front"; z 1 lost to the frames).
 - User: "This look super good."
 
+**Geometry v6 (2026-06-09, after a 4th wand broke v5):** the "selected box is
+taller" theory was WRONG — box height is per-wand: `29u + sprite height`
+(engine-UI units, 1u = 0.0025·GUI width = 5 screen px at 2000×1125; slots are
+13u pitch / 12u frames; slot row sits 5u above the next box top, first box
+top at 30u). The tall purple wand's sprite caused the extra height v5
+attributed to selection — which is why brackets jumped when selecting another
+wand or a potion, and drifted when a new wand was added. Sprite height is
+read at runtime via `SpriteComponent.image_file` + `GuiGetImageDimensions`
+(pcall, fallback 12). Boxes accumulate: `top += 29 + sprite_h`. Selection
+contributes NOTHING. Model validated ±2u against two 4-wand screenshots.
+
 ### Slot brackets v2 history — paren-style delimiters (superseded)
 
 User feedback on v1: long underline brackets misaligned (sat ~2 slots right and
