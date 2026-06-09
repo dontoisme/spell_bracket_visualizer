@@ -52,6 +52,9 @@ def parse(src):
         t = re.search(r'\btype\s*=\s*(ACTION_TYPE_\w+)', body)
         typ = t.group(1).replace("ACTION_TYPE_", "") if t else "OTHER"
         rec = {"type": typ}
+        nm = re.search(r'\bname\s*=\s*"([^"]*)"', body)
+        if nm:
+            rec["name"] = nm.group(1)
         if typ == "DRAW_MANY":
             dm = re.search(r'draw_actions\(\s*(\d+)', body)
             if dm:
@@ -67,6 +70,7 @@ def parse(src):
 def to_lua(meta):
     def fmt(rec):
         parts = ['type="%s"' % rec["type"]]
+        if "name" in rec:    parts.append('name="%s"' % rec["name"])
         if "group" in rec:   parts.append("group=%d" % rec["group"])
         if "payload" in rec: parts.append('trigger="%s", payload=%d' % (rec["trigger"], rec["payload"]))
         return "{ " + ", ".join(parts) + " }"

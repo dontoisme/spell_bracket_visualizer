@@ -31,6 +31,20 @@ local function pretty(id)
 	return s
 end
 
+-- Localized spell name ($action_*) if available, else a prettified id.
+local function display_name(id)
+	local m = meta[id]
+	if m and m.name and type(GameTextGet) == "function" then
+		local t = GameTextGet(m.name)
+		if t and t ~= "" then return t end
+	end
+	return pretty(id)
+end
+
+local function type_color(atype)
+	return COLOR[atype] or COLOR.OTHER
+end
+
 -- ---- read the active wand and its cards ------------------------------------
 
 local function get_active_wand()
@@ -73,29 +87,38 @@ end
 
 -- ---- flatten the tree into colored, indented display lines -----------------
 
-local function emit(lines, node, depth)
-	local indent = string.rep("  ", depth)
+local function copy_list(t)
+	local r = {}
+	for i = 1, #t do r[i] = t[i] end
+	return r
+end
+
+-- Flatten the tree into display rows. Each row carries `bars`: one color per
+-- enclosing group (the rainbow nesting spines), plus its own label + color.
+local function walk(rows, node, ancestor_colors)
 	local mods = ""
 	if node.modifiers and #node.modifiers > 0 then
 		local names = {}
-		for _, m in ipairs(node.modifiers) do names[#names + 1] = pretty(m) end
+		for _, m in ipairs(node.modifiers) do names[#names + 1] = display_name(m) end
 		mods = "[" .. table.concat(names, ", ") .. "] "
 	end
 
+	local name = display_name(node.id)
 	local label
 	if node.kind == "multicast" then
-		label = indent .. mods .. "x" .. tostring(node.group) .. " " .. pretty(node.id)
+		label = mods .. name .. "  x" .. tostring(node.group)
 	elseif node.kind == "trigger" then
-		label = indent .. mods .. pretty(node.id) .. " <trig " .. tostring(node.payload) .. ">"
+		label = mods .. name .. "  (trig " .. tostring(node.payload) .. ")"
 	else
-		label = indent .. mods .. pretty(node.id)
+		label = mods .. name
 	end
 
-	local c = COLOR[node.atype] or COLOR.OTHER
-	lines[#lines + 1] = { text = label, r = c[1], g = c[2], b = c[3] }
+	rows[#rows + 1] = { bars = copy_list(ancestor_colors), label = label, color = type_color(node.atype) }
 
-	if node.children then
-		for _, ch in ipairs(node.children) do emit(lines, ch, depth + 1) end
+	if node.children and #node.children > 0 then
+		local child_colors = copy_list(ancestor_colors)
+		child_colors[#child_colors + 1] = type_color(node.atype) -- this group's spine color
+		for _, ch in ipairs(node.children) do walk(rows, ch, child_colors) end
 	end
 end
 
@@ -113,40 +136,47 @@ function M.update()
 	if #tokens == 0 then return end
 
 	local tree = wand_structure.build(tokens, meta)
-	local lines = {}
-	for _, node in ipairs(tree) do emit(lines, node, 0) end
-	if #lines == 0 then return end
+	local rows = {}
+	for _, node in ipairs(tree) do walk(rows, node, {}) end
+	if #rows == 0 then return end
 
 	if gui == nil then gui = GuiCreate() end
 	GuiStartFrame(gui)
 
 	local title = "Wand structure"
-	local line_h = 10
+	local line_h = 11
 	local pad = 4
+	local bar_w = (GuiGetTextDimensions(gui, "| ")) -- horizontal advance per nesting spine
 
-	-- Auto-size to the widest line so we can right-anchor cleanly.
+	-- Auto-size to the widest row (spines + label) so we can right-anchor cleanly.
 	local max_w = (GuiGetTextDimensions(gui, title))
-	for _, ln in ipairs(lines) do
-		local w = (GuiGetTextDimensions(gui, ln.text))
+	for _, r in ipairs(rows) do
+		local w = #r.bars * bar_w + (GuiGetTextDimensions(gui, r.label))
 		if w > max_w then max_w = w end
 	end
 
 	local panel_w = max_w + pad * 2
-	local panel_h = (#lines + 1) * line_h + pad * 2
+	local panel_h = (#rows + 1) * line_h + pad * 2
 
 	local sw, _sh = GuiGetScreenDimensions(gui)
-	local x = sw - panel_w - 6   -- hug the right edge with a small margin
-	local y0 = 58                -- below the top-right vitals HUD (health/hearts/gold)
+	local px = sw - panel_w - 6   -- hug the right edge with a small margin
+	local y0 = 58                 -- below the top-right vitals HUD (health/hearts/gold)
 
-	GuiZSet(gui, 2)
-	GuiImageNinePiece(gui, 90210, x - pad, y0 - pad, panel_w, panel_h, 0.85)
+	GuiZSet(gui, 4)
+	GuiImageNinePiece(gui, 90210, px - pad, y0 - pad, panel_w, panel_h, 0.85)
 
 	GuiZSet(gui, 1)
-	GuiText(gui, x, y0, title)
+	GuiText(gui, px, y0, title)
 	local y = y0 + line_h + 2
-	for _, ln in ipairs(lines) do
-		GuiColorSetForNextWidget(gui, ln.r, ln.g, ln.b, 1)
-		GuiText(gui, x, y, ln.text)
+	for _, r in ipairs(rows) do
+		local x = px
+		for _, bc in ipairs(r.bars) do -- rainbow nesting spines, one per enclosing group
+			GuiColorSetForNextWidget(gui, bc[1], bc[2], bc[3], 1)
+			GuiText(gui, x, y, "|")
+			x = x + bar_w
+		end
+		GuiColorSetForNextWidget(gui, r.color[1], r.color[2], r.color[3], 1)
+		GuiText(gui, x, y, r.label)
 		y = y + line_h
 	end
 end
