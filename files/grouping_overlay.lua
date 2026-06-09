@@ -159,8 +159,11 @@ function M.update()
 	local panel_h = (#rows + 1) * line_h + pad * 2
 
 	local sw, _sh = GuiGetScreenDimensions(gui)
-	local px = sw - panel_w - 6   -- hug the right edge with a small margin
-	local y0 = 58                 -- below the top-right vitals HUD (health/hearts/gold)
+	-- Center-top, just under the SPELLS bar: the one area that stays clear of
+	-- the left wand boxes, the spell tooltip, and the busy right-side HUD
+	-- (vitals + gold + other mods' indicators).
+	local px = math.floor((sw - panel_w) / 2)
+	local y0 = 60
 
 	GuiZSet(gui, 4)
 	GuiImageNinePiece(gui, 90210, px - pad, y0 - pad, panel_w, panel_h, 0.85)
