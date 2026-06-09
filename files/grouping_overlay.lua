@@ -230,7 +230,8 @@ local BOX = {
 	h_pad   = 14,     -- units: box height = max(min_h, h_pad + s_scale * sprite_h)
 	s_scale = 2,      -- units of box height per wand-sprite pixel
 	gap     = 2,      -- units between consecutive boxes
-	row_off = 2,      -- units: slot-row bottom sits this far above the box bottom
+	row_off = 3,      -- units: slot-row bottom sits this far above the box bottom
+	                  -- (user-tuned in-game; the screenshot fits said 2)
 	slot_h  = 12,     -- units: card frame height
 	slot0_x = 0.056,  -- first slot CENTER, fraction of GUI width (22.4u)
 	pitch   = 0.0325, -- slot-to-slot spacing, fraction of width (13u)
