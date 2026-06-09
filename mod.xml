@@ -1,6 +1,6 @@
 <Mod
 	name="Spell Bracket Visualizer"
-	description="Adds colored brackets around spells to visualize spell groupings and triggers.\nMakes wand crafting more intuitive!"
+	description="Frames every spell with a colored border based on its action type - projectile, modifier, material and more.\nRead your wands at a glance!"
 	request_no_api_restrictions="0" 
 > 
 </Mod>
