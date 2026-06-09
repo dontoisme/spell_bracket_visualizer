@@ -80,7 +80,27 @@ A wand-readability mod with two features:
   fix). Not yet observed in-game: the "always:" line (no always-cast wand on
   hand; the read is pcall-guarded and fails soft).
 
-### Slot brackets — the hard part (EXPERIMENTAL, calibrated 2026-06-09)
+### Slot brackets v2 — paren-style delimiters (recalibrated 2026-06-09)
+
+User feedback on v1: long underline brackets misaligned (sat ~2 slots right and
+above the row) and ugly when a group's cards have empty slots between them.
+v2 changes:
+
+- **Delimiters, not underlines.** Each group draws Lisp-style `[` `]` bars
+  (slot height, ticks pointing inward) hugging its first/last card, label above
+  the opening bar. No line spans the gap between non-contiguous cards.
+- **Recalibrated** from an in-game screenshot (2000×1125 px, GUI 640×360):
+  slot-row bottoms 0.295 / 0.465 / 0.686 of height → `bottom0=0.295`,
+  `step=0.170`; first slot center `0.056` of width, `pitch=0.0325`. The old
+  `slot0_x=0.119` was simply wrong (~2 slots right).
+- **Selected-box offset SOLVED.** The earlier "no selection API" claim was
+  wrong: the taller (selected) box is the held wand's box, and the held wand
+  IS `Inventory2Component.mActiveItem`. The selected box and every box below
+  it get `sel_extra=0.051` of height added.
+- Nested delimiters at the same column nudge outward (`NEST_GAP`); a parent's
+  `]` is placed after its children's so it lands outside.
+
+### Slot brackets v1 history (superseded)
 
 Goal: draw the brackets directly on a wand's **own box** spell row (the build
 surface), per the user.

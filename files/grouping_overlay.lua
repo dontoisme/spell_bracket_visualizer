@@ -185,29 +185,27 @@ local function sim_rows(sim, cfg, always)
 	return rows
 end
 
--- ---- phase 2: brackets under each WAND BOX's spell row ---------------------
+-- ---- phase 2: paren-style delimiters on each WAND BOX's spell row -----------
 --
--- EXPERIMENTAL (off by default). The engine exposes neither which wand a box
--- shows nor where any box is drawn, so the layout below is a hand-calibrated
--- stacking model in GUI-screen fractions. It WILL drift: box heights aren't
--- uniform (the selected box renders taller) and your window aspect changes the
--- mapping. We bracket every wand box (each from its own wand's cards), which
--- sidesteps "which is selected".
+-- EXPERIMENTAL (off by default). The engine doesn't expose where it draws the
+-- wand boxes, so the layout below is a hand-calibrated stacking model in
+-- GUI-screen fractions (re-measured 2026-06-09 from a 2000x1125 screenshot,
+-- GUI 640x360). Instead of long underlines spanning the whole group (ugly
+-- across empty slots), each group gets Lisp-style [ ] delimiters hugging its
+-- first and last card, in the group's color, label above the opening one.
+-- The selected box renders taller and shifts everything below it; the selected
+-- box IS the held wand (Inventory2Component.mActiveItem), so we correct for it.
 local PIXEL = "mods/testMod/files/ui/pixel.png"
--- Calibrated against GUI 640x360 (px = 2.5*GUI). Boxes 1 & 2 land dead-on;
--- the SELECTED box renders ~12 GUI taller and its row sits ~12 lower, which we
--- can't detect (no selection API) -- so the box you're editing reads slightly
--- high. Slot geometry (slot0_x/pitch) measured from the box spell row.
 local BOX = {
-	top0    = 0.137, -- first wand box's spell-row top, fraction of GUI height
-	height  = 0.179, -- per-box vertical step (assumed uniform), fraction of height
-	row_off = 0.121, -- box top -> spell row, fraction of height
-	slot0_x = 0.119, -- first slot center, fraction of GUI width (GUI ~76)
-	pitch   = 0.032, -- slot-to-slot spacing, fraction of width (GUI ~20.5)
-	halfw   = 0.016, -- half slot width, fraction of width (GUI ~10)
+	bottom0   = 0.295,  -- box 1 slot-row BOTTOM, fraction of GUI height
+	step      = 0.170,  -- per-box vertical step (non-selected), fraction of height
+	sel_extra = 0.051,  -- extra shift for the selected box and every box below it
+	slot_h    = 0.058,  -- slot height, fraction of GUI height (~21 GUI)
+	slot0_x   = 0.056,  -- first slot CENTER, fraction of GUI width (~36 GUI)
+	pitch     = 0.0325, -- slot-to-slot spacing, fraction of width (~21 GUI)
+	halfw     = 0.016,  -- half slot width, fraction of width (~10 GUI)
 }
-local LEVEL_GAP = 7       -- px between nesting bracket levels
-local TICK = 4            -- px height of the end ticks
+local NEST_GAP = 3        -- px between delimiters stacked at the same column
 local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
@@ -216,22 +214,27 @@ local function line(gui, id, x, y, w, h, c, a)
 	GuiImage(gui, id, x, y, PIXEL, a, w, h)
 end
 
--- Draw a bracket for every group node, under the row at `row_y`, nesting down.
--- A node that wrapped spans min..max of everything it pulled in (reaching back
--- to the wand's start), drawn in the wrap color so the wrap is unmissable.
+-- Draw [ ] delimiters for one group: a vertical bar with two small ticks
+-- pointing into the group, slot height, snug against the boundary cards.
+-- `opens`/`closes` count delimiters already placed per column so nested
+-- delimiters at the same card nudge outward instead of overlapping. The
+-- close is placed AFTER recursing so a parent's ] lands outside its kids'.
 -- `xs` maps deck index -> real slot column (handles empty slots in the wand).
-local function draw_groups(gui, nodes, sw, row_y, depth, idc, xs)
+local function draw_delims(gui, nodes, sw, top, bot, idc, xs, opens, closes)
 	for _, node in ipairs(nodes) do
 		if node.children and #node.children > 0 and node.first and node.last then
-			local a = xs[node.first] or (node.first - 1) -- 0-based slot columns
-			local b = xs[node.last] or (node.last - 1)
-			local lx = sw * BOX.slot0_x + a * sw * BOX.pitch - sw * BOX.halfw
-			local rx = sw * BOX.slot0_x + b * sw * BOX.pitch + sw * BOX.halfw
-			local yt = row_y + depth * LEVEL_GAP
+			local ca = xs[node.first] or (node.first - 1) -- 0-based slot columns
+			local cb = xs[node.last] or (node.last - 1)
 			local c = node.wrap and WRAP_COLOR or type_color(node.atype)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, yt, rx - lx, 1, c)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, yt - TICK, 1, TICK + 1, c)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, yt - TICK, 1, TICK + 1, c)
+			local h = bot - top
+
+			local off_a = opens[ca] or 0
+			opens[ca] = off_a + 1
+			local lx = sw * (BOX.slot0_x + ca * BOX.pitch - BOX.halfw) - 2 - off_a * NEST_GAP
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, top, 1, h, c)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, top, 3, 1, c)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, bot - 1, 3, 1, c)
+
 			local lbl
 			if node.kind == "multicast" then
 				lbl = "x" .. ((node.group == -1) and "all" or tostring(node.group))
@@ -239,15 +242,22 @@ local function draw_groups(gui, nodes, sw, row_y, depth, idc, xs)
 				lbl = "trig " .. tostring(node.payload)
 			end
 			if node.wrap then lbl = lbl .. " ~wrap" end
-			local lw = (GuiGetTextDimensions(gui, lbl))
 			GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
-			GuiText(gui, (lx + rx) / 2 - lw / 2, yt + 1, lbl)
-			draw_groups(gui, node.children, sw, row_y, depth + 1, idc, xs)
+			GuiText(gui, lx, top - 9, lbl)
+
+			draw_delims(gui, node.children, sw, top, bot, idc, xs, opens, closes)
+
+			local off_b = closes[cb] or 0
+			closes[cb] = off_b + 1
+			local rx = sw * (BOX.slot0_x + cb * BOX.pitch + BOX.halfw) + 2 + off_b * NEST_GAP
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, top, 1, h, c)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx - 2, top, 3, 1, c)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx - 2, bot - 1, 3, 1, c)
 		end
 	end
 end
 
--- Enumerate carried wands (in quick-slot order) and bracket each one's box row.
+-- Enumerate carried wands (in quick-slot order) and delimit each one's box row.
 local function draw_box_brackets(gui, sw, sh)
 	local players = EntityGetWithTag("player_unit")
 	if not players or #players == 0 then return end
@@ -264,16 +274,29 @@ local function draw_box_brackets(gui, sw, sh)
 	end
 	table.sort(wands, function(p, q) return p.slot < q.slot end)
 
+	-- the selected (taller) box is the held wand's box
+	local sel_idx = nil
+	local inv = EntityGetFirstComponentIncludingDisabled(players[1], "Inventory2Component")
+	local active = inv and ComponentGetValue2(inv, "mActiveItem")
+	if active and active ~= 0 then
+		for idx, wd in ipairs(wands) do
+			if wd.e == active then sel_idx = idx end
+		end
+	end
+
 	local idc = { n = 0 }
 	for idx, wd in ipairs(wands) do
-		local row_y = sh * BOX.top0 + (idx - 1) * sh * BOX.height + sh * BOX.row_off
+		local bottom = BOX.bottom0 + (idx - 1) * BOX.step
+		if sel_idx and idx >= sel_idx then bottom = bottom + BOX.sel_extra end
+		local bot = sh * bottom
+		local top = bot - sh * BOX.slot_h
 		local tokens, _, xs = read_deck(wd.e)
 		if #tokens > 0 then
 			local cfg = read_config(wd.e)
 			local sim = wand_structure.simulate(tokens, meta,
 				{ spells_per_cast = cfg.spells_per_cast })
 			for _, cast in ipairs(sim.casts) do
-				draw_groups(gui, cast.nodes, sw, row_y, 0, idc, xs)
+				draw_delims(gui, cast.nodes, sw, top, bot, idc, xs, {}, {})
 			end
 		end
 	end
