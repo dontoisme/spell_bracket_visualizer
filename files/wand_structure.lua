@@ -24,6 +24,7 @@ function M.build(tokens, meta)
 	local parse_seq -- forward declaration
 
 	local function parse_expr()
+		local first = i -- first token (slot) index this expression spans, incl. leading modifiers
 		local mods = {}
 		while i <= n do
 			local m = meta_for(meta, tokens[i])
@@ -37,14 +38,15 @@ function M.build(tokens, meta)
 
 		if i > n then
 			if #mods > 0 then
-				return { kind = "leaf", id = mods[#mods], atype = "MODIFIER", modifiers = mods, dangling = true }
+				return { kind = "leaf", id = mods[#mods], atype = "MODIFIER", modifiers = mods,
+					dangling = true, first = first, last = n }
 			end
 			return nil
 		end
 
 		local id = tokens[i]; i = i + 1
 		local m = meta_for(meta, id)
-		local node = { id = id, atype = m.type, modifiers = mods }
+		local node = { id = id, atype = m.type, modifiers = mods, first = first }
 
 		if m.type == "DRAW_MANY" and m.group then
 			node.kind = "multicast"
@@ -58,6 +60,7 @@ function M.build(tokens, meta)
 		else
 			node.kind = "leaf"
 		end
+		node.last = i - 1 -- last token (slot) index consumed by this expression + its children
 		return node
 	end
 

@@ -28,6 +28,13 @@ mod_settings = {
 		value_default = true,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
+	{
+		id = "show_slot_brackets",
+		ui_name = "Slot Brackets",
+		ui_description = "Draw grouping brackets directly under the spell slots in the\nwand UI (experimental; alignment may vary by resolution).",
+		value_default = true,
+		scope = MOD_SETTING_SCOPE_RUNTIME,
+	},
 }
 
 -- Settings take effect when the spell list loads at the start of a run, so they

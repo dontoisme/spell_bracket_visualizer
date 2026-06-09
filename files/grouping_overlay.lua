@@ -122,33 +122,62 @@ local function walk(rows, node, ancestor_colors)
 	end
 end
 
--- ---- per-frame entry point -------------------------------------------------
+-- ---- phase 2: brackets drawn under the engine's SPELLS slot row -------------
+--
+-- The engine never exposes where it draws the spell slots, so the slot geometry
+-- below is expressed as fractions of the GUI screen and tuned empirically. The
+-- card order in the SPELLS row equals our token order, so node.first/last (1-
+-- based token indices) map straight onto slot indices.
+local PIXEL = "mods/testMod/files/ui/pixel.png"
+local SLOT = {
+	cx0   = 0.3377, -- center x of slot 0, as a fraction of GUI screen width
+	pitch = 0.0635, -- slot-to-slot spacing, fraction of width
+	halfw = 0.0185, -- half slot width, fraction of width
+	row_y = 0.126,  -- y just below the slot row, fraction of GUI screen height
+}
+local LEVEL_GAP = 9 -- px between nesting bracket levels
+local TICK = 4      -- px height of the end ticks
 
-function M.update()
-	if type(GameIsInventoryOpen) ~= "function" or not GameIsInventoryOpen() then return end
-	if type(ModSettingGet) == "function" and ModSettingGet("testMod.show_grouping") == false then return end
-	if not wand_structure then return end
+local function line(gui, id, x, y, w, h, c)
+	GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
+	GuiImage(gui, id, x, y, PIXEL, 1, w, h)
+end
 
-	local wand = get_active_wand()
-	if not wand then return end
+local function draw_slot_brackets(gui, nodes, sw, sh, depth, idc)
+	for _, node in ipairs(nodes) do
+		if node.children and #node.children > 0 and node.first and node.last then
+			local a, b = node.first - 1, node.last - 1 -- 0-based slot indices
+			local lx = sw * SLOT.cx0 + a * sw * SLOT.pitch - sw * SLOT.halfw
+			local rx = sw * SLOT.cx0 + b * sw * SLOT.pitch + sw * SLOT.halfw
+			local yt = sh * SLOT.row_y + depth * LEVEL_GAP
+			local c = type_color(node.atype)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, yt, rx - lx, 1, c)         -- horizontal
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, yt - TICK, 1, TICK + 1, c) -- left end tick
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, yt - TICK, 1, TICK + 1, c) -- right end tick
 
-	local tokens = read_deck(wand)
-	if #tokens == 0 then return end
+			local lbl = (node.kind == "multicast") and ("x" .. tostring(node.group))
+				or ("trig " .. tostring(node.payload))
+			local lw = (GuiGetTextDimensions(gui, lbl))
+			GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
+			GuiText(gui, (lx + rx) / 2 - lw / 2, yt + 1, lbl)
 
-	local tree = wand_structure.build(tokens, meta)
+			draw_slot_brackets(gui, node.children, sw, sh, depth + 1, idc)
+		end
+	end
+end
+
+-- ---- companion structure panel (phase 1) -----------------------------------
+
+local function draw_panel(gui, tree, sw)
 	local rows = {}
 	for _, node in ipairs(tree) do walk(rows, node, {}) end
 	if #rows == 0 then return end
-
-	if gui == nil then gui = GuiCreate() end
-	GuiStartFrame(gui)
 
 	local title = "Wand structure"
 	local line_h = 11
 	local pad = 4
 	local bar_w = (GuiGetTextDimensions(gui, "| ")) -- horizontal advance per nesting spine
 
-	-- Auto-size to the widest row (spines + label) so we can right-anchor cleanly.
 	local max_w = (GuiGetTextDimensions(gui, title))
 	for _, r in ipairs(rows) do
 		local w = #r.bars * bar_w + (GuiGetTextDimensions(gui, r.label))
@@ -157,12 +186,7 @@ function M.update()
 
 	local panel_w = max_w + pad * 2
 	local panel_h = (#rows + 1) * line_h + pad * 2
-
-	local sw, _sh = GuiGetScreenDimensions(gui)
-	-- Center-top, just under the SPELLS bar: the one area that stays clear of
-	-- the left wand boxes, the spell tooltip, and the busy right-side HUD
-	-- (vitals + gold + other mods' indicators).
-	local px = math.floor((sw - panel_w) / 2)
+	local px = math.floor((sw - panel_w) / 2) -- center-top, clear of side boxes and right HUD
 	local y0 = 60
 
 	GuiZSet(gui, 4)
@@ -173,7 +197,7 @@ function M.update()
 	local y = y0 + line_h + 2
 	for _, r in ipairs(rows) do
 		local x = px
-		for _, bc in ipairs(r.bars) do -- rainbow nesting spines, one per enclosing group
+		for _, bc in ipairs(r.bars) do -- rainbow nesting spines
 			GuiColorSetForNextWidget(gui, bc[1], bc[2], bc[3], 1)
 			GuiText(gui, x, y, "|")
 			x = x + bar_w
@@ -181,6 +205,38 @@ function M.update()
 		GuiColorSetForNextWidget(gui, r.color[1], r.color[2], r.color[3], 1)
 		GuiText(gui, x, y, r.label)
 		y = y + line_h
+	end
+end
+
+-- ---- per-frame entry point -------------------------------------------------
+
+function M.update()
+	if type(GameIsInventoryOpen) ~= "function" or not GameIsInventoryOpen() then return end
+	if not wand_structure then return end
+
+	local get = (type(ModSettingGet) == "function") and ModSettingGet or function() return nil end
+	local show_panel = get("testMod.show_grouping") ~= false
+	local show_slots = get("testMod.show_slot_brackets") ~= false
+	if not show_panel and not show_slots then return end
+
+	local wand = get_active_wand()
+	if not wand then return end
+
+	local tokens = read_deck(wand)
+	if #tokens == 0 then return end
+
+	local tree = wand_structure.build(tokens, meta)
+
+	if gui == nil then gui = GuiCreate() end
+	GuiStartFrame(gui)
+	local sw, sh = GuiGetScreenDimensions(gui)
+
+	if show_slots then
+		GuiZSet(gui, 1)
+		draw_slot_brackets(gui, tree, sw, sh, 0, { n = 0 })
+	end
+	if show_panel then
+		draw_panel(gui, tree, sw)
 	end
 end
 
