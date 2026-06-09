@@ -1,0 +1,8 @@
+# OS / editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+
+# Noita writes a per-mod settings cache at runtime; keep source settings.lua, ignore generated state
+mod_config.xml
