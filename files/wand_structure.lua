@@ -34,7 +34,11 @@
 --   trigger   { kind="trigger",   id, atype, trigger=kind, payload=N,
 --               children={...}, modifiers={ids} }
 -- A modifier chain that exhausts the deck with nothing left to wrap in
--- becomes a leaf with dangling=true. Nodes built across a wrap get wrap=true.
+-- becomes a leaf with dangling=true. Nodes built across a wrap get wrap=true,
+-- plus wfirst/wlast = min/max slot index of the cards drawn AFTER the wrap
+-- (the wrapped-in segment at the wand's start), so renderers can show the
+-- group as forward-span + return + wrapped-span. node.last stays the max
+-- FORWARD index in practice, since wrapped indices precede the head.
 
 local M = {}
 
@@ -61,6 +65,7 @@ function M.simulate(tokens, meta, opts)
 	for i, id in ipairs(tokens) do deck[#deck + 1] = { i = i, id = id } end
 
 	local wrap_count = 0
+	local wrapped_now = false -- this cast has wrapped; later draws are wrapped-in
 
 	-- One draw off the deck. Forced draws (from a card's own draw_actions /
 	-- trigger payload) wrap the discard pile back in when the deck is empty.
@@ -70,11 +75,13 @@ function M.simulate(tokens, meta, opts)
 				table.sort(discard, function(a, b) return a.i < b.i end)
 				deck, discard = discard, {}
 				wrap_count = wrap_count + 1
+				wrapped_now = true
 			else
 				return nil
 			end
 		end
 		local card = table.remove(deck, 1)
+		if wrapped_now then card.w = true end
 		hand[#hand + 1] = card
 		return card
 	end
@@ -84,25 +91,33 @@ function M.simulate(tokens, meta, opts)
 	local function parse_expr(forced)
 		local wraps_before = wrap_count
 		local mods, first, last = {}, nil, nil
+		local wfirst, wlast = nil, nil -- span of wrapped-in cards (post-wrap)
+		local function note(c)
+			if first == nil or c.i < first then first = c.i end
+			if last == nil or c.i > last then last = c.i end
+			if c.w then
+				if wfirst == nil or c.i < wfirst then wfirst = c.i end
+				if wlast == nil or c.i > wlast then wlast = c.i end
+			end
+		end
 		local card = draw(forced)
 		if card == nil then return nil end
 		local m = meta_for(meta, card.id)
 
 		while chains(m) do
 			mods[#mods + 1] = card.id
-			if first == nil or card.i < first then first = card.i end
-			if last == nil or card.i > last then last = card.i end
+			note(card)
 			card = draw(true)
 			if card == nil then
 				return { kind = "leaf", id = mods[#mods], atype = "MODIFIER",
 					modifiers = mods, dangling = true, first = first, last = last,
+					wfirst = wfirst, wlast = wlast,
 					wrap = (wrap_count > wraps_before) or nil }
 			end
 			m = meta_for(meta, card.id)
 		end
 
-		if first == nil or card.i < first then first = card.i end
-		if last == nil or card.i > last then last = card.i end
+		note(card)
 		local node = { id = card.id, atype = m.type, modifiers = mods, head = card.i }
 
 		if is_multicast(m) then
@@ -124,9 +139,12 @@ function M.simulate(tokens, meta, opts)
 			for _, ch in ipairs(node.children) do
 				if ch.first and ch.first < first then first = ch.first end
 				if ch.last and ch.last > last then last = ch.last end
+				if ch.wfirst and (wfirst == nil or ch.wfirst < wfirst) then wfirst = ch.wfirst end
+				if ch.wlast and (wlast == nil or ch.wlast > wlast) then wlast = ch.wlast end
 			end
 		end
 		node.first, node.last = first, last
+		node.wfirst, node.wlast = wfirst, wlast
 		if wrap_count > wraps_before then node.wrap = true end
 		return node
 	end
@@ -146,6 +164,7 @@ function M.simulate(tokens, meta, opts)
 	while #deck > 0 and #casts < 64 do -- cap: a wrap ends each cycle anyway
 		local wraps_before = wrap_count
 		hand = {}
+		wrapped_now = false
 		local nodes = parse_seq(spc, false)
 		local wrapped = wrap_count > wraps_before
 		casts[#casts + 1] = { nodes = nodes, wrapped = wrapped }

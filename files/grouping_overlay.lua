@@ -286,6 +286,9 @@ local function collect_delims(nodes, depth, xs, out)
 				cb = xs[node.last] or (node.last - 1),
 				c = node.wrap and WRAP_COLOR or nest_color(depth),
 				lbl = lbl,
+				-- wrapped-in segment (cards pulled from the wand's start)
+				w1 = node.wfirst and (xs[node.wfirst] or (node.wfirst - 1)) or nil,
+				w2 = node.wlast and (xs[node.wlast] or (node.wlast - 1)) or nil,
 			}
 			collect_delims(node.children, depth + 1, xs, out)
 		end
@@ -312,6 +315,21 @@ local function draw_delims(gui, groups, sw, top, bot, idc)
 		local rx = sw * (BOX.slot0_x + g.cb * BOX.pitch + BOX.halfw)
 			- BAR_W - CLOSE_NUDGE - s * STACK_X
 		bracket(gui, idc, rx, top - grow, bot + grow, -1, g.c)
+
+		-- wrap: the group continues at the wand's START. Bracket the
+		-- wrapped-in segment and draw a carriage-return line under the row,
+		-- from below the forward close back to the wrapped segment's [.
+		if g.w1 then
+			local wlx = sw * (BOX.slot0_x + g.w1 * BOX.pitch - BOX.halfw) - OPEN_NUDGE
+			local wrx = sw * (BOX.slot0_x + g.w2 * BOX.pitch + BOX.halfw)
+				- BAR_W - CLOSE_NUDGE
+			bracket(gui, idc, wlx, top, bot, 1, g.c)
+			bracket(gui, idc, wrx, top, bot, -1, g.c)
+			local ry = bot + grow + 2 -- return line sits just below the row
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, bot + grow, 1, ry - (bot + grow) + 1, g.c)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, ry, rx - wlx, 1, g.c)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, bot, 1, ry - bot + 1, g.c)
+		end
 	end
 end
 

@@ -51,7 +51,7 @@ def simulate(tokens, meta, spells_per_cast=None):
 
     deck = [{"i": i + 1, "id": aid} for i, aid in enumerate(tokens)]
     discard, hand = [], []
-    state = {"wraps": 0}
+    state = {"wraps": 0, "wrapped_now": False}
 
     def draw(forced):
         nonlocal deck, discard
@@ -60,15 +60,27 @@ def simulate(tokens, meta, spells_per_cast=None):
                 deck = sorted(discard, key=lambda c: c["i"])
                 discard = []
                 state["wraps"] += 1
+                state["wrapped_now"] = True
             else:
                 return None
         card = deck.pop(0)
+        if state["wrapped_now"]:
+            card["w"] = True
         hand.append(card)
         return card
 
     def parse_expr(forced):
         wraps_before = state["wraps"]
-        mods, first, last = [], None, None
+        mods = []
+        span = {"first": None, "last": None, "wfirst": None, "wlast": None}
+
+        def note(c):
+            span["first"] = c["i"] if span["first"] is None else min(span["first"], c["i"])
+            span["last"] = c["i"] if span["last"] is None else max(span["last"], c["i"])
+            if c.get("w"):
+                span["wfirst"] = c["i"] if span["wfirst"] is None else min(span["wfirst"], c["i"])
+                span["wlast"] = c["i"] if span["wlast"] is None else max(span["wlast"], c["i"])
+
         card = draw(forced)
         if card is None:
             return None
@@ -76,20 +88,19 @@ def simulate(tokens, meta, spells_per_cast=None):
 
         while chains(m):
             mods.append(card["id"])
-            first = card["i"] if first is None else min(first, card["i"])
-            last = card["i"] if last is None else max(last, card["i"])
+            note(card)
             card = draw(True)
             if card is None:
                 node = {"kind": "leaf", "id": mods[-1], "atype": "MODIFIER",
                         "modifiers": mods, "dangling": True,
-                        "first": first, "last": last}
+                        "first": span["first"], "last": span["last"],
+                        "wfirst": span["wfirst"], "wlast": span["wlast"]}
                 if state["wraps"] > wraps_before:
                     node["wrap"] = True
                 return node
             m = meta_for(meta, card["id"])
 
-        first = card["i"] if first is None else min(first, card["i"])
-        last = card["i"] if last is None else max(last, card["i"])
+        note(card)
         node = {"id": card["id"], "atype": m["type"], "modifiers": mods,
                 "head": card["i"]}
 
@@ -110,9 +121,13 @@ def simulate(tokens, meta, spells_per_cast=None):
 
         for ch in node.get("children", []):
             if ch.get("first") is not None:
-                first = min(first, ch["first"])
-                last = max(last, ch["last"])
-        node["first"], node["last"] = first, last
+                span["first"] = min(span["first"], ch["first"])
+                span["last"] = max(span["last"], ch["last"])
+            if ch.get("wfirst") is not None:
+                span["wfirst"] = ch["wfirst"] if span["wfirst"] is None else min(span["wfirst"], ch["wfirst"])
+                span["wlast"] = ch["wlast"] if span["wlast"] is None else max(span["wlast"], ch["wlast"])
+        node["first"], node["last"] = span["first"], span["last"]
+        node["wfirst"], node["wlast"] = span["wfirst"], span["wlast"]
         if state["wraps"] > wraps_before:
             node["wrap"] = True
         return node
@@ -131,6 +146,7 @@ def simulate(tokens, meta, spells_per_cast=None):
     while deck and len(casts) < 64:
         wraps_before = state["wraps"]
         hand.clear()
+        state["wrapped_now"] = False
         nodes = parse_seq(spc, False)
         wrapped = state["wraps"] > wraps_before
         casts.append({"nodes": nodes, "wrapped": wrapped})
@@ -264,6 +280,19 @@ def main():
         failures += 1
     print("%s head excludes modifier prefix (first=%s head=%s last=%s)" %
           ("PASS" if head_ok else "FAIL", node["first"], node["head"], node["last"]))
+
+    # wrapped span: the user's wand [BURST(1), SCATTER_2(2), LIGHT(3),
+    # BOUNCE(4)] @1/cast -- cast 2's multicast wraps, pulling slot 1 back in.
+    # Forward span head..last = 2..4, wrapped span wfirst..wlast = 1..1.
+    sim = simulate(["BOUNCY_ORB", "SCATTER_2", "LIGHT", "BOUNCE"], meta, 1)
+    node = sim["casts"][1]["nodes"][0]
+    wrap_ok = (node["head"] == 2 and node["last"] == 4
+               and node["wfirst"] == 1 and node["wlast"] == 1 and node.get("wrap"))
+    if not wrap_ok:
+        failures += 1
+    print("%s wrapped span tracked (head=%s last=%s wfirst=%s wlast=%s)" %
+          ("PASS" if wrap_ok else "FAIL", node["head"], node["last"],
+           node["wfirst"], node["wlast"]))
 
     print("\n%d failure(s)" % failures)
     sys.exit(1 if failures else 0)
