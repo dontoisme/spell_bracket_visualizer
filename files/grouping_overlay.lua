@@ -173,7 +173,7 @@ local function walk(rows, node, ancestor_colors, depth)
 
 	if node.children and #node.children > 0 then
 		local child_colors = copy_list(ancestor_colors)
-		child_colors[#child_colors + 1] = node.wrap and WRAP_COLOR or nest_color(depth)
+		child_colors[#child_colors + 1] = nest_color(depth) -- rainbow even when wrapped
 		for _, ch in ipairs(node.children) do walk(rows, ch, child_colors, depth + 1) end
 	end
 end
@@ -281,15 +281,25 @@ local function collect_delims(nodes, depth, xs, out)
 			else
 				lbl = "trig " .. tostring(node.payload)
 			end
-			if node.wrap then lbl = lbl .. " ~wrap" end
+			-- The wrap apparatus (orange ~wrap tag, wrapped-segment brackets,
+			-- return line) belongs to the INNERMOST group the wrap happened
+			-- in. Ancestors inherit wfirst but must not redraw it -- and they
+			-- keep their rainbow color: orange marks the wrap, not the group.
+			local wrap_here = node.wfirst ~= nil
+			for _, ch in ipairs(node.children) do
+				if ch.wfirst and ch.children and #ch.children > 0 then
+					wrap_here = false
+					break
+				end
+			end
 			out[#out + 1] = {
 				ca = xs[head] or (head - 1), -- 0-based slot columns
 				cb = xs[node.last] or (node.last - 1),
-				c = node.wrap and WRAP_COLOR or nest_color(depth),
+				c = nest_color(depth),
 				lbl = lbl,
 				-- wrapped-in segment (cards pulled from the wand's start)
-				w1 = node.wfirst and (xs[node.wfirst] or (node.wfirst - 1)) or nil,
-				w2 = node.wlast and (xs[node.wlast] or (node.wlast - 1)) or nil,
+				w1 = wrap_here and (xs[node.wfirst] or (node.wfirst - 1)) or nil,
+				w2 = wrap_here and (xs[node.wlast] or (node.wlast - 1)) or nil,
 			}
 			collect_delims(node.children, depth + 1, xs, out)
 		end
@@ -300,11 +310,17 @@ local function draw_delims(gui, groups, sw, top, bot, idc)
 	local counts, seen = {}, {}
 	for _, g in ipairs(groups) do counts[g.cb] = (counts[g.cb] or 0) + 1 end
 	for _, g in ipairs(groups) do
-		-- open: [ just left of the card, over the slot's left edge, label above
+		-- open: [ just left of the card, over the slot's left edge, label
+		-- above (the ~wrap tag, when present, is appended in wrap orange)
 		local lx = sw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
 		bracket(gui, idc, lx, top, bot, 1, g.c)
 		GuiColorSetForNextWidget(gui, g.c[1], g.c[2], g.c[3], 1)
 		GuiText(gui, lx, top - 9, g.lbl)
+		if g.w1 then
+			local lw = (GuiGetTextDimensions(gui, g.lbl))
+			GuiColorSetForNextWidget(gui, WRAP_COLOR[1], WRAP_COLOR[2], WRAP_COLOR[3], 1)
+			GuiText(gui, lx + lw + 2, top - 9, "~wrap")
+		end
 
 		-- close: outermost ] ON the card's right edge (s = 0: collected
 		-- first, placed rightmost, tallest so its hooks wrap the inner
@@ -320,16 +336,17 @@ local function draw_delims(gui, groups, sw, top, bot, idc)
 		-- wrap: the group continues at the wand's START. Bracket the
 		-- wrapped-in segment and draw a carriage-return line under the row,
 		-- from below the forward close back to the wrapped segment's [.
+		-- Always WRAP orange: orange marks the wrap, rainbow marks groups.
 		if g.w1 then
 			local wlx = sw * (BOX.slot0_x + g.w1 * BOX.pitch - BOX.halfw) - OPEN_NUDGE
 			local wrx = sw * (BOX.slot0_x + g.w2 * BOX.pitch + BOX.halfw)
 				- BAR_W - CLOSE_NUDGE
-			bracket(gui, idc, wlx, top, bot, 1, g.c)
-			bracket(gui, idc, wrx, top, bot, -1, g.c)
+			bracket(gui, idc, wlx, top, bot, 1, WRAP_COLOR)
+			bracket(gui, idc, wrx, top, bot, -1, WRAP_COLOR)
 			local ry = bot + grow + 2 -- return line sits just below the row
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, bot + grow, 1, ry - (bot + grow) + 1, g.c)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, ry, rx - wlx, 1, g.c)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, bot, 1, ry - bot + 1, g.c)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, bot + grow, 1, ry - (bot + grow) + 1, WRAP_COLOR)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, ry, rx - wlx, 1, WRAP_COLOR)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, bot, 1, ry - bot + 1, WRAP_COLOR)
 		end
 	end
 end
