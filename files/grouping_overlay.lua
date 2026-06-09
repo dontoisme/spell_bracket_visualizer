@@ -222,7 +222,11 @@ local BOX = {
 	pitch     = 0.0325, -- slot-to-slot spacing, fraction of width (~21 GUI)
 	halfw     = 0.015,  -- half width of the card FRAME (~60px of the 65px pitch)
 }
-local STRIP_W = 0.5       -- GUI width of one delimiter strip
+local BAR_W   = 1   -- GUI width of a bracket's vertical bar
+local TICK_W  = 3   -- GUI length of the top/bottom hooks
+local STACK_X = 1.5 -- horizontal step between closing brackets stacked on one card
+local STACK_Y = 1   -- vertical growth per stack level: outer brackets are taller,
+                    -- so their hooks wrap around the inner bracket's
 local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
@@ -231,14 +235,23 @@ local function line(gui, id, x, y, w, h, c, a)
 	GuiImage(gui, id, x, y, PIXEL, a, w, h)
 end
 
--- Draw delimiter strips for one group: thin vertical bars ON the boundary
--- cards' frame edges (frame height), rainbow-colored by nesting depth.
+-- One [ or ] glyph: vertical bar from top..bot plus two hooks pointing into
+-- the group (dir = 1 for an opening [, -1 for a closing ]).
+local function bracket(gui, idc, x, top, bot, dir, c)
+	idc.n = idc.n + 1; line(gui, 70000 + idc.n, x, top, BAR_W, bot - top, c)
+	local tx = (dir > 0) and x or (x - TICK_W + BAR_W)
+	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx, top, TICK_W, 1, c)
+	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx, bot - 1, TICK_W, 1, c)
+end
+
+-- Draw [ ] bracket glyphs for one group, ON the boundary cards' frame edges,
+-- rainbow-colored by nesting depth (SLIME rainbow parens).
 -- The span starts at the group's OWN card (node.head): leading modifiers sit
 -- outside the parens, Lisp-style, matching the panel's "[mods] name" layout.
--- Closing strips that land on the same card fan out RIGHTWARD, each strip
--- STRIP_W wide and flush against the previous one -- innermost on the card
--- edge, outer groups next to it (children draw first) -- so every level's
--- rainbow color stays visible. `closes` counts strips placed per column.
+-- Closing brackets that land on the same card stack rightward (innermost ON
+-- the card edge -- children draw first) and each outer one is slightly TALLER
+-- so its hooks wrap around the inner bracket's, like nested parens on paper.
+-- `closes` counts brackets placed per column.
 -- `xs` maps deck index -> real slot column (handles empty slots in the wand).
 local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs, closes)
 	for _, node in ipairs(nodes) do
@@ -249,11 +262,10 @@ local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs, closes)
 			local ca = xs[head] or (head - 1) -- 0-based slot columns
 			local cb = xs[node.last] or (node.last - 1)
 			local c = node.wrap and WRAP_COLOR or nest_color(depth)
-			local h = bot - top
 
-			-- open: one strip on the card frame's left edge
+			-- open: [ on the card frame's left edge
 			local lx = sw * (BOX.slot0_x + ca * BOX.pitch - BOX.halfw)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, top, STRIP_W, h, c)
+			bracket(gui, idc, lx, top, bot, 1, c)
 
 			local lbl
 			if node.kind == "multicast" then
@@ -265,12 +277,12 @@ local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs, closes)
 			GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
 			GuiText(gui, lx, top - 9, lbl)
 
-			-- close: strips fan rightward from the card frame's right edge
+			-- close: ] on the card frame's right edge, stacking right + taller
 			local off = closes[cb] or 0
 			closes[cb] = off + 1
 			local rx = sw * (BOX.slot0_x + cb * BOX.pitch + BOX.halfw)
-				- STRIP_W + off * STRIP_W
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, top, STRIP_W, h, c)
+				- BAR_W + off * STACK_X
+			bracket(gui, idc, rx, top - off * STACK_Y, bot + off * STACK_Y, -1, c)
 		end
 	end
 end
