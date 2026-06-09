@@ -1,6 +1,6 @@
 # Spell Bracket Visualizer — project status
 
-_A Noita wand-building aid. Last updated 2026-06-09._
+_A Noita wand-building aid. Last updated 2026-06-09 (casts + wrapping landed)._
 
 ## What the mod is
 
@@ -39,20 +39,39 @@ A wand-readability mod with two features:
   multicasts (`DRAW_MANY`) gather the next N cards, trigger projectiles open a
   nested sub-shot of `payload` cards, modifiers prefix-attach. → a Lisp-style
   parse, statically derivable.
+- **Casts + wrapping** (added 2026-06-09, verified line-by-line from `gun.lua`;
+  see `GROUPING_DESIGN.md`): a cast draws `actions_per_round` root expressions
+  (root draws never wrap); every *card-forced* draw (`draw_actions(N, true)`,
+  trigger payloads) **wraps** on an empty deck — the discard returns in slot
+  order and drawing continues from the wand's start, and the cycle then ends
+  (recharge). Chaining is decided by the card's `draws` count, not its type
+  (ALPHA/I_SHOT chain; RANDOM_MODIFIER doesn't; BURST_X takes the whole deck).
 - `tools/gen_structure_meta.py` → `files/structure_meta.lua`: per-spell type,
-  multicast group size, trigger payload count, localized name (422 actions).
-- `files/wand_structure.lua`: pure deck→tree parser; records each node's
-  `first`/`last` slot span. Validated against hand-traced wands (Python mirror).
+  **`draws` count**, multicast group size, trigger payload count, localized
+  name (422 actions).
+- `files/wand_structure.lua`: pure **deck simulator** —
+  `simulate(tokens, meta, {spells_per_cast=N})` → per-cast trees with
+  `wrapped`/`wrap` flags and slot spans. `build()` kept as the one-cast wrapper.
+- `tools/test_wand_structure.py`: Python mirror + 12 hand-traced tests
+  (cast splits, trigger/modifier/multicast wraps, slot-order restore, …). All
+  pass. **Keep the mirror in sync when editing wand_structure.lua.**
 - Runtime reads confirmed working: `GameIsInventoryOpen()`, active wand via
   `Inventory2Component.mActiveItem`, cards via `ItemActionComponent.action_id`
-  ordered by `ItemComponent.inventory_slot`.
+  ordered by `ItemComponent.inventory_slot`. New reads (need in-game check):
+  `AbilityComponent.gun_config` → `actions_per_round` / `shuffle_deck_when_empty`
+  via `ComponentObjectGetValue2`, `ItemComponent.permanently_attached`
+  (always-cast detection).
 
-### Companion panel (WORKS in-game)
+### Companion panel (WORKS in-game; cast/wrap display NOT yet re-verified)
 
 - `files/grouping_overlay.lua` → `draw_panel`: a "Wand structure" text tree with
   rainbow nesting spines, colored by type, localized names. Center-top placement.
-- ✅ Confirmed accurate in-game (correctly parsed a real multicast+trigger wand).
-- Robust and resolution-independent. This is the **reliable fallback**.
+- ✅ Confirmed accurate in-game (correctly parsed a real multicast+trigger wand)
+  *before* the cast/wrap upgrade; the upgraded rendering needs a fresh check.
+- Now shows: title with spells/cast + shuffle warning, an "always:" line for
+  always-cast cards, per-cast headers when the wand has multiple casts, and a
+  loud orange "cast N -- WRAPS! -> recharge" banner with "~" markers on the
+  wrapped-in cards. This is the **primary feature**.
 
 ### Slot brackets — the hard part (EXPERIMENTAL, calibrated 2026-06-09)
 
@@ -86,32 +105,38 @@ box reads slightly high. Also still subject to: variable wand counts/heights,
 window aspect changes (GUI may not always be 640×360), and the assumption that
 each wand's cards start at slot 0 (leading empty slots would shift it).
 
+## Decisions taken 2026-06-09
+
+- **Panel is the primary feature; box overlay demoted.** `show_slot_brackets`
+  now defaults to **false** (labelled experimental in the settings menu). The
+  box overlay still works and gained: per-wand spells/cast simulation, wrap
+  coloring (orange + "~wrap" label), and real `inventory_slot.x` mapping (fixes
+  leading/interior empty slots — old next-step 3).
+- **Always-cast cards** are read via `permanently_attached` and excluded from
+  the deck sim (they also no longer corrupt slot mapping) — old next-step 4.
+- **Shuffle wands** are flagged in the panel title ("order varies!") — the
+  slot-order sim is one possible outcome.
+- `cast count > 1` (spells/cast) is now fully modeled — that *is* the cast
+  grouping feature.
+
 ## Expected next steps
 
-1. **Re-test the calibrated build** (next action): restart, open the inventory,
-   confirm brackets sit on the non-selected wand-box rows and span the right
-   slots. Expect the selected box to read ~12 GUI high (see above).
-2. **Decision point — is the box overlay worth keeping?** Calibration confirmed
-   it's fundamentally limited: the box you edit (selected) is exactly the one it
-   can't align, and it breaks with different wand counts / window sizes. Options:
-   - **Recommended:** make the **companion panel the primary feature** (it's
-     accurate and robust) and keep box brackets as an off-by-default experimental
-     extra. Consider defaulting `show_slot_brackets` to false.
-   - Try a capacity-driven height model so the selected box's extra height is
-     predicted from the wand's stats (partial fix; still can't detect selection).
-   - Drop the box overlay entirely.
-3. **Handle leading empty slots:** map brackets to each card's real
-   `inventory_slot.x`, not the sequential token index (currently assumes cards
-   start at slot 0).
-4. **Edge cases:** always-cast cards (sorted in with the rest), mod-added spells
-   (unknown → leaf, fine), shuffle wands (deck order randomizes at cast — panel
-   shows static slot order; document it), `cast count` > 1.
-5. **Polish:** connector glyphs / spacing on the panel; optional position setting.
-6. **Merge to `main`** once the feature is satisfying and stable; update the
-   top-level `README.md`.
-7. **Resolution robustness:** GUI was 640×360 here, but it can differ; if the
-   fraction model is shaky across window sizes, anchor slot geometry to absolute
-   GUI units and re-measure.
+1. **Verify in-game** (next action): restart a run, open the inventory and check
+   the panel on (a) a plain multi-`spells/cast` wand → per-cast headers group
+   the right spells, (b) THE classic rapid-fire wrap wand (e.g.
+   `[bolt, bolt, trigger]` with payload pulling past the deck end) → orange
+   "WRAPS! -> recharge" banner and "~" on wrapped-in cards, (c) a wand with an
+   always-cast → "always:" line, (d) a shuffle wand → title warning. Also
+   confirm the two new component reads (`gun_config.actions_per_round`,
+   `permanently_attached`) return what we expect.
+2. **Polish:** connector glyphs / spacing on the panel; optional position
+   setting; maybe dim spells that never fire this cycle (after a wrap).
+3. **Merge to `main`** once verified; update the top-level `README.md`
+   (it still describes the icon-recolor feature only and its "no grouping"
+   limitation no longer holds).
+4. **Resolution robustness** (only if box overlay graduates): GUI was 640×360
+   here, but it can differ; anchor slot geometry to absolute GUI units and
+   re-measure if the fraction model is shaky across window sizes.
 
 ## Caveats for whoever picks this up
 

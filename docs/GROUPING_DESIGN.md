@@ -23,6 +23,46 @@ Because draws are sequential from one stream, a wand's deck parses like a Lisp
 token stream: multicast/trigger counts introduce sub-expressions. This is fully
 derivable **statically** from each card's metadata — no need to run the engine.
 
+## Casts and wand wrapping (verified from gun.lua, 2026-06-09)
+
+The two facts the user actually builds wands around — *what fires together* and
+*when the wand wraps* — fall out of `draw_action(instant_reload_if_empty)`:
+
+- **A cast** (`_start_shot` → `_draw_actions_for_shot`) draws
+  `gun.actions_per_round` (the wand's *spells/cast*) root expressions, passing
+  `instant_reload_if_empty = false`: if the deck is empty on a root draw, the
+  cast simply ends (and the cycle reloads). **Root draws never wrap.**
+- **Every card-forced draw passes `true`**: all 203 `draw_actions(N, ...)` calls
+  in `gun_actions.lua` pass `true`, and trigger payloads use
+  `draw_shot(create_shot(N), true)`. On a forced draw with an empty deck the
+  engine calls `move_discarded_to_deck()` + `order_deck()` — **the WRAP**: cards
+  cast earlier this recharge cycle come back (sorted by `deck_index`, i.e. slot
+  order, for non-shuffle wands; shuffled otherwise) and drawing continues from
+  the wand's start. It also sets `start_reload`, so the recharge cycle ends
+  after the wrapping cast — cards after that point never fire that cycle.
+- **Chaining is decided by the card's body, not its type.** A card that calls
+  `draw_actions(1, true)` consumes itself and pulls the next card — that is what
+  "modifier" means structurally. 142/143 MODIFIERs and all 5 PASSIVEs do this,
+  but so do 13 OTHERs (ALPHA, GAMMA, DUPLICATE, …) and 11 UTILITYs (I_SHOT, …).
+  `RANDOM_MODIFIER` draws nothing → terminates a chain. `BURST_X` draws `#deck`
+  (the whole remaining deck) → recorded as `draws = -1`.
+
+`structure_meta.lua` therefore carries a `draws` field per card, and
+`wand_structure.lua` is a **deck simulator**, not just a parser:
+`M.simulate(tokens, meta, { spells_per_cast = N })` returns
+`{ casts = { { nodes, wrapped }, ... }, wrapped }`, with `wrap = true` on every
+node parsed across a wrap (the wrapping group *and* the wrapped-in cards), and
+`first`/`last` spans that reach back to the wand's start when wrapped.
+Validated by `tools/test_wand_structure.py` — a line-for-line Python mirror
+(no Lua runtime on the dev machine) with hand-traced wands: cast splitting,
+the classic trigger-at-deck-end wrap, trailing-modifier wrap, under-filled
+multicast wrap, slot-order restore on wrap, BURST_X, RANDOM_MODIFIER.
+
+**Always-cast cards** (`permanently_attached`) never sit in the deck — the
+engine plays them at the start of every cast — so the overlay reads them
+separately and excludes them from the simulation (they used to corrupt the
+slot mapping).
+
 ## Foundation (landed on this branch)
 
 - **`tools/gen_structure_meta.py`** — parses `gun_actions.lua` out of `data.wak`

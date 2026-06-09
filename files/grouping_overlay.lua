@@ -1,7 +1,9 @@
 -- Companion "wand structure" panel (Lisp/SLIME-style).
--- When the inventory is open, reads the active wand's cards in slot order,
--- parses them into a cast-structure tree (files/wand_structure.lua), and draws
--- an indented, color-coded tree of the wand's groupings beside the inventory.
+-- When the inventory is open, reads the active wand's cards in slot order plus
+-- its gun_config (spells/cast, shuffle), simulates the cast sequence
+-- (files/wand_structure.lua), and draws an indented, color-coded tree of each
+-- cast's groupings -- including when the wand WRAPS (forced draws past the
+-- deck's end pulling cards from the wand's start: the rapid-fire mechanic).
 --
 -- Loaded once from init.lua; M.update() is called every frame from
 -- OnWorldPostUpdate. All drawing uses our own Gui at coordinates we control, so
@@ -24,6 +26,8 @@ local COLOR = {
 	PASSIVE           = { 0.92, 0.58, 0.18 },
 	OTHER             = { 0.72, 0.72, 0.72 },
 }
+local HEADER_COLOR = { 0.85, 0.85, 0.85 }
+local WRAP_COLOR   = { 1.00, 0.45, 0.15 } -- loud: wrapping is the headline info
 
 local function pretty(id)
 	local s = tostring(id):gsub("_", " "):lower()
@@ -45,7 +49,7 @@ local function type_color(atype)
 	return COLOR[atype] or COLOR.OTHER
 end
 
--- ---- read the active wand and its cards ------------------------------------
+-- ---- read the active wand, its cards and its gun_config ---------------------
 
 local function get_active_wand()
 	local players = EntityGetWithTag("player_unit")
@@ -58,21 +62,40 @@ local function get_active_wand()
 	return active
 end
 
+-- spells/cast + shuffle from the wand's AbilityComponent.gun_config.
+local function read_config(wand)
+	local cfg = { spells_per_cast = 1, shuffle = false }
+	local ab = EntityGetFirstComponentIncludingDisabled(wand, "AbilityComponent")
+	if not ab then return cfg end
+	local spc = ComponentObjectGetValue2(ab, "gun_config", "actions_per_round")
+	if tonumber(spc) and tonumber(spc) > 0 then cfg.spells_per_cast = tonumber(spc) end
+	cfg.shuffle = ComponentObjectGetValue2(ab, "gun_config", "shuffle_deck_when_empty") == true
+	return cfg
+end
+
+-- Returns the deck tokens (slot order) and the always-cast ids separately:
+-- always-cast cards never sit in the deck -- the engine plays them at the
+-- start of every cast -- so they must not take part in the deck simulation.
 local function read_deck(wand)
-	local cards = {}
+	local cards, always = {}, {}
 	local children = EntityGetAllChildren(wand) or {}
 	for _, child in ipairs(children) do
 		local iac = EntityGetFirstComponentIncludingDisabled(child, "ItemActionComponent")
 		if iac then
 			local aid = ComponentGetValue2(iac, "action_id")
-			local sx, sy = 0, 0
+			local sx, sy, perm = 0, 0, false
 			local ic = EntityGetFirstComponentIncludingDisabled(child, "ItemComponent")
 			if ic then
 				local vx, vy = ComponentGetValue2(ic, "inventory_slot")
 				sx, sy = vx or 0, vy or 0
+				perm = ComponentGetValue2(ic, "permanently_attached") == true
 			end
 			if aid and aid ~= "" then
-				cards[#cards + 1] = { id = aid, x = sx, y = sy }
+				if perm then
+					always[#always + 1] = aid
+				else
+					cards[#cards + 1] = { id = aid, x = sx, y = sy }
+				end
 			end
 		end
 	end
@@ -80,12 +103,17 @@ local function read_deck(wand)
 		if a.y ~= b.y then return a.y < b.y end
 		return a.x < b.x
 	end)
-	local tokens = {}
-	for _, c in ipairs(cards) do tokens[#tokens + 1] = c.id end
-	return tokens
+	-- tokens = deck order; xs[i] = that card's real slot column, so brackets
+	-- land right even when the wand has leading/interior empty slots.
+	local tokens, xs = {}, {}
+	for _, c in ipairs(cards) do
+		tokens[#tokens + 1] = c.id
+		xs[#xs + 1] = c.x
+	end
+	return tokens, always, xs
 end
 
--- ---- flatten the tree into colored, indented display lines -----------------
+-- ---- flatten the simulation into colored, indented display lines -------------
 
 local function copy_list(t)
 	local r = {}
@@ -93,8 +121,9 @@ local function copy_list(t)
 	return r
 end
 
--- Flatten the tree into display rows. Each row carries `bars`: one color per
+-- Flatten one node into display rows. Each row carries `bars`: one color per
 -- enclosing group (the rainbow nesting spines), plus its own label + color.
+-- Nodes parsed across a wand wrap get a "~" prefix (the card came around).
 local function walk(rows, node, ancestor_colors)
 	local mods = ""
 	if node.modifiers and #node.modifiers > 0 then
@@ -106,12 +135,15 @@ local function walk(rows, node, ancestor_colors)
 	local name = display_name(node.id)
 	local label
 	if node.kind == "multicast" then
-		label = mods .. name .. "  x" .. tostring(node.group)
+		local count = (node.group == -1) and "all" or tostring(node.group)
+		label = mods .. name .. "  x" .. count
 	elseif node.kind == "trigger" then
 		label = mods .. name .. "  (trig " .. tostring(node.payload) .. ")"
 	else
 		label = mods .. name
 	end
+	if node.dangling then label = label .. "  (no projectile)" end
+	if node.wrap then label = "~ " .. label end
 
 	rows[#rows + 1] = { bars = copy_list(ancestor_colors), label = label, color = type_color(node.atype) }
 
@@ -122,13 +154,38 @@ local function walk(rows, node, ancestor_colors)
 	end
 end
 
+-- Rows for the whole simulation: per-cast headers (when there is more than one
+-- cast or a wrap), the trees, and a loud wrap/recharge banner.
+local function sim_rows(sim, cfg, always)
+	local rows = {}
+	if #always > 0 then
+		local names = {}
+		for _, id in ipairs(always) do names[#names + 1] = display_name(id) end
+		rows[#rows + 1] = { bars = {}, label = "always: " .. table.concat(names, ", "),
+			color = COLOR.PASSIVE }
+	end
+	local show_headers = (#sim.casts > 1) or sim.wrapped
+	for ci, cast in ipairs(sim.casts) do
+		if show_headers then
+			local h = "cast " .. ci
+			if cast.wrapped then h = h .. "  -- WRAPS! -> recharge" end
+			rows[#rows + 1] = { bars = {}, label = h,
+				color = cast.wrapped and WRAP_COLOR or HEADER_COLOR, header = true }
+		end
+		local spine = show_headers and { HEADER_COLOR } or {}
+		for _, node in ipairs(cast.nodes) do walk(rows, node, spine) end
+	end
+	return rows
+end
+
 -- ---- phase 2: brackets under each WAND BOX's spell row ---------------------
 --
--- EXPERIMENTAL. The engine exposes neither which wand a box shows nor where any
--- box is drawn, so the layout below is a hand-calibrated stacking model in GUI-
--- screen fractions. It WILL drift: box heights aren't uniform (the selected box
--- renders taller) and your window aspect changes the mapping. We bracket every
--- wand box (each from its own wand's cards), which sidesteps "which is selected".
+-- EXPERIMENTAL (off by default). The engine exposes neither which wand a box
+-- shows nor where any box is drawn, so the layout below is a hand-calibrated
+-- stacking model in GUI-screen fractions. It WILL drift: box heights aren't
+-- uniform (the selected box renders taller) and your window aspect changes the
+-- mapping. We bracket every wand box (each from its own wand's cards), which
+-- sidesteps "which is selected".
 local PIXEL = "mods/testMod/files/ui/pixel.png"
 -- Calibrated against GUI 640x360 (px = 2.5*GUI). Boxes 1 & 2 land dead-on;
 -- the SELECTED box renders ~12 GUI taller and its row sits ~12 lower, which we
@@ -153,23 +210,32 @@ local function line(gui, id, x, y, w, h, c, a)
 end
 
 -- Draw a bracket for every group node, under the row at `row_y`, nesting down.
-local function draw_groups(gui, nodes, sw, row_y, depth, idc)
+-- A node that wrapped spans min..max of everything it pulled in (reaching back
+-- to the wand's start), drawn in the wrap color so the wrap is unmissable.
+-- `xs` maps deck index -> real slot column (handles empty slots in the wand).
+local function draw_groups(gui, nodes, sw, row_y, depth, idc, xs)
 	for _, node in ipairs(nodes) do
 		if node.children and #node.children > 0 and node.first and node.last then
-			local a, b = node.first - 1, node.last - 1 -- 0-based slot indices
+			local a = xs[node.first] or (node.first - 1) -- 0-based slot columns
+			local b = xs[node.last] or (node.last - 1)
 			local lx = sw * BOX.slot0_x + a * sw * BOX.pitch - sw * BOX.halfw
 			local rx = sw * BOX.slot0_x + b * sw * BOX.pitch + sw * BOX.halfw
 			local yt = row_y + depth * LEVEL_GAP
-			local c = type_color(node.atype)
+			local c = node.wrap and WRAP_COLOR or type_color(node.atype)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, yt, rx - lx, 1, c)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, yt - TICK, 1, TICK + 1, c)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, yt - TICK, 1, TICK + 1, c)
-			local lbl = (node.kind == "multicast") and ("x" .. tostring(node.group))
-				or ("trig " .. tostring(node.payload))
+			local lbl
+			if node.kind == "multicast" then
+				lbl = "x" .. ((node.group == -1) and "all" or tostring(node.group))
+			else
+				lbl = "trig " .. tostring(node.payload)
+			end
+			if node.wrap then lbl = lbl .. " ~wrap" end
 			local lw = (GuiGetTextDimensions(gui, lbl))
 			GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
 			GuiText(gui, (lx + rx) / 2 - lw / 2, yt + 1, lbl)
-			draw_groups(gui, node.children, sw, row_y, depth + 1, idc)
+			draw_groups(gui, node.children, sw, row_y, depth + 1, idc, xs)
 		end
 	end
 end
@@ -194,9 +260,14 @@ local function draw_box_brackets(gui, sw, sh)
 	local idc = { n = 0 }
 	for idx, wd in ipairs(wands) do
 		local row_y = sh * BOX.top0 + (idx - 1) * sh * BOX.height + sh * BOX.row_off
-		local tokens = read_deck(wd.e)
+		local tokens, _, xs = read_deck(wd.e)
 		if #tokens > 0 then
-			draw_groups(gui, wand_structure.build(tokens, meta), sw, row_y, 0, idc)
+			local cfg = read_config(wd.e)
+			local sim = wand_structure.simulate(tokens, meta,
+				{ spells_per_cast = cfg.spells_per_cast })
+			for _, cast in ipairs(sim.casts) do
+				draw_groups(gui, cast.nodes, sw, row_y, 0, idc, xs)
+			end
 		end
 	end
 end
@@ -216,12 +287,9 @@ end
 
 -- ---- companion structure panel (phase 1) -----------------------------------
 
-local function draw_panel(gui, tree, sw)
-	local rows = {}
-	for _, node in ipairs(tree) do walk(rows, node, {}) end
+local function draw_panel(gui, rows, title, sw)
 	if #rows == 0 then return end
 
-	local title = "Wand structure"
 	local line_h = 11
 	local pad = 4
 	local bar_w = (GuiGetTextDimensions(gui, "| ")) -- horizontal advance per nesting spine
@@ -245,7 +313,9 @@ local function draw_panel(gui, tree, sw)
 	local y = y0 + line_h + 2
 	for _, r in ipairs(rows) do
 		local x = px
-		for _, bc in ipairs(r.bars) do -- rainbow nesting spines
+		local bars = r.bars
+		if r.header then bars = {} end -- headers sit flush left
+		for _, bc in ipairs(bars) do   -- rainbow nesting spines
 			GuiColorSetForNextWidget(gui, bc[1], bc[2], bc[3], 1)
 			GuiText(gui, x, y, "|")
 			x = x + bar_w
@@ -264,7 +334,7 @@ function M.update()
 
 	local get = (type(ModSettingGet) == "function") and ModSettingGet or function() return nil end
 	local show_panel = get("testMod.show_grouping") ~= false
-	local show_slots = get("testMod.show_slot_brackets") ~= false
+	local show_slots = get("testMod.show_slot_brackets") == true
 	if not show_panel and not show_slots then return end
 
 	if gui == nil then gui = GuiCreate() end
@@ -277,12 +347,22 @@ function M.update()
 		if DEBUG_RULER then draw_debug(gui, sw, sh) end
 	end
 
-	if show_panel then -- companion tree for the active/held wand
+	if show_panel then -- companion cast-structure tree for the active/held wand
 		local wand = get_active_wand()
 		if wand then
-			local tokens = read_deck(wand)
-			if #tokens > 0 then
-				draw_panel(gui, wand_structure.build(tokens, meta), sw)
+			local tokens, always = read_deck(wand)
+			if #tokens > 0 or #always > 0 then
+				local cfg = read_config(wand)
+				local sim = wand_structure.simulate(tokens, meta,
+					{ spells_per_cast = cfg.spells_per_cast })
+				-- Shuffle wands randomize draw order at cast time, so the
+				-- slot-order simulation is only one possible outcome.
+				local title = "Wand structure  (" .. cfg.spells_per_cast .. "/cast)"
+				if cfg.shuffle then
+					title = "Wand structure  (" .. cfg.spells_per_cast
+						.. "/cast, shuffle: order varies!)"
+				end
+				draw_panel(gui, sim_rows(sim, cfg, always), title, sw)
 			end
 		end
 	end

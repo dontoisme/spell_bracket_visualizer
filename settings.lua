@@ -24,15 +24,15 @@ mod_settings = {
 	{
 		id = "show_grouping",
 		ui_name = "Wand Structure Panel",
-		ui_description = "While the inventory is open, show a Lisp-style tree of the\nactive wand's cast structure (multicasts, triggers, modifiers).",
+		ui_description = "While the inventory is open, show a Lisp-style tree of the\nactive wand's cast structure: what fires together each cast\n(multicasts, triggers, modifiers) and when the wand WRAPS.",
 		value_default = true,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{
 		id = "show_slot_brackets",
-		ui_name = "Slot Brackets",
-		ui_description = "Draw grouping brackets directly under the spell slots in the\nwand UI (experimental; alignment may vary by resolution).",
-		value_default = true,
+		ui_name = "Slot Brackets (experimental)",
+		ui_description = "Also draw grouping brackets directly under the spell slots in\nthe wand UI. Alignment is hand-calibrated and drifts with\nresolution / the selected box; the panel is the reliable view.",
+		value_default = false,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 }
