@@ -17,6 +17,13 @@ mod_settings = {
 		value_default = true,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
+	{
+		id = "debug_boxes",
+		ui_name = "Calibration Overlay (debug)",
+		ui_description = "Draw the computed slot-row lines and wand-sprite reads over\nthe wand boxes. Turn on + screenshot if brackets ever\nmisalign, to recalibrate the geometry.",
+		value_default = false,
+		scope = MOD_SETTING_SCOPE_RUNTIME,
+	},
 }
 
 function ModSettingsUpdate( init_scope )

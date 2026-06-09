@@ -215,18 +215,22 @@ end
 local PIXEL = "mods/testMod/files/ui/pixel.png"
 -- The wand boxes are laid out in engine-UI units (5 screen px each at
 -- 2000x1125 = 0.0025 of GUI width; slots are 13u pitch / 12u frames). Box
--- HEIGHT is per-wand: 16u + 2u per pixel of the wand sprite's height (wand
--- art is 3..17 px tall; the engine reserves 2 units per art px). Selection
--- contributes NOTHING -- the old "selected box is taller" theory was a tall
--- wand sprite in disguise, which is why brackets used to jump when selecting
--- another wand or a potion. Fits all boxes of the 4-wand screenshots +-1u.
+-- HEIGHT is per-wand with a FLOOR: max(37u, 14u + 2u per wand-sprite pixel).
+-- Small wands (art <= 11 px) all get the 37u minimum -- which both explains
+-- why most boxes look uniform and absorbs sprite-read error for them; only
+-- tall art (13/15/17 px) grows the box. Selection contributes NOTHING (the
+-- old "selected box is taller" theory was a tall wand sprite in disguise).
+-- Calibrated against the circled 4-wand screenshot, all rows within 1u.
+-- If rows drift again: flip the "Calibration Overlay" mod setting, take one
+-- screenshot -- it shows computed rows + raw sprite reads to recalibrate.
 local U = 0.0025 -- one engine-UI unit, as a fraction of GUI width
 local BOX = {
 	top0    = 30,     -- units: top of wand box 1
-	h_pad   = 16,     -- units: box height = h_pad + s_scale * sprite_h
+	min_h   = 37,     -- units: minimum box height (floor)
+	h_pad   = 14,     -- units: box height = max(min_h, h_pad + s_scale * sprite_h)
 	s_scale = 2,      -- units of box height per wand-sprite pixel
 	gap     = 2,      -- units between consecutive boxes
-	row_off = 4,      -- units: slot-row bottom sits this far above the box bottom
+	row_off = 2,      -- units: slot-row bottom sits this far above the box bottom
 	slot_h  = 12,     -- units: card frame height
 	slot0_x = 0.056,  -- first slot CENTER, fraction of GUI width (22.4u)
 	pitch   = 0.0325, -- slot-to-slot spacing, fraction of width (13u)
@@ -312,17 +316,20 @@ local function draw_delims(gui, groups, sw, top, bot, idc)
 end
 
 -- Read the height of this wand's art in px (pcall-guarded; vanilla wand art
--- is 3..17 px tall, 9 is a common middle; cap guards against odd mod art).
+-- is 3..17 px tall; cap guards against odd mod art). Also returns the file
+-- for the calibration overlay. A failed read returns 9: small wands hit the
+-- min_h floor anyway, so only tall-art wands need an accurate read.
 local function wand_sprite_h(gui, wand)
 	local sc = EntityGetFirstComponentIncludingDisabled(wand, "SpriteComponent")
 	if sc then
 		local ok, f = pcall(ComponentGetValue2, sc, "image_file")
 		if ok and type(f) == "string" and f ~= "" then
 			local ok2, _, h = pcall(GuiGetImageDimensions, gui, f, 1)
-			if ok2 and tonumber(h) and h > 0 and h < 30 then return h end
+			if ok2 and tonumber(h) and h > 0 and h < 30 then return h, f end
+			return 9, f
 		end
 	end
-	return 9
+	return 9, "?"
 end
 
 -- Enumerate carried wands (in quick-slot order) and delimit each one's box row.
@@ -342,12 +349,28 @@ local function draw_box_brackets(gui, sw, sh)
 	end
 	table.sort(wands, function(p, q) return p.slot < q.slot end)
 
+	local debug_boxes = type(ModSettingGet) == "function"
+		and ModSettingGet("testMod.debug_boxes") == true
+
 	local idc = { n = 0 }
 	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
-	for _, wd in ipairs(wands) do
-		local box_h = BOX.h_pad + BOX.s_scale * wand_sprite_h(gui, wd.e)
+	for i, wd in ipairs(wands) do
+		local s, sfile = wand_sprite_h(gui, wd.e)
+		local box_h = math.max(BOX.min_h, BOX.h_pad + BOX.s_scale * s)
 		local bot = (box_top + box_h - BOX.row_off) * U * sw
 		local top = bot - BOX.slot_h * U * sw
+
+		if debug_boxes then
+			-- computed slot-row top (green) / bottom (red) + the raw inputs,
+			-- so one screenshot carries everything needed to recalibrate
+			local w = sw * 0.35
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, top, w, 1, { 0.2, 1, 0.2 }, 0.8)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, bot, w, 1, { 1, 0.2, 0.2 }, 0.8)
+			GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
+			GuiText(gui, w + 4, bot - 10, string.format("#%d s=%d H=%d top=%d %s",
+				i, s, box_h, box_top, tostring(sfile):gsub(".*/", "")))
+		end
+
 		box_top = box_top + box_h + BOX.gap
 
 		local tokens, _, xs = read_deck(wd.e)
@@ -361,6 +384,12 @@ local function draw_box_brackets(gui, sw, sh)
 			end
 			draw_delims(gui, groups, sw, top, bot, idc)
 		end
+	end
+
+	if debug_boxes then
+		GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
+		GuiText(gui, 4, 2, "GUI " .. math.floor(sw + 0.5) .. "x" .. math.floor(sh + 0.5)
+			.. "  unit=" .. string.format("%.2f", U * sw))
 	end
 end
 
