@@ -13,12 +13,15 @@ Two views, both live while the inventory is open:
    one cast per section, rainbow nesting spines by depth, spell names colored
    by action type. Wrapping casts get a loud orange `WRAPS! -> recharge`
    banner and wrapped-in cards are marked `~`.
-2. **Slot brackets** (in the wand UI itself): thin rainbow strips on the edge
-   of each group's first and last card — SLIME rainbow parens, color cycling
-   by nesting depth. Closing strips that share a card fan out rightward, half
-   a GUI unit each, innermost first. Leading modifiers sit *outside* the
-   group's strips, matching Lisp notation. The group's `x2` / `trig N` label
-   sits above its opening strip; wrap groups override to orange.
+2. **Slot brackets** (in the wand UI itself): `[ ]` bracket glyphs hugging
+   each group's first and last card — SLIME rainbow parens, color cycling by
+   nesting depth, with the group's `x2` / `trig N` label above the opening
+   bracket. Leading modifiers sit *outside* the brackets, matching Lisp
+   notation; closes that share a card nest within it, outermost on the edge
+   with its hooks wrapping the inner ones. **Orange marks the wrap**: the
+   group the wrap happened in gets an orange `~wrap` tag, orange brackets
+   around the wrapped-in cards at the wand's start, and a carriage-return
+   line under the row connecting the two — "the draw continues here".
 
 ## How it works
 
@@ -31,15 +34,19 @@ the recharge cycle. Always-cast spells are listed separately (they join every
 cast). Shuffle wands get an "order varies!" warning — the simulation shows
 the slot-order outcome, one possible draw order of many.
 
-The engine renders the inventory itself (no Lua hook exposes slot positions),
-so the panel draws on its own Gui at safe coordinates, while the slot brackets
-use a hand-calibrated model of the wand-box layout — including detecting the
-selected (taller) box via the held wand.
+The engine renders the inventory itself (no Lua hook exposes slot or box
+positions), so the panel draws on its own Gui at safe coordinates, while the
+slot brackets use a calibrated model of the wand-box layout: boxes stack with
+per-wand heights of `max(37, 14 + 2 × sprite px)` engine units (each wand's
+art height is read at runtime), so brackets stay put across wand pickups,
+reordering, and selection changes.
 
 ## Settings (in the in-game mod settings menu)
 
 - **Wand Structure Panel** — on/off (runtime; applies immediately).
 - **Slot Brackets** — the in-UI rainbow brackets (runtime; on by default).
+- **Calibration Overlay (debug)** — draws the computed slot-row lines and
+  per-wand sprite reads; turn on + screenshot if brackets ever misalign.
 
 ## Project layout
 
@@ -88,5 +95,7 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
   (or skips a depleted spell) may differ from the simulation.
 - Shuffle wands: the panel shows the slot-order outcome with a warning; the
   real draw order randomizes each cycle.
-- The slot brackets' geometry is hand-calibrated against GUI 640×360; other
-  window aspects may drift — the panel is the reliable view.
+- The slot brackets' geometry is calibrated at GUI 640×360 (constants scale as
+  fractions of GUI width, so other sizes should track) — if brackets ever
+  misalign, flip **Calibration Overlay** and screenshot to recalibrate; the
+  panel is always reliable regardless.

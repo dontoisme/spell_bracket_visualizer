@@ -45,13 +45,20 @@ the wand boxes or slots. Consequences:
 
 - The companion panel (`files/grouping_overlay.lua`, driven every frame from
   `OnWorldPostUpdate`) draws with its own `GuiCreate()` at coordinates it fully
-  controls — always correct, resolution-proof. It is the primary feature.
-- The in-UI "slot brackets" (`draw_delims`/`BOX` table) overlay rainbow strips on
-  a **hand-calibrated model** of the wand-box layout (GUI-fraction constants,
-  calibrated from screenshots at GUI 640×360). The selected box renders taller
-  and shifts everything below it — detectable because the selected box is the
-  held wand (`Inventory2Component.mActiveItem`). Other resolutions may still
-  drift; treat the geometry as best-effort and recalibrate from screenshots.
+  controls — always correct, resolution-proof.
+- The in-UI "slot brackets" (`collect_delims`/`draw_delims`/`BOX` table) overlay
+  rainbow `[ ]` glyphs on a **calibrated model** of the wand-box layout, in
+  engine-UI units (1u = 0.0025·GUI width). Boxes stack with per-wand heights
+  `max(37u, 14u + 2u·sprite px)` — each wand's art height is read at runtime
+  (`SpriteComponent.image_file` → `GuiGetImageDimensions`). Selection changes
+  NOTHING (two earlier "selected box is taller" theories were a tall wand
+  sprite in disguise — see docs/STATUS.md). Wrapping is drawn as an orange
+  carriage-return line from the forward close back to orange brackets around
+  the wrapped-in cards, emitted only by the innermost wrapping group; group
+  brackets always keep their rainbow depth color. Drawn at z = -10 (lower z =
+  front) to beat the engine's spell-frame layer. If geometry drifts, the
+  "Calibration Overlay" mod setting draws computed rows + sprite reads for
+  recalibration from one screenshot.
 - (The retired icon-recolor worked around the same constraint by swapping each
   spell's `action.sprite` via `ModLuaFileAppend` onto `gun_actions.lua` — see
   git history if reviving.)

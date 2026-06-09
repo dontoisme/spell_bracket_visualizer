@@ -19,9 +19,9 @@ A wand-readability mod with two features:
 
 ## Where the code lives
 
-- Repo: `…/Noita/mods/testMod` (git). Branch `grouping-brackets` was **merged
-  to `main` 2026-06-09** after in-game verification — `main` now has both
-  features (icon recolor + grouping panel).
+- Repo: `…/Noita/mods/testMod` (git). Everything lives on **`main`**; the
+  `grouping-brackets` branch was merged 2026-06-09 and deleted after the
+  feature shipped. (The icon recolor was later retired; see below.)
 
 ## Feature 1 — icon recolor (RETIRED; history below)
 
@@ -33,7 +33,7 @@ A wand-readability mod with two features:
 - Settings: **Colored Brackets** on/off, **Bracket Style** corners/frame.
 - ✅ Verified in-game: borders render correctly, both settings work.
 
-## Feature 2 — grouping brackets (IN PROGRESS)
+## Feature 2 — grouping brackets (✅ SHIPPED, user-approved 2026-06-09)
 
 ### Solid foundation (verified)
 
@@ -53,16 +53,21 @@ A wand-readability mod with two features:
   name (422 actions).
 - `files/wand_structure.lua`: pure **deck simulator** —
   `simulate(tokens, meta, {spells_per_cast=N})` → per-cast trees with
-  `wrapped`/`wrap` flags and slot spans. `build()` kept as the one-cast wrapper.
-- `tools/test_wand_structure.py`: Python mirror + 12 hand-traced tests
-  (cast splits, trigger/modifier/multicast wraps, slot-order restore, …). All
-  pass. **Keep the mirror in sync when editing wand_structure.lua.**
-- Runtime reads confirmed working: `GameIsInventoryOpen()`, active wand via
-  `Inventory2Component.mActiveItem`, cards via `ItemActionComponent.action_id`
-  ordered by `ItemComponent.inventory_slot`. New reads (need in-game check):
-  `AbilityComponent.gun_config` → `actions_per_round` / `shuffle_deck_when_empty`
-  via `ComponentObjectGetValue2`, `ItemComponent.permanently_attached`
-  (always-cast detection).
+  `wrapped`/`wrap` flags, slot spans (`first`/`last`/`head`), and the
+  wrapped-in span (`wfirst`/`wlast` = cards drawn after the wrap, tagged at
+  draw time). `build()` kept as the one-cast wrapper.
+- `tools/test_wand_structure.py`: Python mirror + 14 hand-traced tests
+  (cast splits, trigger/modifier/multicast wraps, slot-order restore,
+  head/modifier-prefix spans, wrapped spans). All pass. **Keep the mirror in
+  sync when editing wand_structure.lua.**
+- Runtime reads confirmed working in-game: `GameIsInventoryOpen()`, active
+  wand via `Inventory2Component.mActiveItem`, cards via
+  `ItemActionComponent.action_id` ordered by `ItemComponent.inventory_slot`,
+  `AbilityComponent.gun_config` → `actions_per_round` /
+  `shuffle_deck_when_empty` via `ComponentObjectGetValue2`,
+  `SpriteComponent.image_file` + `GuiGetImageDimensions` (box geometry).
+  Still unobserved (pcall-guarded, fails soft):
+  `ItemComponent.permanently_attached` (always-cast detection).
 
 ### Companion panel (✅ VERIFIED in-game, casts + wrapping included)
 
@@ -82,13 +87,20 @@ A wand-readability mod with two features:
   fix). Not yet observed in-game: the "always:" line (no always-cast wand on
   hand; the read is pcall-guarded and fails soft).
 
-### Slot brackets — final form (v5, user-approved 2026-06-09)
+### Slot brackets — final form (shipped, user-approved 2026-06-09)
 
-Iterated v2→v5 against in-game screenshots + a user mockup. Final design:
+Iterated v1→final against in-game screenshots + user mockups. Final design:
 
 - **[ ] glyphs** (1-GUI bar + 3-GUI hooks pointing into the group), card-frame
-  height, SLIME **rainbow by nesting depth** (`RAINBOW`/`nest_color`); wrap
-  groups override to orange. Label (`x2`/`trig N`) above the opening bracket.
+  height, SLIME **rainbow by nesting depth** (`RAINBOW`/`nest_color`) — groups
+  ALWAYS keep their rainbow color. Label (`x2`/`trig N`) above the opening
+  bracket in the group color.
+- **Orange = the wrap, exclusively.** The innermost group a wrap happened in
+  (deepest node with a wrapped span; ancestors inherit `wfirst` but don't
+  redraw) gets, in `WRAP_COLOR`: an appended `~wrap` tag, `[ ]` around the
+  wrapped-in segment at the wand's start, and a **carriage-return line** that
+  drops below the forward close, runs left under the row, and rises into the
+  wrapped segment — "the draw continues here".
 - Open `[` sits 1 GUI left of the group's own card (`OPEN_NUDGE`), over the
   slot's left edge. **Leading modifiers sit outside the parens** (span starts
   at `node.head`, not `node.first`), matching the panel's `[mods] name` text.
@@ -98,18 +110,28 @@ Iterated v2→v5 against in-game screenshots + a user mockup. Final design:
   card art — reads inner→outer left-to-right, contained within the card.
 - Drawn at **z = -10**: in front of the engine's spell-frame layer ("lower z
   = front"; z 1 lost to the frames).
-- User: "This look super good."
+- On by default (`show_slot_brackets`, RUNTIME scope).
 
-**Geometry v6 (2026-06-09, after a 4th wand broke v5):** the "selected box is
-taller" theory was WRONG — box height is per-wand: `29u + sprite height`
-(engine-UI units, 1u = 0.0025·GUI width = 5 screen px at 2000×1125; slots are
-13u pitch / 12u frames; slot row sits 5u above the next box top, first box
-top at 30u). The tall purple wand's sprite caused the extra height v5
-attributed to selection — which is why brackets jumped when selecting another
-wand or a potion, and drifted when a new wand was added. Sprite height is
-read at runtime via `SpriteComponent.image_file` + `GuiGetImageDimensions`
-(pcall, fallback 12). Boxes accumulate: `top += 29 + sprite_h`. Selection
-contributes NOTHING. Model validated ±2u against two 4-wand screenshots.
+### Box geometry — final model (v8)
+
+In engine-UI units (1u = 0.0025·GUI width = 5 screen px at 2000×1125; slots
+are 13u pitch / 12u frames, first slot center 22.4u):
+
+- Boxes stack from `top0 = 30u`; box height = `max(37u, 14u + 2u·sprite_px)`
+  — a 37u FLOOR that most wands hit (art ≤ 11px), only tall art (13/15/17px)
+  grows the box. Sprite height read at runtime (`SpriteComponent.image_file`
+  → `GuiGetImageDimensions`, pcall, fallback 9 — the floor absorbs read error
+  for small wands). 2u gap between boxes; slot-row bottom `row_off = 3u`
+  above the box bottom (user-tuned in-game; screenshots said 2).
+- **Selection contributes NOTHING.** Two earlier theories died here: v2-v5's
+  "selected box is taller" and v6/v7's pure sprite scaling — the tall purple
+  wand's sprite was behind both. Symptoms of the wrong models: brackets
+  jumped when selecting another wand or a potion, drifted when a new wand was
+  picked up. Vanilla wand art is 3..17px tall (verified across all 1016 pngs
+  in data.wak), which pinned the 2u-per-px slope and the floor.
+- **Calibration Overlay (debug)** mod setting: draws computed row lines + raw
+  per-wand sprite reads; any future drift is one screenshot from an exact
+  recalibration.
 
 ### Slot brackets v2 history — paren-style delimiters (superseded)
 
@@ -181,27 +203,31 @@ each wand's cards start at slot 0 (leading empty slots would shift it).
 
 ## Expected next steps
 
-1. ~~Verify in-game~~ ✅ done 2026-06-09 (see panel section above). Casts,
-   wrap banner, shuffle warning, gun_config reads and slot-x mapping all
-   confirmed against a real wrap wand. Outstanding small checks: the
-   "always:" line (need an always-cast wand) and a multi-`spells/cast` wand's
-   per-cast headers (only 1/cast wands were on hand).
-2. **Merge to `main`** + update the top-level `README.md` (its "no grouping"
-   limitation no longer holds).
-3. **Polish (later):** connector glyphs / spacing on the panel; optional
+The feature shipped 2026-06-09: verified in-game across many iterations
+(casts, wrap banner + carriage-return line, shuffle warning, gun_config
+reads, slot-x mapping, the v8 box geometry, orange-wrap/rainbow-group split).
+Remaining nice-to-haves, none blocking:
+
+1. **Small unobserved cases:** the panel's "always:" line (need an always-cast
+   wand in hand) and a multi-`spells/cast` wand's per-cast headers (only
+   1/cast wands have come up so far).
+2. **Polish (later):** connector glyphs / spacing on the panel; optional
    position setting; maybe dim spells that never fire this cycle (after a
-   wrap).
-4. **Resolution robustness** (only if box overlay graduates): GUI was 640×360
-   here, but it can differ; anchor slot geometry to absolute GUI units and
-   re-measure if the fraction model is shaky across window sizes.
+   wrap); inset the wrap return line per depth if a busy layout ever overlaps.
+3. **Resolution robustness:** geometry is calibrated at one window size
+   (2000×1125, GUI 640×360). All constants are fractions of GUI width, so
+   other sizes should scale — but if brackets drift on a different setup,
+   flip the **Calibration Overlay** setting and screenshot.
 
 ## Caveats for whoever picks this up
 
 - No Lua runtime on the dev machine → Lua is checked with a structural balance
-  script, not executed. Verify in-game.
+  script, not executed. Mod Lua reloads only on run load (quit → Continue).
+  Verify in-game; the user's screenshots are the verification channel.
 - `data.wak` can't be unpacked via `noita.exe -wizard_unpak` from WSL; the tools
   read it directly (format: 16-byte header, then `(u32 offset, u32 size,
   u32 path_len, path)` entries).
-- Generated assets (`files/icons/`, `files/structure_meta.lua`,
-  `files/known_ids.lua`) are committed; regenerate with the `tools/` scripts
-  after a game update.
+- `files/structure_meta.lua` is committed and generated; re-run
+  `tools/gen_structure_meta.py` after a game update.
+- When editing `files/wand_structure.lua`, keep the Python mirror in
+  `tools/test_wand_structure.py` in sync and run it.

@@ -4,10 +4,10 @@
 which cards a multicast gathers, and what a trigger's payload is — as nested
 brackets, the way SLIME shows Lisp expression structure.
 
-Branch: `grouping-brackets`. Status: **done and verified in-game 2026-06-09** —
-companion panel with cast grouping + wrap detection confirmed against a real
-wrap wand (decision below = hybrid C: panel primary, native overlay optional,
-off by default).
+Status: **shipped on `main` 2026-06-09** (the `grouping-brackets` branch was
+merged and deleted) — companion panel with cast grouping + wrap detection,
+plus the in-UI rainbow slot brackets with the orange wrap carriage-return
+line. Both on by default. See `STATUS.md` for the full iteration history.
 
 ## How Noita actually builds a shot (verified from data.wak)
 
@@ -52,8 +52,12 @@ The two facts the user actually builds wands around — *what fires together* an
 `wand_structure.lua` is a **deck simulator**, not just a parser:
 `M.simulate(tokens, meta, { spells_per_cast = N })` returns
 `{ casts = { { nodes, wrapped }, ... }, wrapped }`, with `wrap = true` on every
-node parsed across a wrap (the wrapping group *and* the wrapped-in cards), and
-`first`/`last` spans that reach back to the wand's start when wrapped.
+node parsed across a wrap (the wrapping group *and* the wrapped-in cards),
+`first`/`last` spans that reach back to the wand's start when wrapped,
+`head` = the node's own card (the span excluding its leading-modifier prefix —
+Lisp-wise modifiers sit outside the parens), and `wfirst`/`wlast` = the span
+of cards drawn *after* the wrap (tagged at draw time), which renderers use to
+show forward-segment + carriage-return + wrapped-segment.
 Validated by `tools/test_wand_structure.py` — a line-for-line Python mirror
 (no Lua runtime on the dev machine) with hand-traced wands: cast splitting,
 the classic trigger-at-deck-end wrap, trailing-modifier wrap, under-filled
