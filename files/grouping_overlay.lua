@@ -222,9 +222,9 @@ local BOX = {
 	pitch     = 0.0325, -- slot-to-slot spacing, fraction of width (~21 GUI)
 	-- half width of the spell FRAME, not the slot pitch: the frame graphic is
 	-- ~60px of the 65px pitch, so delimiters hug the spell instead of the gap.
-	halfw     = 0.0148,
+	halfw     = 0.015,
 }
-local NEST_GAP = 3        -- px between delimiters stacked at the same column
+local DELIM_GAP = 0.5     -- GUI px between the card frame and its delimiter
 local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
@@ -234,26 +234,26 @@ local function line(gui, id, x, y, w, h, c, a)
 end
 
 -- Draw [ ] delimiters for one group: a vertical bar with two small ticks
--- pointing into the group, slot height, snug against the boundary cards.
+-- pointing into the group, slot height, 1px off the boundary cards' frames.
 -- The span starts at the group's OWN card (node.head): leading modifiers sit
 -- outside the parens, Lisp-style, matching the panel's "[mods] name" layout.
 -- Color cycles through RAINBOW by nesting depth (SLIME rainbow parens).
--- `opens`/`closes` count delimiters already placed per column so nested
--- delimiters at the same card nudge outward instead of overlapping. The
--- close is placed AFTER recursing so a parent's ] lands outside its kids'.
+-- Coincident delimiters (a parent closing where its last child closes) stack
+-- at the SAME spot with no offset: children draw first, so the outer group's
+-- color lands on top and the rainbow tells you which level you're seeing.
 -- `xs` maps deck index -> real slot column (handles empty slots in the wand).
-local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs, opens, closes)
+local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs)
 	for _, node in ipairs(nodes) do
 		if node.children and #node.children > 0 and node.last then
+			draw_delims(gui, node.children, sw, top, bot, depth + 1, idc, xs)
+
 			local head = node.head or node.first
 			local ca = xs[head] or (head - 1) -- 0-based slot columns
 			local cb = xs[node.last] or (node.last - 1)
 			local c = node.wrap and WRAP_COLOR or nest_color(depth)
 			local h = bot - top
 
-			local off_a = opens[ca] or 0
-			opens[ca] = off_a + 1
-			local lx = sw * (BOX.slot0_x + ca * BOX.pitch - BOX.halfw) - 1 - off_a * NEST_GAP
+			local lx = sw * (BOX.slot0_x + ca * BOX.pitch - BOX.halfw) - DELIM_GAP - 1
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, top, 1, h, c)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, top, 3, 1, c)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, lx, bot - 1, 3, 1, c)
@@ -268,11 +268,7 @@ local function draw_delims(gui, nodes, sw, top, bot, depth, idc, xs, opens, clos
 			GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
 			GuiText(gui, lx, top - 9, lbl)
 
-			draw_delims(gui, node.children, sw, top, bot, depth + 1, idc, xs, opens, closes)
-
-			local off_b = closes[cb] or 0
-			closes[cb] = off_b + 1
-			local rx = sw * (BOX.slot0_x + cb * BOX.pitch + BOX.halfw) + 1 + off_b * NEST_GAP
+			local rx = sw * (BOX.slot0_x + cb * BOX.pitch + BOX.halfw) + DELIM_GAP
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, top, 1, h, c)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx - 2, top, 3, 1, c)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx - 2, bot - 1, 3, 1, c)
@@ -319,7 +315,7 @@ local function draw_box_brackets(gui, sw, sh)
 			local sim = wand_structure.simulate(tokens, meta,
 				{ spells_per_cast = cfg.spells_per_cast })
 			for _, cast in ipairs(sim.casts) do
-				draw_delims(gui, cast.nodes, sw, top, bot, 0, idc, xs, {}, {})
+				draw_delims(gui, cast.nodes, sw, top, bot, 0, idc, xs)
 			end
 		end
 	end
