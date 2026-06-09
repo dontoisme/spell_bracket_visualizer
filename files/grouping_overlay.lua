@@ -417,9 +417,12 @@ function M.update()
 	local sw, sh = GuiGetScreenDimensions(gui)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
-		GuiZSet(gui, 1)
+		-- strongly negative z = "bring to front": lower z draws on top, and
+		-- this must beat the engine's spell-frame layer, not just our own gui
+		GuiZSet(gui, -10)
 		draw_box_brackets(gui, sw, sh)
 		if DEBUG_RULER then draw_debug(gui, sw, sh) end
+		GuiZSet(gui, 1)
 	end
 
 	if show_panel then -- companion cast-structure tree for the active/held wand
