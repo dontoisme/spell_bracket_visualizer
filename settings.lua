@@ -20,7 +20,7 @@ mod_settings = {
 	{
 		id = "debug_boxes",
 		ui_name = "Calibration Overlay (debug)",
-		ui_description = "GUI rulers, computed rows/columns, live constants.\nMIDDLE-CLICK: log the exact point under the cursor.\nRIGHT-CLICK: drop a labeled vertical plumb line to align\nagainst slot edges. Turn on + screenshot to recalibrate.",
+		ui_description = "GUI rulers, computed rows/columns, live constants.\nMIDDLE-CLICK: log the exact point under the cursor.\nRIGHT-CLICK: vertical plumb line. SHIFT+RIGHT-CLICK:\nhorizontal plumb line. Turn on + screenshot to recalibrate.",
 		value_default = false,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},

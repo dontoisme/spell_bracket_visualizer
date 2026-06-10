@@ -394,8 +394,11 @@ end
 --  * RIGHT-CLICK plumb lines: drops a full-height vertical line at the
 --    cursor's x, labeled with the GUI x -- align it against slot edges
 --    across every box at once to read pitch/origin directly (last 8)
+--  * SHIFT+RIGHT-CLICK: horizontal plumb line at the cursor's y, labeled
+--    -- align against slot-row tops/bottoms across boxes (last 8)
 local probes = {}
 local vlines = {}
+local hlines = {}
 
 local function draw_calibration_hud(gui, sw, sh, idc)
 	-- rulers
@@ -450,8 +453,19 @@ local function draw_calibration_hud(gui, sw, sh, idc)
 			end
 			local okv, vdown = pcall(InputIsMouseButtonJustDown, 2) -- right
 			if okv and vdown then
-				vlines[#vlines + 1] = { mx, cx }
-				if #vlines > 8 then table.remove(vlines, 1) end
+				local shift = false
+				if type(InputIsKeyDown) == "function" then
+					local oks, s1 = pcall(InputIsKeyDown, 225) -- Key_LSHIFT
+					local oks2, s2 = pcall(InputIsKeyDown, 229) -- Key_RSHIFT
+					shift = (oks and s1) or (oks2 and s2) or false
+				end
+				if shift then
+					hlines[#hlines + 1] = { my, cy }
+					if #hlines > 8 then table.remove(hlines, 1) end
+				else
+					vlines[#vlines + 1] = { mx, cx }
+					if #vlines > 8 then table.remove(vlines, 1) end
+				end
 			end
 		end
 	end
@@ -462,6 +476,12 @@ local function draw_calibration_hud(gui, sw, sh, idc)
 		idc.n = idc.n + 1; line(gui, 70000 + idc.n, v[2], 0, 1, sh, { 0.4, 1, 1 }, 0.9)
 		GuiColorSetForNextWidget(gui, 0.4, 1, 1, 1)
 		GuiText(gui, v[2] + 2, 20 + (vi % 4) * 10, string.format("x=%.1f", v[2]))
+	end
+	-- horizontal plumb lines (shift+right-click), GUI y labeled
+	for hi, h in ipairs(hlines) do
+		idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, h[2], sw, 1, { 1, 0.8, 0.3 }, 0.9)
+		GuiColorSetForNextWidget(gui, 1, 0.8, 0.3, 1)
+		GuiText(gui, sw - 60 - (hi % 4) * 50, h[2] + 1, string.format("y=%.1f", h[2]))
 	end
 	for pi, p in ipairs(probes) do
 		say(string.format("probe %d: raw=(%.0f,%.0f) gui=(%.1f,%.1f)", pi, p[1], p[2], p[3], p[4]))
