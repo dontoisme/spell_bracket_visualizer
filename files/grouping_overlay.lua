@@ -228,12 +228,14 @@ local PIXEL = "mods/testMod/files/ui/pixel.png"
 local U = 0.0025 -- one engine-UI unit, as a fraction of GUI width
 local BOX = {
 	top0    = 30,     -- units: top of wand box 1
-	min_h   = 37,     -- units: minimum box height (floor)
+	-- min_h/row_off refit 2026-06-09 from 4-box corner probes: the per-box
+	-- step is 61.6 GUI (38.5u), not 62.4 -- the old values accumulated ~1.5u
+	-- of downward drift by box 4. Fractional units are fine (float math).
+	min_h   = 36.5,   -- units: minimum box height (floor)
 	h_pad   = 14,     -- units: box height = max(min_h, h_pad + s_scale * sprite_h)
 	s_scale = 2,      -- units of box height per wand-sprite pixel
 	gap     = 2,      -- units between consecutive boxes
-	row_off = 3,      -- units: slot-row bottom sits this far above the box bottom
-	                  -- (user-tuned in-game; the screenshot fits said 2)
+	row_off = 2.5,    -- units: slot-row bottom sits this far above the box bottom
 	slot_h  = 12,     -- units: card frame height
 	-- Horizontal: the slot grid is 16 art-px cells at 4x = 64 screen px pitch
 	-- (0.032 of width), frames 60px with ~2px inset, first cell at 80px. The
@@ -446,6 +448,12 @@ local function draw_calibration_hud(gui, sw, sh, idc)
 	end
 	for pi, p in ipairs(probes) do
 		say(string.format("probe %d: raw=(%.0f,%.0f) gui=(%.1f,%.1f)", pi, p[1], p[2], p[3], p[4]))
+		-- persistent marker AT the probed point, so the screenshot shows
+		-- exactly where each probe landed relative to the intended corner
+		idc.n = idc.n + 1; line(gui, 70000 + idc.n, p[3] - 3, p[4], 7, 1, { 1, 1, 0.2 }, 1)
+		idc.n = idc.n + 1; line(gui, 70000 + idc.n, p[3], p[4] - 3, 1, 7, { 1, 1, 0.2 }, 1)
+		GuiColorSetForNextWidget(gui, 1, 1, 0.2, 1)
+		GuiText(gui, p[3] + 3, p[4] + 2, tostring(pi))
 	end
 end
 
