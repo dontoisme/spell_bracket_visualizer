@@ -243,10 +243,14 @@ local BOX = {
 	slot0_x = 0.055,  -- first slot CENTER, fraction of GUI width (110px)
 	pitch   = 0.032,  -- slot-to-slot spacing, fraction of width (64px)
 	halfw   = 0.015,  -- half width of the card FRAME, fraction of width
-	-- Multi-row: big wands (capacity up to 26+) wrap the slot row.
-	-- UNVERIFIED GUESSES pending a capacity-26 calibration screenshot:
-	per_row  = 16,    -- slots per displayed row before wrapping
-	row_step = 13,    -- units: vertical step between slot rows
+	-- Multi-row: the machinery below supports wands whose slot row wraps,
+	-- but a capacity-26 wand renders as ONE long row at 2000x1125 (user
+	-- observation) -- so wrapping is either resolution-dependent or doesn't
+	-- happen. per_row=99 disables it until someone actually sees a second
+	-- row; if that day comes, set per_row to the observed wrap column and
+	-- calibrate row_step from the overlay.
+	per_row  = 99,    -- slots per displayed row before wrapping (99 = off)
+	row_step = 13,    -- units: vertical step between slot rows (unverified)
 }
 local BAR_W   = 1   -- GUI width of a bracket's vertical bar
 local TICK_W  = 3   -- GUI length of the top/bottom hooks
