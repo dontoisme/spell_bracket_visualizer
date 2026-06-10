@@ -112,7 +112,26 @@ Iterated v1→final against in-game screenshots + user mockups. Final design:
   = front"; z 1 lost to the frames).
 - On by default (`show_slot_brackets`, RUNTIME scope).
 
-### Box geometry — final model (v8)
+### Box geometry — PROBE-CALIBRATED final values (v9, 2026-06-09)
+
+Supersedes the v8 numbers below. After the calibration HUD gained click
+probes and plumb lines (middle-click = point, right-click = vertical line,
+shift+right-click = horizontal line), every constant was measured in-game
+rather than estimated from screenshots:
+
+- **Horizontal** (8 vertical plumbs, columns 0–25, fit ±0.15 GUI): the slot
+  grid is laid out in **GUI units** — pitch exactly **20.0 GUI**, col-0 frame
+  left edge **26.0 GUI**, visible frame **17.5 GUI wide**. (The 65px → 64px
+  "art-pixel cell" theories and the "wide boxes compress" hypothesis all
+  died here; one pitch fits a capacity-26 box end to end.)
+- **Vertical** (corner probes + 8 horizontal plumbs, fit ±0.7 GUI): row tops
+  at **83.0 + 61.6·(box−1) GUI** for floor-height boxes; frames are
+  **SQUARE, 17.5×17.5 GUI**. In code (5px units): min_h=36.5, gap=2,
+  row_off=3.7, slot_h=10.94; sprite term unchanged (only tall art grows it).
+- **Mouse**: `InputGetMousePosOnScreen` returns 1280×720 virtual-screen
+  coords = exactly **2× GUI**.
+
+### Box geometry — v8 history (superseded)
 
 In engine-UI units (1u = 0.0025·GUI width = 5 screen px at 2000×1125; slots
 are 13u pitch / 12u frames, first slot center 22.4u):
