@@ -391,7 +391,11 @@ end
 --    crosshair sits under your cursor, the conversion is right
 --  * MIDDLE-CLICK probe recorder: hover a landmark (e.g. a card's exact
 --    corner), middle-click, and the point is logged on screen (last 8)
+--  * RIGHT-CLICK plumb lines: drops a full-height vertical line at the
+--    cursor's x, labeled with the GUI x -- align it against slot edges
+--    across every box at once to read pitch/origin directly (last 8)
 local probes = {}
+local vlines = {}
 
 local function draw_calibration_hud(gui, sw, sh, idc)
 	-- rulers
@@ -444,7 +448,20 @@ local function draw_calibration_hud(gui, sw, sh, idc)
 				probes[#probes + 1] = { mx, my, cx, cy }
 				if #probes > 8 then table.remove(probes, 1) end
 			end
+			local okv, vdown = pcall(InputIsMouseButtonJustDown, 2) -- right
+			if okv and vdown then
+				vlines[#vlines + 1] = { mx, cx }
+				if #vlines > 8 then table.remove(vlines, 1) end
+			end
 		end
+	end
+
+	-- plumb lines: full-height verticals with their GUI x labeled (staggered
+	-- so adjacent labels don't overlap)
+	for vi, v in ipairs(vlines) do
+		idc.n = idc.n + 1; line(gui, 70000 + idc.n, v[2], 0, 1, sh, { 0.4, 1, 1 }, 0.9)
+		GuiColorSetForNextWidget(gui, 0.4, 1, 1, 1)
+		GuiText(gui, v[2] + 2, 20 + (vi % 4) * 10, string.format("x=%.1f", v[2]))
 	end
 	for pi, p in ipairs(probes) do
 		say(string.format("probe %d: raw=(%.0f,%.0f) gui=(%.1f,%.1f)", pi, p[1], p[2], p[3], p[4]))

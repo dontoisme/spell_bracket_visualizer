@@ -20,7 +20,7 @@ mod_settings = {
 	{
 		id = "debug_boxes",
 		ui_name = "Calibration Overlay (debug)",
-		ui_description = "GUI rulers, computed rows/columns, live constants, and a\nMIDDLE-CLICK probe that logs exact coordinates. Turn on +\nscreenshot if brackets ever misalign; hover card corners and\nmiddle-click to record them.",
+		ui_description = "GUI rulers, computed rows/columns, live constants.\nMIDDLE-CLICK: log the exact point under the cursor.\nRIGHT-CLICK: drop a labeled vertical plumb line to align\nagainst slot edges. Turn on + screenshot to recalibrate.",
 		value_default = false,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
