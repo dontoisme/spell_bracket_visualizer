@@ -235,8 +235,12 @@ local BOX = {
 	h_pad   = 14,     -- units: box height = max(min_h, h_pad + s_scale * sprite_h)
 	s_scale = 2,      -- units of box height per wand-sprite pixel
 	gap     = 2,      -- units between consecutive boxes
-	row_off = 2.5,    -- units: slot-row bottom sits this far above the box bottom
-	slot_h  = 12,     -- units: card frame height
+	-- Horizontal-plumb probes confirmed the frames are SQUARE: 17.5 GUI
+	-- tall (= the probed width), not 19.2. slot_h shrinks to 10.94u and
+	-- row_off grows to 3.7u so the row TOPS stay where the probes put them
+	-- (tops fit +-0.7 GUI across all four boxes).
+	row_off = 3.7,    -- units: slot-row bottom sits this far above the box bottom
+	slot_h  = 10.94,  -- units: card frame height (17.5 GUI, square frame)
 	-- Horizontal: nailed by 8 plumb-line probes spanning columns 0..25
 	-- (2026-06-09): the layout is in GUI units -- pitch exactly 20.0 GUI
 	-- (62.5px), visible frame width 17.5 GUI, col-0 left edge at 26.0 GUI.
