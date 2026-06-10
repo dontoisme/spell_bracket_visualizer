@@ -1,0 +1,7 @@
+<Mod
+	name="Spell Bracket Visualizer"
+	description="Lisp/SLIME-style wand structure: rainbow nesting brackets on the wand UI and a cast-structure panel. See what fires together each cast - and when your wand WRAPS."
+	tags="quality of life"
+	dont_upload_folders="tools|docs"
+>
+</Mod>
