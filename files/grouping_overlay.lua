@@ -237,14 +237,14 @@ local BOX = {
 	gap     = 2,      -- units between consecutive boxes
 	row_off = 2.5,    -- units: slot-row bottom sits this far above the box bottom
 	slot_h  = 12,     -- units: card frame height
-	-- Horizontal: the slot grid is 16 art-px cells at 4x = 64 screen px pitch
-	-- (0.032 of width), frames 60px with ~2px inset, first cell at 80px. The
-	-- earlier 65px pitch estimate drifted ~1px per column INTO the cards --
-	-- invisible at columns 0..4 (inside the frame inset), spotted by the user
-	-- at columns 6..8 as "opens walking into the spell card".
-	slot0_x = 0.055,  -- first slot CENTER, fraction of GUI width (110px)
-	pitch   = 0.032,  -- slot-to-slot spacing, fraction of width (64px)
-	halfw   = 0.015,  -- half width of the card FRAME, fraction of width
+	-- Horizontal: nailed by 8 plumb-line probes spanning columns 0..25
+	-- (2026-06-09): the layout is in GUI units -- pitch exactly 20.0 GUI
+	-- (62.5px), visible frame width 17.5 GUI, col-0 left edge at 26.0 GUI.
+	-- All 8 probes fit within 0.15 GUI (the earlier 65px/64px estimates
+	-- drifted ~1px+ per column; the "wide boxes compress" theory was false).
+	slot0_x = 0.05430, -- first slot frame CENTER: (26.0 + 8.75)/640
+	pitch   = 0.03125, -- slot-to-slot spacing: 20.0 GUI / 640
+	halfw   = 0.01367, -- half VISIBLE frame width: 8.75 GUI / 640
 	-- Multi-row: the machinery below supports wands whose slot row wraps,
 	-- but a capacity-26 wand renders as ONE long row at 2000x1125 (user
 	-- observation) -- so wrapping is either resolution-dependent or doesn't
@@ -427,7 +427,7 @@ local function draw_calibration_hud(gui, sw, sh, idc)
 	end
 	say(string.format("GUI %dx%d  unit=%.2fgui (%.3f of w)",
 		math.floor(sw + 0.5), math.floor(sh + 0.5), U * sw, U))
-	say(string.format("BOX top0=%d min_h=%d h_pad=%d s_scale=%d gap=%d row_off=%d slot_h=%d",
+	say(string.format("BOX top0=%g min_h=%g h_pad=%g s_scale=%g gap=%g row_off=%g slot_h=%g",
 		BOX.top0, BOX.min_h, BOX.h_pad, BOX.s_scale, BOX.gap, BOX.row_off, BOX.slot_h))
 	say(string.format("X: slot0_x=%.4f (%.1fgui) pitch=%.4f (%.1fgui) halfw=%.4f (%.1fgui) nudges o=%g c=%g",
 		BOX.slot0_x, BOX.slot0_x * sw, BOX.pitch, BOX.pitch * sw,
