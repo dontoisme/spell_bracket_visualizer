@@ -83,7 +83,7 @@ end
 -- disable the whole panel (init.lua kills it on first error), so a future
 -- game update changing these fields degrades to 1/cast, no shuffle.
 local function read_config(wand)
-	local cfg = { spells_per_cast = 1, shuffle = false }
+	local cfg = { spells_per_cast = 1, shuffle = false, capacity = 0 }
 	if type(ComponentObjectGetValue2) ~= "function" then return cfg end
 	local ab = EntityGetFirstComponentIncludingDisabled(wand, "AbilityComponent")
 	if not ab then return cfg end
@@ -91,6 +91,8 @@ local function read_config(wand)
 	if ok and tonumber(spc) and tonumber(spc) > 0 then cfg.spells_per_cast = tonumber(spc) end
 	local ok2, sh = pcall(ComponentObjectGetValue2, ab, "gun_config", "shuffle_deck_when_empty")
 	cfg.shuffle = ok2 and sh == true
+	local ok3, cap = pcall(ComponentObjectGetValue2, ab, "gun_config", "deck_capacity")
+	if ok3 and tonumber(cap) and tonumber(cap) > 0 then cfg.capacity = tonumber(cap) end
 	return cfg
 end
 
@@ -241,6 +243,10 @@ local BOX = {
 	slot0_x = 0.055,  -- first slot CENTER, fraction of GUI width (110px)
 	pitch   = 0.032,  -- slot-to-slot spacing, fraction of width (64px)
 	halfw   = 0.015,  -- half width of the card FRAME, fraction of width
+	-- Multi-row: big wands (capacity up to 26+) wrap the slot row.
+	-- UNVERIFIED GUESSES pending a capacity-26 calibration screenshot:
+	per_row  = 16,    -- slots per displayed row before wrapping
+	row_step = 13,    -- units: vertical step between slot rows
 }
 local BAR_W   = 1   -- GUI width of a bracket's vertical bar
 local TICK_W  = 3   -- GUI length of the top/bottom hooks
@@ -277,7 +283,9 @@ end
 -- The span starts at the group's OWN card (node.head): leading modifiers sit
 -- outside the parens, Lisp-style, matching the panel's "[mods] name" layout.
 -- `xs` maps deck index -> real slot column (handles empty slots in the wand).
-local function collect_delims(nodes, depth, xs, out)
+-- cols/rows map deck index -> displayed column / slot-row (multi-row wands
+-- wrap their slot row every BOX.per_row slots).
+local function collect_delims(nodes, depth, cols, rows, out)
 	for _, node in ipairs(nodes) do
 		if node.children and #node.children > 0 and node.last then
 			local head = node.head or node.first
@@ -299,60 +307,71 @@ local function collect_delims(nodes, depth, xs, out)
 				end
 			end
 			out[#out + 1] = {
-				ca = xs[head] or (head - 1), -- 0-based slot columns
-				cb = xs[node.last] or (node.last - 1),
+				ca = cols[head] or (head - 1), -- 0-based slot columns
+				cb = cols[node.last] or (node.last - 1),
+				ra = rows[head] or 0,          -- 0-based slot rows
+				rb = rows[node.last] or 0,
 				c = nest_color(depth),
 				lbl = lbl,
 				-- wrapped-in segment (cards pulled from the wand's start)
-				w1 = wrap_here and (xs[node.wfirst] or (node.wfirst - 1)) or nil,
-				w2 = wrap_here and (xs[node.wlast] or (node.wlast - 1)) or nil,
+				w1 = wrap_here and (cols[node.wfirst] or (node.wfirst - 1)) or nil,
+				w2 = wrap_here and (cols[node.wlast] or (node.wlast - 1)) or nil,
+				w1r = wrap_here and (rows[node.wfirst] or 0) or nil,
 			}
-			collect_delims(node.children, depth + 1, xs, out)
+			collect_delims(node.children, depth + 1, cols, rows, out)
 		end
 	end
 end
 
-local function draw_delims(gui, groups, sw, top, bot, idc)
+-- rows_geo[r+1] = { top, bot } for displayed slot-row r (0-based): brackets
+-- anchor to the row their card actually sits on.
+local function draw_delims(gui, groups, sw, rows_geo, idc)
 	local counts, seen = {}, {}
-	for _, g in ipairs(groups) do counts[g.cb] = (counts[g.cb] or 0) + 1 end
+	local function key(g) return g.rb * 100 + g.cb end
+	for _, g in ipairs(groups) do counts[key(g)] = (counts[key(g)] or 0) + 1 end
 	for _, g in ipairs(groups) do
+		local ya = rows_geo[g.ra + 1] or rows_geo[1]
+		local yb = rows_geo[g.rb + 1] or rows_geo[1]
+
 		-- open: [ just left of the card, over the slot's left edge, label
 		-- above (the ~wrap tag, when present, is appended in wrap orange)
 		local lx = sw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
-		bracket(gui, idc, lx, top, bot, 1, g.c)
+		bracket(gui, idc, lx, ya.top, ya.bot, 1, g.c)
 		GuiColorSetForNextWidget(gui, g.c[1], g.c[2], g.c[3], 1)
-		GuiText(gui, lx, top - 9, g.lbl)
+		GuiText(gui, lx, ya.top - 9, g.lbl)
 		if g.w1 then
 			local lw = (GuiGetTextDimensions(gui, g.lbl))
 			GuiColorSetForNextWidget(gui, WRAP_COLOR[1], WRAP_COLOR[2], WRAP_COLOR[3], 1)
-			GuiText(gui, lx + lw + 2, top - 9, "~wrap")
+			GuiText(gui, lx + lw + 2, ya.top - 9, "~wrap")
 		end
 
 		-- close: outermost ] ON the card's right edge (s = 0: collected
 		-- first, placed rightmost, tallest so its hooks wrap the inner
 		-- ones); inner brackets step LEFT over the card art, so the stack
 		-- reads inner -> outer left-to-right and stays within the card
-		local s = seen[g.cb] or 0
-		seen[g.cb] = s + 1
-		local grow = (counts[g.cb] - 1 - s) * STACK_Y
+		local s = seen[key(g)] or 0
+		seen[key(g)] = s + 1
+		local grow = (counts[key(g)] - 1 - s) * STACK_Y
 		local rx = sw * (BOX.slot0_x + g.cb * BOX.pitch + BOX.halfw)
 			- BAR_W - CLOSE_NUDGE - s * STACK_X
-		bracket(gui, idc, rx, top - grow, bot + grow, -1, g.c)
+		bracket(gui, idc, rx, yb.top - grow, yb.bot + grow, -1, g.c)
 
 		-- wrap: the group continues at the wand's START. Bracket the
-		-- wrapped-in segment and draw a carriage-return line under the row,
-		-- from below the forward close back to the wrapped segment's [.
+		-- wrapped-in segment and draw a carriage-return line, from below the
+		-- forward close back (and up, if the wrapped cards sit on an earlier
+		-- slot row) to the wrapped segment's [.
 		-- Always WRAP orange: orange marks the wrap, rainbow marks groups.
 		if g.w1 then
+			local yw = rows_geo[(g.w1r or 0) + 1] or rows_geo[1]
 			local wlx = sw * (BOX.slot0_x + g.w1 * BOX.pitch - BOX.halfw) - OPEN_NUDGE
 			local wrx = sw * (BOX.slot0_x + g.w2 * BOX.pitch + BOX.halfw)
 				- BAR_W - CLOSE_NUDGE
-			bracket(gui, idc, wlx, top, bot, 1, WRAP_COLOR)
-			bracket(gui, idc, wrx, top, bot, -1, WRAP_COLOR)
-			local ry = bot + grow + 2 -- return line sits just below the row
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, bot + grow, 1, ry - (bot + grow) + 1, WRAP_COLOR)
+			bracket(gui, idc, wlx, yw.top, yw.bot, 1, WRAP_COLOR)
+			bracket(gui, idc, wrx, yw.top, yw.bot, -1, WRAP_COLOR)
+			local ry = yb.bot + grow + 2 -- return line sits just below the close's row
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, yb.bot + grow, 1, ry - (yb.bot + grow) + 1, WRAP_COLOR)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, ry, rx - wlx, 1, WRAP_COLOR)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, bot, 1, ry - bot + 1, WRAP_COLOR)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, yw.bot, 1, ry - yw.bot + 1, WRAP_COLOR)
 		end
 	end
 end
@@ -468,48 +487,70 @@ local function draw_box_brackets(gui, sw, sh)
 	local idc = { n = 0 }
 	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
 	for i, wd in ipairs(wands) do
+		local tokens, _, xs = read_deck(wd.e)
+		local cfg = read_config(wd.e)
 		local s, sfile = wand_sprite_h(gui, wd.e)
+
+		-- displayed slot rows: capacity wraps every per_row slots (fall back
+		-- to the highest occupied slot if the capacity read failed)
+		local max_slot = cfg.capacity - 1
+		for _, x in ipairs(xs) do if x > max_slot then max_slot = x end end
+		local nrows = math.max(1, math.floor(max_slot / BOX.per_row) + 1)
+
 		local box_h = math.max(BOX.min_h, BOX.h_pad + BOX.s_scale * s)
-		local bot = (box_top + box_h - BOX.row_off) * U * sw
-		local top = bot - BOX.slot_h * U * sw
+			+ (nrows - 1) * BOX.row_step
+		-- the LAST slot row sits row_off above the box bottom; earlier rows
+		-- stack upward by row_step
+		local rows_geo = {}
+		for r = 0, nrows - 1 do
+			local bot = (box_top + box_h - BOX.row_off
+				- (nrows - 1 - r) * BOX.row_step) * U * sw
+			rows_geo[r + 1] = { top = bot - BOX.slot_h * U * sw, bot = bot }
+		end
 
 		if debug_boxes then
-			-- computed slot-row top (green) / bottom (red) + the raw inputs,
-			-- so one screenshot carries everything needed to recalibrate
 			local w = sw * 0.35
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, top, w, 1, { 0.2, 1, 0.2 }, 0.8)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, bot, w, 1, { 1, 0.2, 0.2 }, 0.8)
-			-- per-column computed frame edges, full row height (green = left
-			-- edge, red = right): any pitch/origin error shows as these lines
-			-- walking off the real card edges as the column index grows
-			for col = 0, 12 do
-				local exl = sw * (BOX.slot0_x + col * BOX.pitch - BOX.halfw)
-				local exr = sw * (BOX.slot0_x + col * BOX.pitch + BOX.halfw)
-				idc.n = idc.n + 1; line(gui, 70000 + idc.n, exl, top, 1, bot - top, { 0.2, 1, 0.2 }, 0.55)
-				idc.n = idc.n + 1; line(gui, 70000 + idc.n, exr - 1, top, 1, bot - top, { 1, 0.2, 0.2 }, 0.55)
-				if i == 1 and col % 2 == 0 then -- column indices on the first row
-					GuiColorSetForNextWidget(gui, 0.6, 0.8, 1, 1)
-					GuiText(gui, exl + 2, top - 18, tostring(col))
+			for r, geo in ipairs(rows_geo) do
+				-- computed slot-row top (green) / bottom (red) per row
+				idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, geo.top, w, 1, { 0.2, 1, 0.2 }, 0.8)
+				idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, geo.bot, w, 1, { 1, 0.2, 0.2 }, 0.8)
+				-- per-column computed frame edges, full row height (green =
+				-- left, red = right): pitch/origin error shows as these lines
+				-- walking off the real card edges as the column index grows
+				for col = 0, BOX.per_row - 1 do
+					local exl = sw * (BOX.slot0_x + col * BOX.pitch - BOX.halfw)
+					local exr = sw * (BOX.slot0_x + col * BOX.pitch + BOX.halfw)
+					idc.n = idc.n + 1; line(gui, 70000 + idc.n, exl, geo.top, 1, geo.bot - geo.top, { 0.2, 1, 0.2 }, 0.55)
+					idc.n = idc.n + 1; line(gui, 70000 + idc.n, exr - 1, geo.top, 1, geo.bot - geo.top, { 1, 0.2, 0.2 }, 0.55)
+					if i == 1 and r == 1 and col % 2 == 0 then -- column indices once
+						GuiColorSetForNextWidget(gui, 0.6, 0.8, 1, 1)
+						GuiText(gui, exl + 2, geo.top - 18, tostring(col))
+					end
 				end
 			end
 			GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
-			GuiText(gui, w + 4, bot - 10, string.format(
-				"#%d s=%d H=%d top=%du row[%.1f..%.1f]gui %s",
-				i, s, box_h, box_top, top, bot, tostring(sfile):gsub(".*/", "")))
+			GuiText(gui, w + 4, rows_geo[1].bot - 10, string.format(
+				"#%d s=%d H=%d top=%du cap=%d rows=%d row1[%.1f..%.1f]gui %s",
+				i, s, box_h, box_top, cfg.capacity, nrows,
+				rows_geo[1].top, rows_geo[1].bot, tostring(sfile):gsub(".*/", "")))
 		end
 
 		box_top = box_top + box_h + BOX.gap
 
-		local tokens, _, xs = read_deck(wd.e)
 		if #tokens > 0 then
-			local cfg = read_config(wd.e)
 			local sim = wand_structure.simulate(tokens, meta,
 				{ spells_per_cast = cfg.spells_per_cast })
-			local groups = {} -- all casts together: closes stack per column
-			for _, cast in ipairs(sim.casts) do
-				collect_delims(cast.nodes, 0, xs, groups)
+			-- displayed position of each card: wraps every per_row slots
+			local cols, rows = {}, {}
+			for k, x in ipairs(xs) do
+				cols[k] = x % BOX.per_row
+				rows[k] = math.floor(x / BOX.per_row)
 			end
-			draw_delims(gui, groups, sw, top, bot, idc)
+			local groups = {} -- all casts together: closes stack per row+column
+			for _, cast in ipairs(sim.casts) do
+				collect_delims(cast.nodes, 0, cols, rows, groups)
+			end
+			draw_delims(gui, groups, sw, rows_geo, idc)
 		end
 	end
 
