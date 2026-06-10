@@ -667,16 +667,27 @@ end
 -- ---- per-frame entry point -------------------------------------------------
 
 function M.update()
-	if type(GameIsInventoryOpen) ~= "function" or not GameIsInventoryOpen() then return end
 	if not wand_structure then return end
+
+	-- Once the gui exists it must start a frame EVERY update, even with the
+	-- inventory closed: the engine keeps the previous frame's widgets live
+	-- (mouse-capturing) until the next GuiStartFrame, so skipping frames left
+	-- our widgets blocking wand fire after the inventory was closed.
+	if gui == nil then gui = GuiCreate() end
+	GuiStartFrame(gui)
+	-- Never capture the mouse: hovering the panel/brackets must not block
+	-- firing or inventory clicks. 2 = GUI_OPTION.NonInteractive
+	-- (data/scripts/lib/utilities.lua); options reset on each GuiStartFrame,
+	-- so re-add every frame.
+	GuiOptionsAdd(gui, 2)
+
+	if type(GameIsInventoryOpen) ~= "function" or not GameIsInventoryOpen() then return end
 
 	local get = (type(ModSettingGet) == "function") and ModSettingGet or function() return nil end
 	local show_panel = get("testMod.show_grouping") ~= false
 	local show_slots = get("testMod.show_slot_brackets") ~= false
 	if not show_panel and not show_slots then return end
 
-	if gui == nil then gui = GuiCreate() end
-	GuiStartFrame(gui)
 	local sw, sh = GuiGetScreenDimensions(gui)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
