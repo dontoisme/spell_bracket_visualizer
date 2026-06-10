@@ -431,14 +431,12 @@ local function draw_calibration_hud(gui, sw, sh, idc)
 	if type(InputGetMousePosOnScreen) == "function" then
 		local ok, mx, my = pcall(InputGetMousePosOnScreen)
 		if ok and mx then
-			-- candidate conversion: raw is window px; assume window == 2000x1125
-			-- (the calibration screenshots' size). If the crosshair tracks the
-			-- cursor, the candidate is right; if not, the raw values + rulers
-			-- in the same screenshot still pin the mapping.
-			local cx, cy = mx * sw / 2000, my * sh / 1125
+			-- raw is in the 1280x720 virtual screen = exactly 2x GUI
+			-- (verified by probes against known slot corners, 2026-06-09)
+			local cx, cy = mx * sw / 1280, my * sh / 720
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, cx - 6, cy, 13, 1, { 1, 0.3, 1 }, 0.9)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, cx, cy - 6, 1, 13, { 1, 0.3, 1 }, 0.9)
-			say(string.format("mouse raw=(%.0f,%.0f) gui@2000x1125=(%.1f,%.1f)", mx, my, cx, cy))
+			say(string.format("mouse raw=(%.0f,%.0f) gui=(%.1f,%.1f)", mx, my, cx, cy))
 			local okd, down = pcall(InputIsMouseButtonJustDown, 3) -- middle
 			if okd and down then
 				probes[#probes + 1] = { mx, my, cx, cy }
