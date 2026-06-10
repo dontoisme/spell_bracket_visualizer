@@ -20,7 +20,7 @@ mod_settings = {
 	{
 		id = "debug_boxes",
 		ui_name = "Calibration Overlay (debug)",
-		ui_description = "Draw the computed slot-row lines and wand-sprite reads over\nthe wand boxes. Turn on + screenshot if brackets ever\nmisalign, to recalibrate the geometry.",
+		ui_description = "GUI rulers, computed rows/columns, live constants, and a\nMIDDLE-CLICK probe that logs exact coordinates. Turn on +\nscreenshot if brackets ever misalign; hover card corners and\nmiddle-click to record them.",
 		value_default = false,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},

@@ -357,6 +357,77 @@ local function draw_delims(gui, groups, sw, top, bot, idc)
 	end
 end
 
+-- ---- calibration HUD (debug_boxes setting) ----------------------------------
+-- Everything needed to nail the geometry from ONE screenshot:
+--  * GUI-coordinate rulers (lines every 50 GUI, ticks every 10, labeled)
+--  * the live BOX constants that produced the frame (self-documenting)
+--  * live mouse position: raw (InputGetMousePosOnScreen) + a candidate GUI
+--    conversion, with a crosshair drawn at the converted spot -- if the
+--    crosshair sits under your cursor, the conversion is right
+--  * MIDDLE-CLICK probe recorder: hover a landmark (e.g. a card's exact
+--    corner), middle-click, and the point is logged on screen (last 8)
+local probes = {}
+
+local function draw_calibration_hud(gui, sw, sh, idc)
+	-- rulers
+	for gx = 0, math.floor(sw), 10 do
+		local major = (gx % 50 == 0)
+		idc.n = idc.n + 1
+		line(gui, 70000 + idc.n, gx, 0, 1, major and sh or 4, { 0.3, 0.6, 1 }, major and 0.25 or 0.8)
+		if major then
+			GuiColorSetForNextWidget(gui, 0.3, 0.6, 1, 1)
+			GuiText(gui, gx + 1, 10, tostring(gx))
+		end
+	end
+	for gy = 0, math.floor(sh), 10 do
+		local major = (gy % 50 == 0)
+		idc.n = idc.n + 1
+		line(gui, 70000 + idc.n, 0, gy, major and sw or 4, 1, { 0.3, 1, 0.4 }, major and 0.25 or 0.8)
+		if major then
+			GuiColorSetForNextWidget(gui, 0.3, 1, 0.4, 1)
+			GuiText(gui, 24, gy + 1, tostring(gy))
+		end
+	end
+
+	-- constants dump + dims (leave room for up to 8 probe lines below)
+	local y = sh - 130
+	local function say(text)
+		GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
+		GuiText(gui, 4, y, text)
+		y = y + 10
+	end
+	say(string.format("GUI %dx%d  unit=%.2fgui (%.3f of w)",
+		math.floor(sw + 0.5), math.floor(sh + 0.5), U * sw, U))
+	say(string.format("BOX top0=%d min_h=%d h_pad=%d s_scale=%d gap=%d row_off=%d slot_h=%d",
+		BOX.top0, BOX.min_h, BOX.h_pad, BOX.s_scale, BOX.gap, BOX.row_off, BOX.slot_h))
+	say(string.format("X: slot0_x=%.4f (%.1fgui) pitch=%.4f (%.1fgui) halfw=%.4f (%.1fgui) nudges o=%g c=%g",
+		BOX.slot0_x, BOX.slot0_x * sw, BOX.pitch, BOX.pitch * sw,
+		BOX.halfw, BOX.halfw * sw, OPEN_NUDGE, CLOSE_NUDGE))
+
+	-- mouse + probes
+	if type(InputGetMousePosOnScreen) == "function" then
+		local ok, mx, my = pcall(InputGetMousePosOnScreen)
+		if ok and mx then
+			-- candidate conversion: raw is window px; assume window == 2000x1125
+			-- (the calibration screenshots' size). If the crosshair tracks the
+			-- cursor, the candidate is right; if not, the raw values + rulers
+			-- in the same screenshot still pin the mapping.
+			local cx, cy = mx * sw / 2000, my * sh / 1125
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, cx - 6, cy, 13, 1, { 1, 0.3, 1 }, 0.9)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, cx, cy - 6, 1, 13, { 1, 0.3, 1 }, 0.9)
+			say(string.format("mouse raw=(%.0f,%.0f) gui@2000x1125=(%.1f,%.1f)", mx, my, cx, cy))
+			local okd, down = pcall(InputIsMouseButtonJustDown, 3) -- middle
+			if okd and down then
+				probes[#probes + 1] = { mx, my, cx, cy }
+				if #probes > 8 then table.remove(probes, 1) end
+			end
+		end
+	end
+	for pi, p in ipairs(probes) do
+		say(string.format("probe %d: raw=(%.0f,%.0f) gui=(%.1f,%.1f)", pi, p[1], p[2], p[3], p[4]))
+	end
+end
+
 -- Read the height of this wand's art in px (pcall-guarded; vanilla wand art
 -- is 3..17 px tall; cap guards against odd mod art). Also returns the file
 -- for the calibration overlay. A failed read returns 9: small wands hit the
@@ -408,17 +479,23 @@ local function draw_box_brackets(gui, sw, sh)
 			local w = sw * 0.35
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, top, w, 1, { 0.2, 1, 0.2 }, 0.8)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, bot, w, 1, { 1, 0.2, 0.2 }, 0.8)
-			-- per-column frame-edge ticks: any pitch/origin error shows as
-			-- ticks walking off the card edges as the column index grows
+			-- per-column computed frame edges, full row height (green = left
+			-- edge, red = right): any pitch/origin error shows as these lines
+			-- walking off the real card edges as the column index grows
 			for col = 0, 12 do
 				local exl = sw * (BOX.slot0_x + col * BOX.pitch - BOX.halfw)
 				local exr = sw * (BOX.slot0_x + col * BOX.pitch + BOX.halfw)
-				idc.n = idc.n + 1; line(gui, 70000 + idc.n, exl, top - 3, 1, 3, { 0.2, 1, 0.2 }, 0.9)
-				idc.n = idc.n + 1; line(gui, 70000 + idc.n, exr - 1, top - 3, 1, 3, { 1, 0.2, 0.2 }, 0.9)
+				idc.n = idc.n + 1; line(gui, 70000 + idc.n, exl, top, 1, bot - top, { 0.2, 1, 0.2 }, 0.55)
+				idc.n = idc.n + 1; line(gui, 70000 + idc.n, exr - 1, top, 1, bot - top, { 1, 0.2, 0.2 }, 0.55)
+				if i == 1 and col % 2 == 0 then -- column indices on the first row
+					GuiColorSetForNextWidget(gui, 0.6, 0.8, 1, 1)
+					GuiText(gui, exl + 2, top - 18, tostring(col))
+				end
 			end
 			GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
-			GuiText(gui, w + 4, bot - 10, string.format("#%d s=%d H=%d top=%d %s",
-				i, s, box_h, box_top, tostring(sfile):gsub(".*/", "")))
+			GuiText(gui, w + 4, bot - 10, string.format(
+				"#%d s=%d H=%d top=%du row[%.1f..%.1f]gui %s",
+				i, s, box_h, box_top, top, bot, tostring(sfile):gsub(".*/", "")))
 		end
 
 		box_top = box_top + box_h + BOX.gap
@@ -437,9 +514,7 @@ local function draw_box_brackets(gui, sw, sh)
 	end
 
 	if debug_boxes then
-		GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
-		GuiText(gui, 4, 2, "GUI " .. math.floor(sw + 0.5) .. "x" .. math.floor(sh + 0.5)
-			.. "  unit=" .. string.format("%.2f", U * sw))
+		draw_calibration_hud(gui, sw, sh, idc)
 	end
 end
 
