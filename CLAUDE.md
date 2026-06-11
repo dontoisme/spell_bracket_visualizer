@@ -61,9 +61,10 @@ the wand boxes or slots. Consequences:
   carriage-return line from the forward close back to orange brackets around
   the wrapped-in cards, emitted only by the innermost wrapping group; group
   brackets always keep their rainbow depth color. Drawn at z = -10 (lower z =
-  front) to beat the engine's spell-frame layer. If geometry drifts, the
-  "Calibration Overlay" mod setting draws computed rows + sprite reads for
-  recalibration from one screenshot.
+  front) to beat the engine's spell-frame layer. If geometry drifts, recover
+  the calibration HUD (`draw_calibration_hud` + the `debug_boxes` settings
+  entry, REMOVED for the Workshop release) from git history — it re-measures
+  everything from one screenshot.
 - (The retired icon-recolor worked around the same constraint by swapping each
   spell's `action.sprite` via `ModLuaFileAppend` onto `gun_actions.lua` — see
   git history if reviving.)

@@ -283,7 +283,9 @@ Remaining nice-to-haves, none blocking:
 3. **Resolution robustness:** geometry is calibrated at one window size
    (2000×1125, GUI 640×360). All constants are fractions of GUI width, so
    other sizes should scale — but if brackets drift on a different setup,
-   flip the **Calibration Overlay** setting and screenshot.
+   recover the calibration HUD from git history (REMOVED for the Workshop
+   release, 2026-06-11: `draw_calibration_hud` + the `debug_boxes` setting)
+   and screenshot.
 
 ## Caveats for whoever picks this up
 

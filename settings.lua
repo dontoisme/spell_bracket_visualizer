@@ -13,17 +13,13 @@ mod_settings = {
 	{
 		id = "show_slot_brackets",
 		ui_name = "Slot Brackets",
-		ui_description = "Rainbow nesting brackets on the spell cards in the wand UI,\nSLIME-style: each group's span, multicast/trigger labels, and\nwand wrapping in orange.",
+		ui_description = "Rainbow nesting brackets on the spell cards in the wand UI,\nlike nested code brackets: each group's span, and wand\nwrapping in orange.",
 		value_default = true,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
-	{
-		id = "debug_boxes",
-		ui_name = "Calibration Overlay (debug)",
-		ui_description = "GUI rulers, computed rows/columns, live constants.\nMIDDLE-CLICK: log the exact point under the cursor.\nRIGHT-CLICK: vertical plumb line. SHIFT+RIGHT-CLICK:\nhorizontal plumb line. Turn on + screenshot to recalibrate.",
-		value_default = false,
-		scope = MOD_SETTING_SCOPE_RUNTIME,
-	},
+	-- The "Calibration Overlay (debug)" setting (debug_boxes) was removed for
+	-- the Workshop release; the HUD code lives in git history. Re-add both if
+	-- the box geometry ever drifts after a game update.
 }
 
 function ModSettingsUpdate( init_scope )

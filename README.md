@@ -48,8 +48,6 @@ reordering, and selection changes.
 
 - **Wand Structure Panel** — on/off (runtime; applies immediately).
 - **Slot Brackets** — the in-UI rainbow brackets (runtime; on by default).
-- **Calibration Overlay (debug)** — draws the computed slot-row lines and
-  per-wand sprite reads; turn on + screenshot if brackets ever misalign.
 
 ## Project layout
 
@@ -100,5 +98,6 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
   real draw order randomizes each cycle.
 - The slot brackets' geometry is calibrated at GUI 640×360 (constants scale as
   fractions of GUI width, so other sizes should track) — if brackets ever
-  misalign, flip **Calibration Overlay** and screenshot to recalibrate; the
-  panel is always reliable regardless.
+  misalign after a game update, the calibration HUD in git history can
+  re-measure everything from one screenshot; the panel is always reliable
+  regardless.

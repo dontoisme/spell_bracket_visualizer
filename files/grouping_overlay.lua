@@ -271,7 +271,6 @@ local OPEN_NUDGE  = 0 -- extra left shift of opening brackets
 local BRACKET_RAISE = 2 -- GUI: all bracket glyphs sit this much higher than
                         -- the slot row, so the top hooks overlap the card
                         -- frame's top edge (user-tuned from screenshots)
-local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
 	a = a or 1
@@ -395,133 +394,21 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 	end
 end
 
--- ---- calibration HUD (debug_boxes setting) ----------------------------------
--- Everything needed to nail the geometry from ONE screenshot:
---  * GUI-coordinate rulers (lines every 50 GUI, ticks every 10, labeled)
---  * the live BOX constants that produced the frame (self-documenting)
---  * live mouse position: raw (InputGetMousePosOnScreen) + a candidate GUI
---    conversion, with a crosshair drawn at the converted spot -- if the
---    crosshair sits under your cursor, the conversion is right
---  * MIDDLE-CLICK probe recorder: hover a landmark (e.g. a card's exact
---    corner), middle-click, and the point is logged on screen (last 8)
---  * RIGHT-CLICK plumb lines: drops a full-height vertical line at the
---    cursor's x, labeled with the GUI x -- align it against slot edges
---    across every box at once to read pitch/origin directly (last 8)
---  * SHIFT+RIGHT-CLICK: horizontal plumb line at the cursor's y, labeled
---    -- align against slot-row tops/bottoms across boxes (last 8)
-local probes = {}
-local vlines = {}
-local hlines = {}
-
-local function draw_calibration_hud(gui, sw, sh, idc)
-	-- rulers
-	for gx = 0, math.floor(sw), 10 do
-		local major = (gx % 50 == 0)
-		idc.n = idc.n + 1
-		line(gui, 70000 + idc.n, gx, 0, 1, major and sh or 4, { 0.3, 0.6, 1 }, major and 0.25 or 0.8)
-		if major then
-			GuiColorSetForNextWidget(gui, 0.3, 0.6, 1, 1)
-			GuiText(gui, gx + 1, 10, tostring(gx))
-		end
-	end
-	for gy = 0, math.floor(sh), 10 do
-		local major = (gy % 50 == 0)
-		idc.n = idc.n + 1
-		line(gui, 70000 + idc.n, 0, gy, major and sw or 4, 1, { 0.3, 1, 0.4 }, major and 0.25 or 0.8)
-		if major then
-			GuiColorSetForNextWidget(gui, 0.3, 1, 0.4, 1)
-			GuiText(gui, 24, gy + 1, tostring(gy))
-		end
-	end
-
-	-- constants dump + dims (leave room for up to 8 probe lines below)
-	local y = sh - 130
-	local function say(text)
-		GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
-		GuiText(gui, 4, y, text)
-		y = y + 10
-	end
-	say(string.format("GUI %dx%d  unit=%.2fgui (%.3f of w)",
-		math.floor(sw + 0.5), math.floor(sh + 0.5), U * sw, U))
-	say(string.format("BOX top0=%g min_h=%g h_pad=%g s_scale=%g gap=%g row_off=%g slot_h=%g",
-		BOX.top0, BOX.min_h, BOX.h_pad, BOX.s_scale, BOX.gap, BOX.row_off, BOX.slot_h))
-	say(string.format("X: slot0_x=%.4f (%.1fgui) pitch=%.4f (%.1fgui) halfw=%.4f (%.1fgui) nudges o=%g c=%g",
-		BOX.slot0_x, BOX.slot0_x * sw, BOX.pitch, BOX.pitch * sw,
-		BOX.halfw, BOX.halfw * sw, OPEN_NUDGE, CLOSE_NUDGE))
-
-	-- mouse + probes
-	if type(InputGetMousePosOnScreen) == "function" then
-		local ok, mx, my = pcall(InputGetMousePosOnScreen)
-		if ok and mx then
-			-- raw is in the 1280x720 virtual screen = exactly 2x GUI
-			-- (verified by probes against known slot corners, 2026-06-09)
-			local cx, cy = mx * sw / 1280, my * sh / 720
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, cx - 6, cy, 13, 1, { 1, 0.3, 1 }, 0.9)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, cx, cy - 6, 1, 13, { 1, 0.3, 1 }, 0.9)
-			say(string.format("mouse raw=(%.0f,%.0f) gui=(%.1f,%.1f)", mx, my, cx, cy))
-			local okd, down = pcall(InputIsMouseButtonJustDown, 3) -- middle
-			if okd and down then
-				probes[#probes + 1] = { mx, my, cx, cy }
-				if #probes > 8 then table.remove(probes, 1) end
-			end
-			local okv, vdown = pcall(InputIsMouseButtonJustDown, 2) -- right
-			if okv and vdown then
-				local shift = false
-				if type(InputIsKeyDown) == "function" then
-					local oks, s1 = pcall(InputIsKeyDown, 225) -- Key_LSHIFT
-					local oks2, s2 = pcall(InputIsKeyDown, 229) -- Key_RSHIFT
-					shift = (oks and s1) or (oks2 and s2) or false
-				end
-				if shift then
-					hlines[#hlines + 1] = { my, cy }
-					if #hlines > 8 then table.remove(hlines, 1) end
-				else
-					vlines[#vlines + 1] = { mx, cx }
-					if #vlines > 8 then table.remove(vlines, 1) end
-				end
-			end
-		end
-	end
-
-	-- plumb lines: full-height verticals with their GUI x labeled (staggered
-	-- so adjacent labels don't overlap)
-	for vi, v in ipairs(vlines) do
-		idc.n = idc.n + 1; line(gui, 70000 + idc.n, v[2], 0, 1, sh, { 0.4, 1, 1 }, 0.9)
-		GuiColorSetForNextWidget(gui, 0.4, 1, 1, 1)
-		GuiText(gui, v[2] + 2, 20 + (vi % 4) * 10, string.format("x=%.1f", v[2]))
-	end
-	-- horizontal plumb lines (shift+right-click), GUI y labeled
-	for hi, h in ipairs(hlines) do
-		idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, h[2], sw, 1, { 1, 0.8, 0.3 }, 0.9)
-		GuiColorSetForNextWidget(gui, 1, 0.8, 0.3, 1)
-		GuiText(gui, sw - 60 - (hi % 4) * 50, h[2] + 1, string.format("y=%.1f", h[2]))
-	end
-	for pi, p in ipairs(probes) do
-		say(string.format("probe %d: raw=(%.0f,%.0f) gui=(%.1f,%.1f)", pi, p[1], p[2], p[3], p[4]))
-		-- persistent marker AT the probed point, so the screenshot shows
-		-- exactly where each probe landed relative to the intended corner
-		idc.n = idc.n + 1; line(gui, 70000 + idc.n, p[3] - 3, p[4], 7, 1, { 1, 1, 0.2 }, 1)
-		idc.n = idc.n + 1; line(gui, 70000 + idc.n, p[3], p[4] - 3, 1, 7, { 1, 1, 0.2 }, 1)
-		GuiColorSetForNextWidget(gui, 1, 1, 0.2, 1)
-		GuiText(gui, p[3] + 3, p[4] + 2, tostring(pi))
-	end
-end
-
 -- Read the height of this wand's art in px (pcall-guarded; vanilla wand art
--- is 3..17 px tall; cap guards against odd mod art). Also returns the file
--- for the calibration overlay. A failed read returns 9: small wands hit the
--- min_h floor anyway, so only tall-art wands need an accurate read.
+-- is 3..17 px tall; cap guards against odd mod art). A failed read returns 9:
+-- small wands hit the min_h floor anyway, so only tall-art wands need an
+-- accurate read.
 local function wand_sprite_h(gui, wand)
 	local sc = EntityGetFirstComponentIncludingDisabled(wand, "SpriteComponent")
 	if sc then
 		local ok, f = pcall(ComponentGetValue2, sc, "image_file")
 		if ok and type(f) == "string" and f ~= "" then
 			local ok2, _, h = pcall(GuiGetImageDimensions, gui, f, 1)
-			if ok2 and tonumber(h) and h > 0 and h < 30 then return h, f end
-			return 9, f
+			if ok2 and tonumber(h) and h > 0 and h < 30 then return h end
+			return 9
 		end
 	end
-	return 9, "?"
+	return 9
 end
 
 -- Measure every carried wand's box (quick-slot order): the stacking model plus
@@ -550,7 +437,7 @@ local function collect_wand_boxes(gui, sw)
 	for _, wd in ipairs(wands) do
 		wd.tokens, wd.always, wd.xs = read_deck(wd.e)
 		wd.cfg = read_config(wd.e)
-		wd.s, wd.sfile = wand_sprite_h(gui, wd.e)
+		wd.s = wand_sprite_h(gui, wd.e)
 		wd.sim = wand_structure.simulate(wd.tokens, meta,
 			{ spells_per_cast = wd.cfg.spells_per_cast })
 
@@ -586,39 +473,13 @@ local function collect_wand_boxes(gui, sw)
 end
 
 -- Delimit each measured wand box's spell row.
-local function draw_box_brackets(gui, sw, sh, wands)
-	local debug_boxes = type(ModSettingGet) == "function"
-		and ModSettingGet("spell_bracket_visualizer.debug_boxes") == true
-
+-- (The "Calibration Overlay" debug HUD that used to live here -- rulers,
+-- plumb lines, click probes, per-box readouts -- was removed for the
+-- Workshop release. It lives in git history; re-add it together with its
+-- settings.lua entry if the box geometry ever drifts after a game update.)
+local function draw_box_brackets(gui, sw, wands)
 	local idc = { n = 0 }
-	for i, wd in ipairs(wands) do
-		if debug_boxes then
-			local w = sw * 0.35
-			for r, geo in ipairs(wd.rows_geo) do
-				-- computed slot-row top (green) / bottom (red) per row
-				idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, geo.top, w, 1, { 0.2, 1, 0.2 }, 0.8)
-				idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, geo.bot, w, 1, { 1, 0.2, 0.2 }, 0.8)
-				-- per-column computed frame edges, full row height (green =
-				-- left, red = right): pitch/origin error shows as these lines
-				-- walking off the real card edges as the column index grows
-				for col = 0, BOX.per_row - 1 do
-					local exl = sw * (BOX.slot0_x + col * BOX.pitch - BOX.halfw)
-					local exr = sw * (BOX.slot0_x + col * BOX.pitch + BOX.halfw)
-					idc.n = idc.n + 1; line(gui, 70000 + idc.n, exl, geo.top, 1, geo.bot - geo.top, { 0.2, 1, 0.2 }, 0.55)
-					idc.n = idc.n + 1; line(gui, 70000 + idc.n, exr - 1, geo.top, 1, geo.bot - geo.top, { 1, 0.2, 0.2 }, 0.55)
-					if i == 1 and r == 1 and col % 2 == 0 then -- column indices once
-						GuiColorSetForNextWidget(gui, 0.6, 0.8, 1, 1)
-						GuiText(gui, exl + 2, geo.top - 18, tostring(col))
-					end
-				end
-			end
-			GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
-			GuiText(gui, w + 4, wd.rows_geo[1].bot - 10, string.format(
-				"#%d s=%d H=%d top=%du cap=%d rows=%d row1[%.1f..%.1f]gui %s",
-				i, wd.s, wd.box_h, wd.top, wd.cfg.capacity, wd.nrows,
-				wd.rows_geo[1].top, wd.rows_geo[1].bot, tostring(wd.sfile):gsub(".*/", "")))
-		end
-
+	for _, wd in ipairs(wands) do
 		if #wd.tokens > 0 then
 			-- displayed position of each card: wraps every per_row slots
 			local cols, rows = {}, {}
@@ -632,23 +493,6 @@ local function draw_box_brackets(gui, sw, sh, wands)
 			end
 			draw_delims(gui, groups, sw, wd.rows_geo, idc)
 		end
-	end
-
-	if debug_boxes then
-		draw_calibration_hud(gui, sw, sh, idc)
-	end
-end
-
--- Temporary calibration aid: prints GUI dimensions and a 10% grid so the
--- screenshot-pixel <-> GUI-coordinate mapping can be measured exactly.
-local function draw_debug(gui, sw, sh)
-	GuiColorSetForNextWidget(gui, 1, 1, 0, 1)
-	GuiText(gui, 4, 2, "GUI " .. math.floor(sw + 0.5) .. "x" .. math.floor(sh + 0.5))
-	for f = 1, 9 do
-		line(gui, 80000 + f, sw * f / 10, 0, 1, sh, { 0.3, 0.6, 1 }, 0.35)
-		GuiColorSetForNextWidget(gui, 0.3, 0.6, 1, 1); GuiText(gui, sw * f / 10 + 1, 12, tostring(f * 10))
-		line(gui, 80100 + f, 0, sh * f / 10, sw, 1, { 0.3, 1, 0.4 }, 0.35)
-		GuiColorSetForNextWidget(gui, 0.3, 1, 0.4, 1); GuiText(gui, 2, sh * f / 10, tostring(f * 10))
 	end
 end
 
@@ -770,8 +614,7 @@ function M.update()
 		-- strongly negative z = "bring to front": lower z draws on top, and
 		-- this must beat the engine's spell-frame layer, not just our own gui
 		GuiZSet(gui, -10)
-		draw_box_brackets(gui, sw, sh, boxes)
-		if DEBUG_RULER then draw_debug(gui, sw, sh) end
+		draw_box_brackets(gui, sw, boxes)
 		GuiZSet(gui, 1)
 	end
 
