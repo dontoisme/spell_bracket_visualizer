@@ -349,8 +349,10 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 		local lx = sw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
 		bracket(gui, idc, lx, ya.top - BRACKET_RAISE, ya.bot - BRACKET_RAISE, 1, g.c)
 		if g.w1 then
+			-- "wraps to": reads toward the orange segment at the wand's start
+			-- (was "~wrap", but Noita's font renders ~ as a double quote)
 			GuiColorSetForNextWidget(gui, WRAP_COLOR[1], WRAP_COLOR[2], WRAP_COLOR[3], 1)
-			GuiText(gui, lx, ya.top - 9, "~wrap")
+			GuiText(gui, lx, ya.top - 9, "wraps to")
 		end
 
 		-- close: outermost ] ON the card's right edge (s = 0: collected

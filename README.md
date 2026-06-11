@@ -22,7 +22,7 @@ Two views, both live while the inventory is open:
    is). Leading modifiers sit *outside* the brackets, matching Lisp
    notation; closes that share a card nest within it, outermost on the edge
    with its hooks wrapping the inner ones. **Orange marks the wrap**: the
-   group the wrap happened in gets an orange `~wrap` tag, orange brackets
+   group the wrap happened in gets an orange `wraps to` tag, orange brackets
    around the wrapped-in cards at the wand's start, and a carriage-return
    line under the row connecting the two — "the draw continues here".
 
