@@ -150,9 +150,11 @@ Iterated v1→final against in-game screenshots + user mockups. Final design:
   slot's left edge. **Leading modifiers sit outside the parens** (span starts
   at `node.head`, not `node.first`), matching the panel's `[mods] name` text.
 - Closes stack on the END card: two-pass render (`collect_delims` counts per
-  column first), outermost `]` ON the card's right edge (`CLOSE_NUDGE`) and
-  TALLEST (hooks wrap the inner ones), inner ones step 1.5 GUI left over the
-  card art — reads inner→outer left-to-right, contained within the card.
+  column first), INNERMOST `]` ON the card's right edge, outer ones step
+  1.5 GUI RIGHT into the slot gap, outermost TALLEST (hooks wrap the inner
+  ones) — reads inner→outer left-to-right. Flipped 2026-06-11 (user call):
+  they used to step LEFT over the card art; closes must start at the end of
+  the slot, not push into it.
 - Drawn at **z = -10**: in front of the engine's spell-frame layer ("lower z
   = front"; z 1 lost to the frames).
 - On by default (`show_slot_brackets`, RUNTIME scope).

@@ -20,8 +20,8 @@ Two views, both live while the inventory is open:
    each group's first and last card — SLIME rainbow parens, color cycling by
    nesting depth, no text labels (the card art already says what the group
    is). Leading modifiers sit *outside* the brackets, matching Lisp
-   notation; closes that share a card nest within it, outermost on the edge
-   with its hooks wrapping the inner ones. **Orange marks the wrap**: the
+   notation; closes that share a card stack outward from its right edge,
+   the outermost's hooks wrapping the inner ones. **Orange marks the wrap**: the
    group the wrap happened in gets an orange `wraps to front` tag, orange brackets
    around the wrapped-in cards at the wand's start, and a carriage-return
    line under the row connecting the two — "the draw continues here".

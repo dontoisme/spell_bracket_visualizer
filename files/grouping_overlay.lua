@@ -290,10 +290,10 @@ end
 
 -- Collect one wand's group delimiters (all casts) for two-pass rendering.
 -- Two passes because closing brackets need the per-column TOTAL before any
--- can be placed: the OUTERMOST sits on the card's right edge and inner ones
--- step left over the card art (inner -> outer reads left -> right, like
--- nested parens on paper). Parents are collected before their children, so
--- per column the collection order is outer -> inner.
+-- can be placed: the INNERMOST sits on the card's right edge and outer ones
+-- step right into the slot gap (inner -> outer still reads left -> right,
+-- like nested parens on paper). Parents are collected before their children,
+-- so per column the collection order is outer -> inner.
 -- The span starts at the group's OWN card (node.head): leading modifiers sit
 -- outside the parens, Lisp-style, matching the panel's "[mods] name" layout.
 -- `xs` maps deck index -> real slot column (handles empty slots in the wand).
@@ -357,15 +357,17 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 			GuiText(gui, lx, ya.top - 11, "wraps to front")
 		end
 
-		-- close: outermost ] ON the card's right edge (s = 0: collected
-		-- first, placed rightmost, tallest so its hooks wrap the inner
-		-- ones); inner brackets step LEFT over the card art, so the stack
-		-- reads inner -> outer left-to-right and stays within the card
+		-- close: innermost ] sits ON the card's right edge and outer
+		-- brackets step RIGHT into the slot gap (outermost furthest out
+		-- and tallest, its hooks wrapping the inner ones) -- closes start
+		-- at the end of the slot and never push into the card art (user
+		-- call 2026-06-11; they used to step left over the card)
 		local s = seen[key(g)] or 0
 		seen[key(g)] = s + 1
-		local grow = (counts[key(g)] - 1 - s) * STACK_Y
+		local o = counts[key(g)] - 1 - s -- 0 = innermost (collected last)
+		local grow = o * STACK_Y
 		local rx = sw * (BOX.slot0_x + g.cb * BOX.pitch + BOX.halfw)
-			- BAR_W - CLOSE_NUDGE - s * STACK_X
+			- BAR_W - CLOSE_NUDGE + o * STACK_X
 		bracket(gui, idc, rx, yb.top - grow - BRACKET_RAISE,
 			yb.bot + grow - BRACKET_RAISE, -1, g.c)
 
