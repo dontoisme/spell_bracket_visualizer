@@ -165,16 +165,10 @@ local function walk(rows, node, ancestor_colors, depth)
 	end
 
 	local name = display_name(node.id)
-	local label
-	if node.kind == "multicast" then
-		-- no "xN" suffix: the spell name (Double spell, ...) already says it
-		-- and the indented children below show what was gathered
-		label = mods .. name
-	elseif node.kind == "trigger" then
-		label = mods .. name .. "  (trig " .. tostring(node.payload) .. ")"
-	else
-		label = mods .. name
-	end
+	-- no "xN" / "(trig N)" suffixes (user calls, 2026-06-11): the spell name
+	-- already says it and the indented children below show what was gathered
+	-- or carried as payload
+	local label = mods .. name
 	if node.dangling then label = label .. "  (no projectile)" end
 	if node.wrap then label = "~ " .. label end
 
@@ -274,6 +268,9 @@ local STACK_Y = 1   -- vertical growth per stack level: outer brackets are talle
 -- ~2px outside the visible frame, so no extra nudges are needed.
 local CLOSE_NUDGE = 0 -- extra left shift of closing brackets
 local OPEN_NUDGE  = 0 -- extra left shift of opening brackets
+local OPEN_RAISE  = 2 -- GUI: opening brackets sit this much higher than the
+                      -- slot row, so their top hook overlaps the card frame's
+                      -- top edge (user-tuned from an in-game screenshot)
 local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
@@ -306,15 +303,10 @@ local function collect_delims(nodes, depth, cols, rows, out)
 	for _, node in ipairs(nodes) do
 		if node.children and #node.children > 0 and node.last then
 			local head = node.head or node.first
-			-- multicasts get NO label: the card art already says x2/x3 and
-			-- the bracket span shows what was gathered (user call,
-			-- 2026-06-11 -- the xN text was clutter that collided with
-			-- neighboring labels). Triggers keep "trig N": payload count
-			-- isn't always readable off the card.
-			local lbl
-			if node.kind ~= "multicast" then
-				lbl = "trig " .. tostring(node.payload)
-			end
+			-- Brackets carry NO text labels (user calls, 2026-06-11): the
+			-- card art already says x2/x3, a trigger's payload shows as the
+			-- nested bracket, and the labels collided ("trig 1x3"). Only
+			-- the orange ~wrap tag remains.
 			-- The wrap apparatus (orange ~wrap tag, wrapped-segment brackets,
 			-- return line) belongs to the INNERMOST group the wrap happened
 			-- in. Ancestors inherit wfirst but must not redraw it -- and they
@@ -332,7 +324,6 @@ local function collect_delims(nodes, depth, cols, rows, out)
 				ra = rows[head] or 0,          -- 0-based slot rows
 				rb = rows[node.last] or 0,
 				c = nest_color(depth),
-				lbl = lbl,
 				-- wrapped-in segment (cards pulled from the wand's start)
 				w1 = wrap_here and (cols[node.wfirst] or (node.wfirst - 1)) or nil,
 				w2 = wrap_here and (cols[node.wlast] or (node.wlast - 1)) or nil,
@@ -353,18 +344,13 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 		local ya = rows_geo[g.ra + 1] or rows_geo[1]
 		local yb = rows_geo[g.rb + 1] or rows_geo[1]
 
-		-- open: [ just left of the card, over the slot's left edge, label
-		-- above (the ~wrap tag, when present, is appended in wrap orange)
+		-- open: [ just left of the card, raised so its top hook overlaps the
+		-- slot's top edge (the ~wrap tag, when present, sits above in orange)
 		local lx = sw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
-		bracket(gui, idc, lx, ya.top, ya.bot, 1, g.c)
-		if g.lbl then
-			GuiColorSetForNextWidget(gui, g.c[1], g.c[2], g.c[3], 1)
-			GuiText(gui, lx, ya.top - 9, g.lbl)
-		end
+		bracket(gui, idc, lx, ya.top - OPEN_RAISE, ya.bot - OPEN_RAISE, 1, g.c)
 		if g.w1 then
-			local lw = g.lbl and (GuiGetTextDimensions(gui, g.lbl)) + 2 or 0
 			GuiColorSetForNextWidget(gui, WRAP_COLOR[1], WRAP_COLOR[2], WRAP_COLOR[3], 1)
-			GuiText(gui, lx + lw, ya.top - 9, "~wrap")
+			GuiText(gui, lx, ya.top - 9, "~wrap")
 		end
 
 		-- close: outermost ] ON the card's right edge (s = 0: collected
@@ -388,12 +374,13 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 			local wlx = sw * (BOX.slot0_x + g.w1 * BOX.pitch - BOX.halfw) - OPEN_NUDGE
 			local wrx = sw * (BOX.slot0_x + g.w2 * BOX.pitch + BOX.halfw)
 				- BAR_W - CLOSE_NUDGE
-			bracket(gui, idc, wlx, yw.top, yw.bot, 1, WRAP_COLOR)
+			bracket(gui, idc, wlx, yw.top - OPEN_RAISE, yw.bot - OPEN_RAISE, 1, WRAP_COLOR)
 			bracket(gui, idc, wrx, yw.top, yw.bot, -1, WRAP_COLOR)
 			local ry = yb.bot + grow + 2 -- return line sits just below the close's row
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, yb.bot + grow, 1, ry - (yb.bot + grow) + 1, WRAP_COLOR)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, ry, rx - wlx, 1, WRAP_COLOR)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, yw.bot, 1, ry - yw.bot + 1, WRAP_COLOR)
+			-- riser meets the (raised) wrapped-segment open bracket's bottom
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, yw.bot - OPEN_RAISE, 1, ry - (yw.bot - OPEN_RAISE) + 1, WRAP_COLOR)
 		end
 	end
 end

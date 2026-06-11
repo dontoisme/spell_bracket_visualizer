@@ -18,8 +18,8 @@ Two views, both live while the inventory is open:
    it clamps to the screen (`... +N more`) instead of overflowing.
 2. **Slot brackets** (in the wand UI itself): `[ ]` bracket glyphs hugging
    each group's first and last card — SLIME rainbow parens, color cycling by
-   nesting depth, with the group's `x2` / `trig N` label above the opening
-   bracket. Leading modifiers sit *outside* the brackets, matching Lisp
+   nesting depth, no text labels (the card art already says what the group
+   is). Leading modifiers sit *outside* the brackets, matching Lisp
    notation; closes that share a card nest within it, outermost on the edge
    with its hooks wrapping the inner ones. **Orange marks the wrap**: the
    group the wrap happened in gets an orange `~wrap` tag, orange brackets

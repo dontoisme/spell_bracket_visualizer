@@ -171,8 +171,10 @@ function M.simulate(tokens, meta, opts)
 		for _, cd in ipairs(hand) do discard[#discard + 1] = cd end
 		hand = {}
 		if wrapped then
-			-- start_reload: the recharge cycle ends after a wrapping cast;
-			-- cards after this point never fire this cycle.
+			-- start_reload: the recharge cycle ends after a wrapping cast.
+			-- (No card is left unfired: a wrap requires an EMPTY deck, so
+			-- everything fired before it; the remaining deck here is the
+			-- returned discard the wrapped cast didn't re-draw.)
 			any_wrapped = true
 			break
 		end

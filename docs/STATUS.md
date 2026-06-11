@@ -125,10 +125,19 @@ Iterated v1→final against in-game screenshots + user mockups. Final design:
 
 - **[ ] glyphs** (1-GUI bar + 3-GUI hooks pointing into the group), card-frame
   height, SLIME **rainbow by nesting depth** (`RAINBOW`/`nest_color`) — groups
-  ALWAYS keep their rainbow color. Label (`trig N` only) above the opening
-  bracket in the group color — multicast `xN` labels were REMOVED 2026-06-11
-  (user call: the card art already says x2/x3 and the labels collided with
-  neighbors, e.g. "trig 1x3"); the panel's `xN` suffix went with them.
+  ALWAYS keep their rainbow color. ALL text labels REMOVED 2026-06-11
+  (user calls: first the multicast `xN` — the card art already says x2/x3
+  and labels collided, e.g. "trig 1x3" — then `trig N` too; the panel's
+  `xN` and `(trig N)` suffixes went with them). Only the orange `~wrap` tag
+  remains. Same day: opening brackets raised by `OPEN_RAISE = 2` GUI so the
+  top hook overlaps the card frame's top edge (user-tuned from screenshot).
+- **"Post-wrap dead cards" is a NON-feature (analyzed 2026-06-11).** The UX
+  review claimed cards after a wrapping cast "never fire" and deserve a
+  marker. Wrong: a wrap only triggers on a forced draw with an EMPTY deck,
+  so by wrap time every card has already fired this cycle; cards left in
+  the deck after a wrapping cast are returned discard — they fired in
+  earlier casts. Nothing to mark; the orange wrap segment + `~` already
+  shows the cards that fire twice. Do not re-add.
 - **Orange = the wrap, exclusively.** The innermost group a wrap happened in
   (deepest node with a wrapped span; ancestors inherit `wfirst` but don't
   redraw) gets, in `WRAP_COLOR`: an appended `~wrap` tag, `[ ]` around the
