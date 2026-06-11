@@ -15,8 +15,10 @@ A first feature — recoloring every spell icon with a type-colored border — w
 (`recolor_actions.lua`, `known_ids.lua`, `files/icons/`, the `OnModInit`
 `ModLuaFileAppend` hook) lives in git history; `tools/gen_icons.py` remains.
 
-The mod directory IS the install location (`…/Noita/mods/testMod`), so edits here
-are live in the game on next run-load (quit to menu → Continue).
+The mod directory IS the install location (`…/Noita/mods/spell_bracket_visualizer`),
+so edits here are live in the game on next run-load (quit to menu → Continue).
+(Renamed from `testMod` 2026-06-11, before the first Workshop upload — renaming
+after release would orphan subscribers' saved settings.)
 
 ## Commands
 
@@ -104,7 +106,8 @@ init.lua
 ```
 
 Settings (`settings.lua`): `show_grouping` (default on), `show_slot_brackets`
-(default off) — both RUNTIME scope, read via `ModSettingGet("testMod.<id>")`.
+(default off) — both RUNTIME scope, read via
+`ModSettingGet("spell_bracket_visualizer.<id>")`.
 
 ## Conventions
 

@@ -12,8 +12,8 @@
 -- OnWorldPostUpdate. All drawing uses our own Gui at coordinates we control, so
 -- it never depends on the engine's (unexposed) spell-slot positions.
 
-local meta = dofile_once("mods/testMod/files/structure_meta.lua") or {}
-local wand_structure = dofile_once("mods/testMod/files/wand_structure.lua")
+local meta = dofile_once("mods/spell_bracket_visualizer/files/structure_meta.lua") or {}
+local wand_structure = dofile_once("mods/spell_bracket_visualizer/files/wand_structure.lua")
 
 local M = {}
 local gui = nil
@@ -167,8 +167,9 @@ local function walk(rows, node, ancestor_colors, depth)
 	local name = display_name(node.id)
 	local label
 	if node.kind == "multicast" then
-		local count = (node.group == -1) and "all" or tostring(node.group)
-		label = mods .. name .. "  x" .. count
+		-- no "xN" suffix: the spell name (Double spell, ...) already says it
+		-- and the indented children below show what was gathered
+		label = mods .. name
 	elseif node.kind == "trigger" then
 		label = mods .. name .. "  (trig " .. tostring(node.payload) .. ")"
 	else
@@ -220,7 +221,7 @@ end
 -- first and last card, in the group's color, label above the opening one.
 -- The selected box renders taller and shifts everything below it; the selected
 -- box IS the held wand (Inventory2Component.mActiveItem), so we correct for it.
-local PIXEL = "mods/testMod/files/ui/pixel.png"
+local PIXEL = "mods/spell_bracket_visualizer/files/ui/pixel.png"
 -- The wand boxes are laid out in engine-UI units (5 screen px each at
 -- 2000x1125 = 0.0025 of GUI width; slots are 13u pitch / 12u frames). Box
 -- HEIGHT is per-wand with a FLOOR: max(37u, 14u + 2u per wand-sprite pixel).
@@ -305,10 +306,13 @@ local function collect_delims(nodes, depth, cols, rows, out)
 	for _, node in ipairs(nodes) do
 		if node.children and #node.children > 0 and node.last then
 			local head = node.head or node.first
+			-- multicasts get NO label: the card art already says x2/x3 and
+			-- the bracket span shows what was gathered (user call,
+			-- 2026-06-11 -- the xN text was clutter that collided with
+			-- neighboring labels). Triggers keep "trig N": payload count
+			-- isn't always readable off the card.
 			local lbl
-			if node.kind == "multicast" then
-				lbl = "x" .. ((node.group == -1) and "all" or tostring(node.group))
-			else
+			if node.kind ~= "multicast" then
 				lbl = "trig " .. tostring(node.payload)
 			end
 			-- The wrap apparatus (orange ~wrap tag, wrapped-segment brackets,
@@ -353,12 +357,14 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 		-- above (the ~wrap tag, when present, is appended in wrap orange)
 		local lx = sw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
 		bracket(gui, idc, lx, ya.top, ya.bot, 1, g.c)
-		GuiColorSetForNextWidget(gui, g.c[1], g.c[2], g.c[3], 1)
-		GuiText(gui, lx, ya.top - 9, g.lbl)
+		if g.lbl then
+			GuiColorSetForNextWidget(gui, g.c[1], g.c[2], g.c[3], 1)
+			GuiText(gui, lx, ya.top - 9, g.lbl)
+		end
 		if g.w1 then
-			local lw = (GuiGetTextDimensions(gui, g.lbl))
+			local lw = g.lbl and (GuiGetTextDimensions(gui, g.lbl)) + 2 or 0
 			GuiColorSetForNextWidget(gui, WRAP_COLOR[1], WRAP_COLOR[2], WRAP_COLOR[3], 1)
-			GuiText(gui, lx + lw + 2, ya.top - 9, "~wrap")
+			GuiText(gui, lx + lw, ya.top - 9, "~wrap")
 		end
 
 		-- close: outermost ] ON the card's right edge (s = 0: collected
@@ -585,7 +591,7 @@ end
 -- Delimit each measured wand box's spell row.
 local function draw_box_brackets(gui, sw, sh, wands)
 	local debug_boxes = type(ModSettingGet) == "function"
-		and ModSettingGet("testMod.debug_boxes") == true
+		and ModSettingGet("spell_bracket_visualizer.debug_boxes") == true
 
 	local idc = { n = 0 }
 	for i, wd in ipairs(wands) do
@@ -660,8 +666,9 @@ end
 -- screen; overflow folds into one "... +N more" line. Either way it never
 -- covers a wand box, so the old z-order fight with the engine's spell frames
 -- and our slot brackets can't happen.
-local DOCK_GAP     = 6  -- GUI between the boxes and the docked panel
+local DOCK_GAP     = 14 -- GUI between the boxes and the docked panel
 local RIGHT_KEEPOUT = 64 -- GUI kept clear of the right-side HUD column
+local BOTTOM_MARGIN = 12 -- GUI kept clear at the screen bottom
 local function draw_panel(gui, rows, title, sw, sh, anchor)
 	if #rows == 0 then return end
 
@@ -686,9 +693,12 @@ local function draw_panel(gui, rows, title, sw, sh, anchor)
 		-- so we never ride into the top bar / right HUD. (No scroll container
 		-- on purpose: this gui is NonInteractive so hovering it can never
 		-- block firing or inventory clicks -- see the fire-block fix.)
-		local bottom = y0 + line_h + 2 + #rows * line_h
-		if bottom > sh - 8 then
-			y0 = math.max(math.floor(BOX.top0 * U * sw), y0 - (bottom - (sh - 8)))
+		-- fit_y0 derives from the SAME budget as the row clamp below, so a
+		-- slid panel never folds rows it had room for (the old sh-8 target
+		-- was 2 GUI tighter than the clamp: every slide ate 2 rows).
+		local fit_y0 = sh - BOTTOM_MARGIN - pad - 2 - (#rows + 1) * line_h
+		if y0 > fit_y0 then
+			y0 = math.max(math.floor(BOX.top0 * U * sw), math.floor(fit_y0))
 		end
 	else
 		px = math.floor((sw - panel_w) / 2)
@@ -696,7 +706,7 @@ local function draw_panel(gui, rows, title, sw, sh, anchor)
 	end
 
 	-- clamp to the screen: keep the rows that fit, fold the rest
-	local max_rows = math.floor((sh - 6 - y0 - pad - 2 - line_h) / line_h)
+	local max_rows = math.floor((sh - BOTTOM_MARGIN - y0 - pad - 2 - line_h) / line_h)
 	if max_rows < 2 then max_rows = 2 end
 	if #rows > max_rows then
 		local kept = {}
@@ -750,8 +760,8 @@ function M.update()
 	if type(GameIsInventoryOpen) ~= "function" or not GameIsInventoryOpen() then return end
 
 	local get = (type(ModSettingGet) == "function") and ModSettingGet or function() return nil end
-	local show_panel = get("testMod.show_grouping") ~= false
-	local show_slots = get("testMod.show_slot_brackets") ~= false
+	local show_panel = get("spell_bracket_visualizer.show_grouping") ~= false
+	local show_slots = get("spell_bracket_visualizer.show_slot_brackets") ~= false
 	if not show_panel and not show_slots then return end
 
 	local sw, sh = GuiGetScreenDimensions(gui)

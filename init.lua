@@ -14,15 +14,15 @@ local grouping_failed = false
 function OnWorldPostUpdate()
 	if grouping_failed then return end
 	if grouping == nil then
-		grouping = dofile_once("mods/testMod/files/grouping_overlay.lua")
+		grouping = dofile_once("mods/spell_bracket_visualizer/files/grouping_overlay.lua")
 		if type(grouping) ~= "table" then grouping_failed = true; return end
 	end
 	local ok, err = pcall(grouping.update)
 	if not ok then
 		grouping_failed = true
-		print("[Spell Bracket Visualizer] grouping panel disabled: " .. tostring(err))
+		print("[Spell Bracket Visualizer] overlay disabled (panel + brackets): " .. tostring(err))
 		if type(GamePrint) == "function" then
-			pcall(GamePrint, "[Spell Bracket Visualizer] panel error: " .. tostring(err))
+			pcall(GamePrint, "[Spell Bracket Visualizer] overlay error: " .. tostring(err))
 		end
 	end
 end

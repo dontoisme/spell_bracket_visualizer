@@ -8,7 +8,7 @@ Pure stdlib (zlib) — no Pillow.
 """
 import struct, zlib, re, os, sys
 
-# Paths are derived from this script's location (mods/testMod/tools/gen_icons.py):
+# Paths are derived from this script's location (mods/spell_bracket_visualizer/tools/gen_icons.py):
 #   MOD  = the mod root (parent of tools/)
 #   WAK  = <Noita install>/data/data.wak  (mods/<mod> -> ../../data/data.wak)
 # Override the wak path with argv[1] or $NOITA_WAK if your install differs.

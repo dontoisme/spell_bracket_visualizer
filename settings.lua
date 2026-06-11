@@ -1,6 +1,6 @@
 dofile("data/scripts/lib/mod_settings.lua") -- see this file for documentation on the settings API
 
-local mod_id = "testMod"
+local mod_id = "spell_bracket_visualizer"
 mod_settings_version = 1
 mod_settings = {
 	{

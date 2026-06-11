@@ -19,7 +19,10 @@ A wand-readability mod with two features:
 
 ## Where the code lives
 
-- Repo: `…/Noita/mods/testMod` (git). Everything lives on **`main`**; the
+- Repo: `…/Noita/mods/spell_bracket_visualizer` (git; folder + settings
+  namespace renamed from `testMod` 2026-06-11, pre-Workshop — the user must
+  re-enable the mod in Noita's mod menu once, and old `testMod.*` settings
+  reset to defaults). Everything lives on **`main`**; the
   `grouping-brackets` branch was merged 2026-06-09 and deleted after the
   feature shipped. (The icon recolor was later retired; see below.)
 
@@ -87,6 +90,10 @@ A wand-readability mod with two features:
     wand: top-aligning there folded most of the tree into "+7 more"):
     docked panels bottom-anchor against the screen edge and grow upward,
     floored at the stack top (the column right of the boxes is free).
+    v2 fix (same day, in-game catch): the slide target and the row clamp now
+    share one budget — the first slide aimed 2 GUI past the clamp, so every
+    slid panel folded its last rows into "+2 more". Also DOCK_GAP 6→14
+    (panel background was kissing the box borders) and BOTTOM_MARGIN 12.
     A Spell-Lab-style scroll bar was considered and rejected: the gui is
     deliberately NonInteractive (the fire-block fix, 7d9e3ac), and a scroll
     container would recapture the mouse.
@@ -118,8 +125,10 @@ Iterated v1→final against in-game screenshots + user mockups. Final design:
 
 - **[ ] glyphs** (1-GUI bar + 3-GUI hooks pointing into the group), card-frame
   height, SLIME **rainbow by nesting depth** (`RAINBOW`/`nest_color`) — groups
-  ALWAYS keep their rainbow color. Label (`x2`/`trig N`) above the opening
-  bracket in the group color.
+  ALWAYS keep their rainbow color. Label (`trig N` only) above the opening
+  bracket in the group color — multicast `xN` labels were REMOVED 2026-06-11
+  (user call: the card art already says x2/x3 and the labels collided with
+  neighbors, e.g. "trig 1x3"); the panel's `xN` suffix went with them.
 - **Orange = the wrap, exclusively.** The innermost group a wrap happened in
   (deepest node with a wrapped span; ancestors inherit `wfirst` but don't
   redraw) gets, in `WRAP_COLOR`: an appended `~wrap` tag, `[ ]` around the
