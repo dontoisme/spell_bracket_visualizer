@@ -109,6 +109,14 @@ A wand-readability mod with two features:
     wands: the dock landed inside their boxes): right edge ≥ 164.5 GUI
     (`BOX.min_right`, pixel-measured) regardless of slots; width =
     max(header min, slot row). Caps ≤7 are header-bound, 8+ slot-bound.
+  - **Per-tail dock candidates** (in-game catch: a 17-slot wand mid-stack
+    pushed a wide panel into the below-stack fallback as a 2-row stub even
+    though the space right of the narrow bottom box was free): a panel
+    whose top is at box j's top can only intersect bands of boxes j..n, so
+    each j is tried in order (top-aligned with the selected box when
+    j ≤ sel), first-full-fit wins, best-partial otherwise, below-stack
+    only if it beats them all. Verified by a Python dry-run mirror of the
+    placement math against all prior screenshot layouts.
   - Panel text palette brightened (the old icon-border colors — dark red
     PROJECTILE etc. — were barely legible as 1px text on the dark panel).
 - Shows: title with spells/cast + shuffle warning, an "always:" line for

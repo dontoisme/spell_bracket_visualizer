@@ -439,7 +439,6 @@ local function collect_wand_boxes(gui, sw)
 	table.sort(wands, function(p, q) return p.slot < q.slot end)
 
 	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
-	local right = 0
 	for _, wd in ipairs(wands) do
 		wd.tokens, wd.always, wd.xs = read_deck(wd.e)
 		wd.cfg = read_config(wd.e)
@@ -465,19 +464,19 @@ local function collect_wand_boxes(gui, sw)
 			wd.rows_geo[r + 1] = { top = bot - BOX.slot_h * U * sw, bot = bot }
 		end
 
-		-- box right edge: the wider of the box's minimum (header-driven,
-		-- BOX.min_right) and the slot row (last slot's frame edge + ~5 GUI
-		-- of border; col-0 frame left sits at 26 GUI, box left at ~21)
-		local er = sw * BOX.min_right
+		-- box right edge (GUI): the wider of the box's minimum (header-
+		-- driven, BOX.min_right) and the slot row (last slot's frame edge
+		-- + ~5 GUI of border; col-0 frame left sits at 26 GUI, box at ~21)
+		wd.right = sw * BOX.min_right
 		if max_slot >= 0 then
 			local last_col = math.min(max_slot, BOX.per_row - 1)
-			er = math.max(er, sw * (BOX.slot0_x + last_col * BOX.pitch + BOX.halfw) + 5)
+			wd.right = math.max(wd.right,
+				sw * (BOX.slot0_x + last_col * BOX.pitch + BOX.halfw) + 5)
 		end
-		if er > right then right = er end
 
 		box_top = box_top + wd.box_h + BOX.gap
 	end
-	return wands, box_top * U * sw, right
+	return wands, box_top * U * sw
 end
 
 -- Delimit each measured wand box's spell row.
@@ -513,13 +512,15 @@ end
 
 -- The panel describes the HELD wand (= the selected box), so it stays put
 -- while the user rearranges that wand's spells and live-updates as the cast
--- order changes -- no popping like a hover tooltip would. It docks right of
--- the wand-box stack, top-aligned with the selected wand's own box; when the
--- boxes leave no room beside them (a capacity-26 box spans nearly the whole
--- screen) it falls back to centered below the stack. Height is clamped to the
--- screen; overflow folds into one "... +N more" line. Either way it never
--- covers a wand box, so the old z-order fight with the engine's spell frames
--- and our slot brackets can't happen.
+-- order changes -- no popping like a hover tooltip would. It docks in the
+-- free column right of the wand boxes, top-aligned with the selected wand's
+-- own box when there's room, sliding down past wider boxes / up from the
+-- screen bottom when there isn't (see placement below). Height is clamped
+-- to the screen; overflow folds into one "... +N more" line. It never
+-- covers a wand box, so the old z-order fight with the engine's spell
+-- frames and our slot brackets can't happen. (No scroll container on
+-- purpose: this gui is NonInteractive so hovering it can never block
+-- firing or inventory clicks -- see the fire-block fix.)
 local DOCK_GAP     = 14 -- GUI between the boxes and the docked panel
 local RIGHT_KEEPOUT = 64 -- GUI kept clear of the right-side HUD column
 local BOTTOM_MARGIN = 12 -- GUI kept clear at the screen bottom
@@ -537,24 +538,43 @@ local function draw_panel(gui, rows, title, sw, sh, anchor)
 	end
 
 	local panel_w = max_w + pad * 2
-	local px, y0
-	if anchor.dock_x + panel_w <= sw - RIGHT_KEEPOUT then
-		px, y0 = math.floor(anchor.dock_x), math.floor(anchor.dock_y)
-		-- Stay attached beside the stack but keep the WHOLE tree readable:
-		-- when the selected wand sits low, slide the panel up (bottom-anchor)
-		-- instead of truncating most of it at the screen edge. The column
-		-- right of the boxes is free all the way up; floor at the stack top
-		-- so we never ride into the top bar / right HUD. (No scroll container
-		-- on purpose: this gui is NonInteractive so hovering it can never
-		-- block firing or inventory clicks -- see the fire-block fix.)
-		-- fit_y0 derives from the SAME budget as the row clamp below, so a
-		-- slid panel never folds rows it had room for (the old sh-8 target
-		-- was 2 GUI tighter than the clamp: every slide ate 2 rows).
-		local fit_y0 = sh - BOTTOM_MARGIN - pad - 2 - (#rows + 1) * line_h
-		if y0 > fit_y0 then
-			y0 = math.max(math.floor(BOX.top0 * U * sw), math.floor(fit_y0))
+
+	-- Placement. Boxes differ in width, so docking right of the WHOLE stack
+	-- wastes the space beside its narrow tail: a panel whose top is at box
+	-- j's top can only intersect the bands of boxes j..n (bands never
+	-- overlap vertically), so it only has to clear THEIR right edges. Try
+	-- j = 1..n in order -- top-aligned with the selected box when allowed
+	-- (j <= sel), else at box j's top -- with the bottom-anchored slide-up
+	-- floored at box j's top. Take the first candidate that shows every
+	-- row; otherwise remember the one showing the most, and fall back to
+	-- centered-below-the-stack only if it beats them all. This is what
+	-- pushes the panel BELOW a wide mid-stack box (17-slot wand above two
+	-- small ones) instead of folding it to a 2-row stub at the bottom.
+	-- fit_y0/rows_at share one budget with the row clamp below, so a slid
+	-- panel never folds rows it had room for.
+	local fit_y0 = sh - BOTTOM_MARGIN - pad - 2 - (#rows + 1) * line_h
+	local function rows_at(y)
+		return math.floor((sh - BOTTOM_MARGIN - y - pad - 2 - line_h) / line_h)
+	end
+	local sel_top = anchor.boxes[anchor.sel].top
+	local px, y0, best_n
+	for j = 1, #anchor.boxes do
+		local x = 0
+		for k = j, #anchor.boxes do
+			x = math.max(x, anchor.boxes[k].right)
 		end
-	else
+		x = math.floor(x) + DOCK_GAP
+		if x + panel_w <= sw - RIGHT_KEEPOUT then
+			local floor_y = anchor.boxes[j].top
+			local y = math.max(sel_top, floor_y)
+			if y > fit_y0 then y = math.max(floor_y, fit_y0) end
+			y = math.floor(y)
+			local n = rows_at(y)
+			if n >= #rows then px, y0, best_n = x, y, nil; break end
+			if best_n == nil or n > best_n then px, y0, best_n = x, y, n end
+		end
+	end
+	if px == nil or (best_n ~= nil and rows_at(anchor.below_y) > best_n) then
 		px = math.floor((sw - panel_w) / 2)
 		y0 = math.floor(anchor.below_y)
 	end
@@ -621,7 +641,7 @@ function M.update()
 	local sw, sh = GuiGetScreenDimensions(gui)
 
 	-- one measure/read pass shared by the brackets and the panel's dock anchor
-	local boxes, stack_bot, stack_right = collect_wand_boxes(gui, sw)
+	local boxes, stack_bot = collect_wand_boxes(gui, sw)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
 		-- strongly negative z = "bring to front": lower z draws on top, and
@@ -633,18 +653,22 @@ function M.update()
 
 	if show_panel then -- companion cast-structure tree for the active/held wand
 		local wand = get_active_wand()
-		local wd = nil
-		for _, b in ipairs(boxes) do
-			if b.e == wand then wd = b; break end
+		local wd, sel = nil, nil
+		for i, b in ipairs(boxes) do
+			if b.e == wand then wd, sel = b, i; break end
 		end
 		-- Shuffle wands get nothing at all (user call 2026-06-11): the deck
 		-- order randomizes at cast time, so even the panel's slot-order tree
 		-- is just one arrangement of many -- not worth showing.
 		if wd and not wd.cfg.shuffle and (#wd.tokens > 0 or #wd.always > 0) then
 			local title = "Wand structure  (" .. wd.cfg.spells_per_cast .. "/cast)"
+			local geo = {} -- per-box GUI geometry for the dock candidates
+			for i, b in ipairs(boxes) do
+				geo[i] = { top = b.top * U * sw, right = b.right }
+			end
 			local anchor = {
-				dock_x  = stack_right + DOCK_GAP,
-				dock_y  = wd.top * U * sw,
+				boxes   = geo,
+				sel     = sel,
 				below_y = stack_bot + DOCK_GAP,
 			}
 			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always), title, sw, sh, anchor)
