@@ -4,6 +4,9 @@
 -- (files/wand_structure.lua), and draws an indented, color-coded tree of each
 -- cast's groupings -- including when the wand WRAPS (forced draws past the
 -- deck's end pulling cards from the wand's start: the rapid-fire mechanic).
+-- The panel docks beside the SELECTED wand's box (below the stack when the
+-- boxes leave no room) and is height-clamped to the screen, so it never sits
+-- on top of the wand boxes or the slot brackets.
 --
 -- Loaded once from init.lua; M.update() is called every frame from
 -- OnWorldPostUpdate. All drawing uses our own Gui at coordinates we control, so
@@ -15,16 +18,19 @@ local wand_structure = dofile_once("mods/testMod/files/wand_structure.lua")
 local M = {}
 local gui = nil
 
--- type -> RGB (0..1) for panel row labels (the retired icon-recolor palette).
+-- type -> RGB (0..1) for panel row labels. Brightened from the retired
+-- icon-recolor border palette: those values were tuned for icon frames, and
+-- as 1px text on the dark nine-piece panel the dark red/blue rows were
+-- barely legible (UX review 2026-06-11).
 local COLOR = {
-	PROJECTILE        = { 0.82, 0.25, 0.25 },
-	STATIC_PROJECTILE = { 0.25, 0.78, 0.30 },
-	MODIFIER          = { 0.30, 0.45, 0.92 },
-	DRAW_MANY         = { 0.85, 0.80, 0.25 },
-	MATERIAL          = { 0.80, 0.30, 0.80 },
-	UTILITY           = { 0.25, 0.80, 0.80 },
-	PASSIVE           = { 0.92, 0.58, 0.18 },
-	OTHER             = { 0.72, 0.72, 0.72 },
+	PROJECTILE        = { 1.00, 0.45, 0.45 },
+	STATIC_PROJECTILE = { 0.40, 0.92, 0.45 },
+	MODIFIER          = { 0.50, 0.65, 1.00 },
+	DRAW_MANY         = { 0.95, 0.90, 0.35 },
+	MATERIAL          = { 0.95, 0.50, 0.95 },
+	UTILITY           = { 0.40, 0.90, 0.90 },
+	PASSIVE           = { 1.00, 0.68, 0.28 },
+	OTHER             = { 0.78, 0.78, 0.78 },
 }
 local HEADER_COLOR = { 0.85, 0.85, 0.85 }
 local WRAP_COLOR   = { 1.00, 0.45, 0.15 } -- loud: wrapping is the headline info
@@ -515,10 +521,14 @@ local function wand_sprite_h(gui, wand)
 	return 9, "?"
 end
 
--- Enumerate carried wands (in quick-slot order) and delimit each one's box row.
-local function draw_box_brackets(gui, sw, sh)
+-- Measure every carried wand's box (quick-slot order): the stacking model plus
+-- each wand's deck, config, sprite and slot-row geometry. One shared pass --
+-- the slot brackets render from it, and the panel docks against it (the
+-- selected wand's box top + the stack's bottom/right extents).
+-- Returns wands, stack bottom (GUI y) and stack right edge (GUI x).
+local function collect_wand_boxes(gui, sw)
 	local players = EntityGetWithTag("player_unit")
-	if not players or #players == 0 then return end
+	if not players or #players == 0 then return {}, BOX.top0 * U * sw, 0 end
 	local items = GameGetAllInventoryItems(players[1]) or {}
 
 	local wands = {}
@@ -532,36 +542,56 @@ local function draw_box_brackets(gui, sw, sh)
 	end
 	table.sort(wands, function(p, q) return p.slot < q.slot end)
 
+	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
+	local right = 0
+	for _, wd in ipairs(wands) do
+		wd.tokens, wd.always, wd.xs = read_deck(wd.e)
+		wd.cfg = read_config(wd.e)
+		wd.s, wd.sfile = wand_sprite_h(gui, wd.e)
+		wd.sim = wand_structure.simulate(wd.tokens, meta,
+			{ spells_per_cast = wd.cfg.spells_per_cast })
+
+		-- displayed slot rows: capacity wraps every per_row slots (fall back
+		-- to the highest occupied slot if the capacity read failed)
+		local max_slot = wd.cfg.capacity - 1
+		for _, x in ipairs(wd.xs) do if x > max_slot then max_slot = x end end
+		wd.nrows = math.max(1, math.floor(max_slot / BOX.per_row) + 1)
+
+		wd.box_h = math.max(BOX.min_h, BOX.h_pad + BOX.s_scale * wd.s)
+			+ (wd.nrows - 1) * BOX.row_step
+		wd.top = box_top
+		-- the LAST slot row sits row_off above the box bottom; earlier rows
+		-- stack upward by row_step
+		wd.rows_geo = {}
+		for r = 0, wd.nrows - 1 do
+			local bot = (box_top + wd.box_h - BOX.row_off
+				- (wd.nrows - 1 - r) * BOX.row_step) * U * sw
+			wd.rows_geo[r + 1] = { top = bot - BOX.slot_h * U * sw, bot = bot }
+		end
+
+		-- box right edge: last slot's frame edge + ~5 GUI of box border
+		-- (col-0 frame left sits at 26 GUI, box left at ~21)
+		if max_slot >= 0 then
+			local last_col = math.min(max_slot, BOX.per_row - 1)
+			local er = sw * (BOX.slot0_x + last_col * BOX.pitch + BOX.halfw) + 5
+			if er > right then right = er end
+		end
+
+		box_top = box_top + wd.box_h + BOX.gap
+	end
+	return wands, box_top * U * sw, right
+end
+
+-- Delimit each measured wand box's spell row.
+local function draw_box_brackets(gui, sw, sh, wands)
 	local debug_boxes = type(ModSettingGet) == "function"
 		and ModSettingGet("testMod.debug_boxes") == true
 
 	local idc = { n = 0 }
-	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
 	for i, wd in ipairs(wands) do
-		local tokens, _, xs = read_deck(wd.e)
-		local cfg = read_config(wd.e)
-		local s, sfile = wand_sprite_h(gui, wd.e)
-
-		-- displayed slot rows: capacity wraps every per_row slots (fall back
-		-- to the highest occupied slot if the capacity read failed)
-		local max_slot = cfg.capacity - 1
-		for _, x in ipairs(xs) do if x > max_slot then max_slot = x end end
-		local nrows = math.max(1, math.floor(max_slot / BOX.per_row) + 1)
-
-		local box_h = math.max(BOX.min_h, BOX.h_pad + BOX.s_scale * s)
-			+ (nrows - 1) * BOX.row_step
-		-- the LAST slot row sits row_off above the box bottom; earlier rows
-		-- stack upward by row_step
-		local rows_geo = {}
-		for r = 0, nrows - 1 do
-			local bot = (box_top + box_h - BOX.row_off
-				- (nrows - 1 - r) * BOX.row_step) * U * sw
-			rows_geo[r + 1] = { top = bot - BOX.slot_h * U * sw, bot = bot }
-		end
-
 		if debug_boxes then
 			local w = sw * 0.35
-			for r, geo in ipairs(rows_geo) do
+			for r, geo in ipairs(wd.rows_geo) do
 				-- computed slot-row top (green) / bottom (red) per row
 				idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, geo.top, w, 1, { 0.2, 1, 0.2 }, 0.8)
 				idc.n = idc.n + 1; line(gui, 70000 + idc.n, 0, geo.bot, w, 1, { 1, 0.2, 0.2 }, 0.8)
@@ -580,28 +610,24 @@ local function draw_box_brackets(gui, sw, sh)
 				end
 			end
 			GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
-			GuiText(gui, w + 4, rows_geo[1].bot - 10, string.format(
+			GuiText(gui, w + 4, wd.rows_geo[1].bot - 10, string.format(
 				"#%d s=%d H=%d top=%du cap=%d rows=%d row1[%.1f..%.1f]gui %s",
-				i, s, box_h, box_top, cfg.capacity, nrows,
-				rows_geo[1].top, rows_geo[1].bot, tostring(sfile):gsub(".*/", "")))
+				i, wd.s, wd.box_h, wd.top, wd.cfg.capacity, wd.nrows,
+				wd.rows_geo[1].top, wd.rows_geo[1].bot, tostring(wd.sfile):gsub(".*/", "")))
 		end
 
-		box_top = box_top + box_h + BOX.gap
-
-		if #tokens > 0 then
-			local sim = wand_structure.simulate(tokens, meta,
-				{ spells_per_cast = cfg.spells_per_cast })
+		if #wd.tokens > 0 then
 			-- displayed position of each card: wraps every per_row slots
 			local cols, rows = {}, {}
-			for k, x in ipairs(xs) do
+			for k, x in ipairs(wd.xs) do
 				cols[k] = x % BOX.per_row
 				rows[k] = math.floor(x / BOX.per_row)
 			end
 			local groups = {} -- all casts together: closes stack per row+column
-			for _, cast in ipairs(sim.casts) do
+			for _, cast in ipairs(wd.sim.casts) do
 				collect_delims(cast.nodes, 0, cols, rows, groups)
 			end
-			draw_delims(gui, groups, sw, rows_geo, idc)
+			draw_delims(gui, groups, sw, wd.rows_geo, idc)
 		end
 	end
 
@@ -623,9 +649,20 @@ local function draw_debug(gui, sw, sh)
 	end
 end
 
--- ---- companion structure panel (phase 1) -----------------------------------
+-- ---- companion structure panel (docked to the selected wand) ----------------
 
-local function draw_panel(gui, rows, title, sw)
+-- The panel describes the HELD wand (= the selected box), so it stays put
+-- while the user rearranges that wand's spells and live-updates as the cast
+-- order changes -- no popping like a hover tooltip would. It docks right of
+-- the wand-box stack, top-aligned with the selected wand's own box; when the
+-- boxes leave no room beside them (a capacity-26 box spans nearly the whole
+-- screen) it falls back to centered below the stack. Height is clamped to the
+-- screen; overflow folds into one "... +N more" line. Either way it never
+-- covers a wand box, so the old z-order fight with the engine's spell frames
+-- and our slot brackets can't happen.
+local DOCK_GAP     = 6  -- GUI between the boxes and the docked panel
+local RIGHT_KEEPOUT = 64 -- GUI kept clear of the right-side HUD column
+local function draw_panel(gui, rows, title, sw, sh, anchor)
 	if #rows == 0 then return end
 
 	local line_h = 11
@@ -639,9 +676,27 @@ local function draw_panel(gui, rows, title, sw)
 	end
 
 	local panel_w = max_w + pad * 2
+	local px, y0
+	if anchor.dock_x + panel_w <= sw - RIGHT_KEEPOUT then
+		px, y0 = math.floor(anchor.dock_x), math.floor(anchor.dock_y)
+	else
+		px = math.floor((sw - panel_w) / 2)
+		y0 = math.floor(anchor.below_y)
+	end
+
+	-- clamp to the screen: keep the rows that fit, fold the rest
+	local max_rows = math.floor((sh - 6 - y0 - pad - 2 - line_h) / line_h)
+	if max_rows < 2 then max_rows = 2 end
+	if #rows > max_rows then
+		local kept = {}
+		for i = 1, max_rows - 1 do kept[i] = rows[i] end
+		kept[max_rows] = { bars = {},
+			label = "... +" .. (#rows - max_rows + 1) .. " more",
+			color = HEADER_COLOR }
+		rows = kept
+	end
+
 	local panel_h = (#rows + 1) * line_h + pad * 2
-	local px = math.floor((sw - panel_w) / 2) -- center-top, clear of side boxes and right HUD
-	local y0 = 60
 
 	GuiZSet(gui, 4)
 	GuiImageNinePiece(gui, 90210, px - pad, y0 - pad, panel_w, panel_h, 0.85)
@@ -690,32 +745,38 @@ function M.update()
 
 	local sw, sh = GuiGetScreenDimensions(gui)
 
+	-- one measure/read pass shared by the brackets and the panel's dock anchor
+	local boxes, stack_bot, stack_right = collect_wand_boxes(gui, sw)
+
 	if show_slots then -- brackets on every wand box (independent of active wand)
 		-- strongly negative z = "bring to front": lower z draws on top, and
 		-- this must beat the engine's spell-frame layer, not just our own gui
 		GuiZSet(gui, -10)
-		draw_box_brackets(gui, sw, sh)
+		draw_box_brackets(gui, sw, sh, boxes)
 		if DEBUG_RULER then draw_debug(gui, sw, sh) end
 		GuiZSet(gui, 1)
 	end
 
 	if show_panel then -- companion cast-structure tree for the active/held wand
 		local wand = get_active_wand()
-		if wand then
-			local tokens, always = read_deck(wand)
-			if #tokens > 0 or #always > 0 then
-				local cfg = read_config(wand)
-				local sim = wand_structure.simulate(tokens, meta,
-					{ spells_per_cast = cfg.spells_per_cast })
-				-- Shuffle wands randomize draw order at cast time, so the
-				-- slot-order simulation is only one possible outcome.
-				local title = "Wand structure  (" .. cfg.spells_per_cast .. "/cast)"
-				if cfg.shuffle then
-					title = "Wand structure  (" .. cfg.spells_per_cast
-						.. "/cast, shuffle: order varies!)"
-				end
-				draw_panel(gui, sim_rows(sim, cfg, always), title, sw)
+		local wd = nil
+		for _, b in ipairs(boxes) do
+			if b.e == wand then wd = b; break end
+		end
+		if wd and (#wd.tokens > 0 or #wd.always > 0) then
+			-- Shuffle wands randomize draw order at cast time, so the
+			-- slot-order simulation is only one possible outcome.
+			local title = "Wand structure  (" .. wd.cfg.spells_per_cast .. "/cast)"
+			if wd.cfg.shuffle then
+				title = "Wand structure  (" .. wd.cfg.spells_per_cast
+					.. "/cast, shuffle: order varies!)"
 			end
+			local anchor = {
+				dock_x  = stack_right + DOCK_GAP,
+				dock_y  = wd.top * U * sw,
+				below_y = stack_bot + DOCK_GAP,
+			}
+			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always), title, sw, sh, anchor)
 		end
 	end
 end

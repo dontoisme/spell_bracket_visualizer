@@ -45,7 +45,10 @@ the wand boxes or slots. Consequences:
 
 - The companion panel (`files/grouping_overlay.lua`, driven every frame from
   `OnWorldPostUpdate`) draws with its own `GuiCreate()` at coordinates it fully
-  controls — always correct, resolution-proof.
+  controls. Since 2026-06-11 it DOCKS beside the selected wand's box (falling
+  back below the stack, height-clamped with "+N more"), so its position — not
+  its content — depends on the same calibrated box model the brackets use
+  (`collect_wand_boxes`, the shared measuring pass).
 - The in-UI "slot brackets" (`collect_delims`/`draw_delims`/`BOX` table) overlay
   rainbow `[ ]` glyphs on a **calibrated model** of the wand-box layout, in
   engine-UI units (1u = 0.0025·GUI width). Boxes stack with per-wand heights

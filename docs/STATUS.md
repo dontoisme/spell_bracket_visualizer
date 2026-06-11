@@ -72,7 +72,23 @@ A wand-readability mod with two features:
 ### Companion panel (✅ VERIFIED in-game, casts + wrapping included)
 
 - `files/grouping_overlay.lua` → `draw_panel`: a "Wand structure" text tree with
-  rainbow nesting spines, colored by type, localized names. Center-top placement.
+  rainbow nesting spines, colored by type, localized names.
+- **UX rework 2026-06-11 (⚠ NOT yet verified in-game)** — pre-Workshop review
+  found the old center-top placement collided with wide wand boxes (a
+  capacity-26 box spans GUI x ≈ 21–571) and had no height limit (a 26×1/cast
+  wand → ~53 rows ≈ 591 GUI on a 360 screen). Now:
+  - The panel **docks beside the selected wand's box** (right of the whole
+    box stack at `stack_right + DOCK_GAP`, top-aligned with the held wand's
+    own box top). Selection-anchored, NOT hover-anchored, by user decision:
+    the panel must stay put while rearranging spells so the cast order can be
+    watched live. Falls back to centered **below the stack** when the boxes
+    leave no room beside them (`RIGHT_KEEPOUT` guards the right HUD).
+  - **Height-clamped to the screen**: overflow rows fold into "... +N more".
+  - Geometry comes from `collect_wand_boxes` — the box-measuring pass split
+    out of `draw_box_brackets`, shared by brackets and panel (also kills the
+    duplicate per-frame simulate of the active wand).
+  - Panel text palette brightened (the old icon-border colors — dark red
+    PROJECTILE etc. — were barely legible as 1px text on the dark panel).
 - Shows: title with spells/cast + shuffle warning, an "always:" line for
   always-cast cards, per-cast headers when the wand has multiple casts, and a
   loud orange "cast N -- WRAPS! -> recharge" banner with "~" markers on the

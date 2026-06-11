@@ -9,10 +9,13 @@ from the wand's start and forces the recharge).
 
 Two views, both live while the inventory is open:
 
-1. **Wand structure panel** (center-top): an indented tree of the held wand,
-   one cast per section, rainbow nesting spines by depth, spell names colored
-   by action type. Wrapping casts get a loud orange `WRAPS! -> recharge`
-   banner and wrapped-in cards are marked `~`.
+1. **Wand structure panel** (docked beside the held wand's box, so it tracks
+   your selection and updates live as you rearrange spells): an indented tree
+   of the held wand, one cast per section, rainbow nesting spines by depth,
+   spell names colored by action type. Wrapping casts get a loud orange
+   `WRAPS! -> recharge` banner and wrapped-in cards are marked `~`. When a
+   wide wand leaves no room beside the boxes the panel drops below them, and
+   it clamps to the screen (`... +N more`) instead of overflowing.
 2. **Slot brackets** (in the wand UI itself): `[ ]` bracket glyphs hugging
    each group's first and last card — SLIME rainbow parens, color cycling by
    nesting depth, with the group's `x2` / `trig N` label above the opening
@@ -71,7 +74,7 @@ python3 tools/gen_structure_meta.py
 ## Testing
 
 1. Enable **Spell Bracket Visualizer** in the mod menu, start/continue a run.
-2. Hold a wand and open the inventory: the panel appears center-top; with
+2. Hold a wand and open the inventory: the panel docks beside its box; with
    Slot Brackets enabled, rainbow strips mark each group in the wand boxes.
 3. `python3 tools/test_wand_structure.py` runs the simulator's test suite
    (a Python mirror — no Lua needed).
