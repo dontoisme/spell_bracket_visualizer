@@ -13,9 +13,10 @@ Two views, both live while the inventory is open:
    your selection and updates live as you rearrange spells): an indented tree
    of the held wand, one cast per section, rainbow nesting spines by depth,
    spell names colored by action type. Wrapping casts get a loud orange
-   `WRAPS! -> recharge` banner and wrapped-in cards are marked `~`. When a
-   wide wand leaves no room beside the boxes the panel drops below them, and
-   it clamps to the screen (`... +N more`) instead of overflowing.
+   `WRAPS! -> recharge` banner and wrapped-in cards are marked `~`. The
+   panel finds free space automatically — beside the boxes, below a wider
+   one, or under the whole stack — and clamps to the screen (`... +N more`)
+   instead of overflowing.
 2. **Slot brackets** (in the wand UI itself): `[ ]` bracket glyphs hugging
    each group's first and last card — SLIME rainbow parens, color cycling by
    nesting depth, no text labels (the card art already says what the group
@@ -61,6 +62,8 @@ tools/gen_structure_meta.py  # regenerates structure_meta.lua from data.wak
 tools/test_wand_structure.py # Python mirror of wand_structure.lua + tests
 tools/gen_icons.py           # (retired icon-recolor feature; see below)
 mod.xml, compatibility.xml
+workshop.xml                 # Steam Workshop manifest (name/desc/tags/excludes)
+workshop_preview_image.png   # Workshop thumbnail (16:9)
 ```
 
 Regenerate `structure_meta.lua` after a game update:

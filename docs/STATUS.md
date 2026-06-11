@@ -1,6 +1,7 @@
 # Spell Bracket Visualizer — project status
 
-_A Noita wand-building aid. Last updated 2026-06-09 (casts + wrapping landed)._
+_A Noita wand-building aid. Last updated 2026-06-11 (Workshop-ready: UX pass
+done, debug stripped, mod id renamed, every runtime read verified in-game)._
 
 ## What the mod is
 
@@ -82,9 +83,10 @@ A wand-readability mod with two features:
   pre-Workshop review found the old center-top placement collided with wide
   wand boxes (a capacity-26 box spans GUI x ≈ 21–571) and had no height limit
   (a 26×1/cast wand → ~53 rows ≈ 591 GUI on a 360 screen). Now:
-  - The panel **docks beside the selected wand's box** (right of the whole
-    box stack at `stack_right + DOCK_GAP`, top-aligned with the held wand's
-    own box top). Selection-anchored, NOT hover-anchored, by user decision:
+  - The panel **docks beside the selected wand's box** (in the free column
+    right of the boxes, top-aligned with the held wand's own box top; the
+    "per-tail candidates" bullet below is the final placement algorithm).
+    Selection-anchored, NOT hover-anchored, by user decision:
     the panel must stay put while rearranging spells so the cast order can be
     watched live. Falls back to centered **below the stack** when the boxes
     leave no room beside them (`RIGHT_KEEPOUT` guards the right HUD).
@@ -119,10 +121,12 @@ A wand-readability mod with two features:
     placement math against all prior screenshot layouts.
   - Panel text palette brightened (the old icon-border colors — dark red
     PROJECTILE etc. — were barely legible as 1px text on the dark panel).
-- Shows: title with spells/cast + shuffle warning, an "always:" line for
-  always-cast cards, per-cast headers when the wand has multiple casts, and a
-  loud orange "cast N -- WRAPS! -> recharge" banner with "~" markers on the
-  wrapped-in cards. This is the **primary feature**.
+- Shows: title with spells/cast, an "always:" line for always-cast cards,
+  per-cast headers when the wand has multiple casts, and a loud orange
+  "cast N -- WRAPS! -> recharge" banner with "~" markers on the wrapped-in
+  cards. (The old shuffle "order varies!" title warning is gone — shuffle
+  wands now show nothing at all; see Decisions.) This is the **primary
+  feature**.
 - ✅ Verified in-game 2026-06-09 (screenshot): a shuffle 1/cast wand with deck
   `[Light, Bomb, Double scatter, Spark bolt]` rendered exactly the engine
   behavior — cast 1 `[Light] Bomb`; cast 2 `Double scatter x2` gathering
@@ -285,25 +289,46 @@ each wand's cards start at slot 0 (leading empty slots would shift it).
 - `cast count > 1` (spells/cast) is now fully modeled — that *is* the cast
   grouping feature.
 
-## Expected next steps
+## Workshop release state (2026-06-11)
 
-The feature shipped 2026-06-09: verified in-game across many iterations
-(casts, wrap banner + carriage-return line, shuffle warning, gun_config
-reads, slot-x mapping, the v8 box geometry, orange-wrap/rainbow-group split).
-Remaining nice-to-haves, none blocking:
+Code-side everything is DONE — debug tooling stripped (in git history),
+mod id renamed pre-upload, manifest hardened, preview image in place,
+every runtime read verified in-game. The remaining steps are manual:
 
-1. **Small unobserved cases:** the panel's "always:" line (need an always-cast
-   wand in hand) and a multi-`spells/cast` wand's per-cast headers (only
-   1/cast wands have come up so far).
-2. **Polish (later):** connector glyphs / spacing on the panel; optional
-   position setting; maybe dim spells that never fire this cycle (after a
-   wrap); inset the wrap return line per depth if a busy layout ever overlaps.
-3. **Resolution robustness:** geometry is calibrated at one window size
-   (2000×1125, GUI 640×360). All constants are fractions of GUI width, so
-   other sizes should scale — but if brackets drift on a different setup,
-   recover the calibration HUD from git history (REMOVED for the Workshop
-   release, 2026-06-11: `draw_calibration_hud` + the `debug_boxes` setting)
-   and screenshot.
+1. **Retake `workshop_preview_image.png`** from the final build (the current
+   one is cropped from a pre-label-removal screenshot; must stay 16:9 —
+   official requirement). The crop tooling: reuse `tools/gen_icons.py`'s
+   PNG codec, as done for v1.
+2. **Upload** (Windows, Steam running): `workshop_upload.bat` in the Noita
+   install folder (or `noita_dev.exe -workshop_upload`), type
+   `spell_bracket_visualizer` at the prompt. The first upload starts
+   HIDDEN until the Steam Workshop Legal Agreement is accepted on Steam;
+   then flip the item's visibility. Updates later:
+   `noita_dev.exe -workshop_upload MOD_NAME -workshop_upload_change_notes "..."`.
+3. **Commit the generated `workshop_id.txt`** — it pins future uploads to
+   the same Workshop item. (Delete it only to re-create the item; "Steam -
+   workshop upload failed: 2" usually means a stale id.)
+
+Upload mechanics (verified from `READ_ME_FIRST.txt` + `noita_dev.exe`
+strings): only `.txt/.csv/.bmp/.xml/.png/.lua/.frag/.vert/.bank/.bin/.plz`
+files upload; `.git` is skipped automatically; workshop.xml additionally
+excludes `tools|docs|.claude` and `.gitignore|CLAUDE.md`. The uploader
+auto-generates `mod_id.txt` from the FOLDER NAME — which is why the
+pre-upload rename mattered: the folder name is the permanent public mod id
+that `mods/<id>/` paths resolve against on subscribers' machines.
+
+Old next-steps, all resolved 2026-06-11:
+
+- Always-cast line + multi-`spells/cast` per-cast headers: both verified
+  in-game (the "always: Bounce" bomb wand rendered 4 cast headers at
+  3/cast).
+- "Dim spells that never fire after a wrap": disproven — a NON-feature
+  (see the slot-brackets section); do not re-add.
+- **Resolution robustness** remains the one open caveat: geometry is
+  calibrated at 2000×1125 (GUI 640×360); constants are GUI-width fractions
+  so other sizes should scale. If brackets drift on another setup, recover
+  the calibration HUD from git history (removed for release:
+  `draw_calibration_hud` + the `debug_boxes` setting) and screenshot.
 
 ## Caveats for whoever picks this up
 

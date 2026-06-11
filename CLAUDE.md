@@ -47,9 +47,12 @@ the wand boxes or slots. Consequences:
 
 - The companion panel (`files/grouping_overlay.lua`, driven every frame from
   `OnWorldPostUpdate`) draws with its own `GuiCreate()` at coordinates it fully
-  controls. Since 2026-06-11 it DOCKS beside the selected wand's box (falling
-  back below the stack, height-clamped with "+N more"), so its position — not
-  its content — depends on the same calibrated box model the brackets use
+  controls. Since 2026-06-11 it DOCKS in the free column right of the wand
+  boxes via per-tail candidates (a panel topped at box j only intersects
+  boxes j..n, so each tail is tried in order, top-aligned with the selected
+  box when possible, with a bottom-anchored slide-up; below-stack is the
+  last resort; height-clamped with "+N more"). Its position — not its
+  content — depends on the same calibrated box model the brackets use
   (`collect_wand_boxes`, the shared measuring pass).
 - The in-UI "slot brackets" (`collect_delims`/`draw_delims`/`BOX` table) overlay
   rainbow `[ ]` glyphs on a **calibrated model** of the wand-box layout, in
@@ -106,9 +109,11 @@ init.lua
                           → draws panel + slot-bracket strips
 ```
 
-Settings (`settings.lua`): `show_grouping` (default on), `show_slot_brackets`
-(default off) — both RUNTIME scope, read via
-`ModSettingGet("spell_bracket_visualizer.<id>")`.
+Settings (`settings.lua`): `show_grouping` and `show_slot_brackets` (both
+default ON) — RUNTIME scope, read via
+`ModSettingGet("spell_bracket_visualizer.<id>")`. Shuffle wands render
+NOTHING (no panel, no brackets): the deck order randomizes at cast time, so
+any displayed structure would be one arrangement of many.
 
 ## Conventions
 

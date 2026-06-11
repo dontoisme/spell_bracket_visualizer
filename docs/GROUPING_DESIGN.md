@@ -140,7 +140,16 @@ an enhancement we can tune against a real screen.
 - **`settings.lua`** — `show_grouping` toggle (RUNTIME scope).
 - Colors reuse the per-type palette from `main`.
 
-## Remaining work
+## Remaining work (HISTORICAL — all items since resolved; STATUS.md is current)
+
+Kept as the design-time record. How each closed out: (1) everything verified
+in-game over 2026-06-09..11; (2) always-cast cards got their own "always:"
+line (verified), mod spells fall back to leaves, shuffle wands now show
+NOTHING at all (no panel, no brackets — user call), multi-cast splits are
+the cast-grouping feature itself; (3) the slot overlay shipped as a co-equal
+feature — the "selected box is taller" limitation turned out to be FALSE
+(tall wand sprite in disguise; selection changes nothing); (4) localized
+`$action_*` names landed in the panel.
 
 1. **Verify in-game** (needs a real run) — confirm `mActiveItem` reads, slot
    ordering, and panel placement; tune position/width/legibility.
