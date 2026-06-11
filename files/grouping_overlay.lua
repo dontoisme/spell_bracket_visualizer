@@ -351,9 +351,10 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 		if g.w1 then
 			-- "wraps to front": reads toward the orange segment at the wand's
 			-- start (was "~wrap", but Noita's font renders ~ as a double
-			-- quote). One GUI above the raised bracket's hook level.
+			-- quote). Sits clear above the raised bracket's hook level
+			-- (screenshot-tuned: -9 and -10 still touched the hooks).
 			GuiColorSetForNextWidget(gui, WRAP_COLOR[1], WRAP_COLOR[2], WRAP_COLOR[3], 1)
-			GuiText(gui, lx, ya.top - 10, "wraps to front")
+			GuiText(gui, lx, ya.top - 11, "wraps to front")
 		end
 
 		-- close: outermost ] ON the card's right edge (s = 0: collected
