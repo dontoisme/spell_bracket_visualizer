@@ -250,6 +250,11 @@ local BOX = {
 	slot0_x = 0.05430, -- first slot frame CENTER: (26.0 + 8.75)/640
 	pitch   = 0.03125, -- slot-to-slot spacing: 20.0 GUI / 640
 	halfw   = 0.01367, -- half VISIBLE frame width: 8.75 GUI / 640
+	-- A box is never narrower than its header (wand sprite + the Shuffle /
+	-- Spells per Cast columns): right edge >= 164.5 GUI even for a 1-slot
+	-- wand (measured from a screenshot 2026-06-11 -- the panel used to dock
+	-- INSIDE the starting wands' boxes). Box width = max(this, slot row).
+	min_right = 0.25703, -- 164.5 GUI / 640
 	-- Multi-row: the machinery below supports wands whose slot row wraps,
 	-- but a capacity-26 wand renders as ONE long row at 2000x1125 (user
 	-- observation) -- so wrapping is either resolution-dependent or doesn't
@@ -459,13 +464,15 @@ local function collect_wand_boxes(gui, sw)
 			wd.rows_geo[r + 1] = { top = bot - BOX.slot_h * U * sw, bot = bot }
 		end
 
-		-- box right edge: last slot's frame edge + ~5 GUI of box border
-		-- (col-0 frame left sits at 26 GUI, box left at ~21)
+		-- box right edge: the wider of the box's minimum (header-driven,
+		-- BOX.min_right) and the slot row (last slot's frame edge + ~5 GUI
+		-- of border; col-0 frame left sits at 26 GUI, box left at ~21)
+		local er = sw * BOX.min_right
 		if max_slot >= 0 then
 			local last_col = math.min(max_slot, BOX.per_row - 1)
-			local er = sw * (BOX.slot0_x + last_col * BOX.pitch + BOX.halfw) + 5
-			if er > right then right = er end
+			er = math.max(er, sw * (BOX.slot0_x + last_col * BOX.pitch + BOX.halfw) + 5)
 		end
+		if er > right then right = er end
 
 		box_top = box_top + wd.box_h + BOX.gap
 	end

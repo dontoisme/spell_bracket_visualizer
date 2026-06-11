@@ -103,6 +103,10 @@ A wand-readability mod with two features:
   - Geometry comes from `collect_wand_boxes` — the box-measuring pass split
     out of `draw_box_brackets`, shared by brackets and panel (also kills the
     duplicate per-frame simulate of the active wand).
+  - **Box width has a header-driven MINIMUM** (in-game catch on the starting
+    wands: the dock landed inside their boxes): right edge ≥ 164.5 GUI
+    (`BOX.min_right`, pixel-measured) regardless of slots; width =
+    max(header min, slot row). Caps ≤7 are header-bound, 8+ slot-bound.
   - Panel text palette brightened (the old icon-border colors — dark red
     PROJECTILE etc. — were barely legible as 1px text on the dark panel).
 - Shows: title with spells/cast + shuffle warning, an "always:" line for
