@@ -267,7 +267,10 @@ each wand's cards start at slot 0 (leading empty slots would shift it).
 - **Always-cast cards** are read via `permanently_attached` and excluded from
   the deck sim (they also no longer corrupt slot mapping) — old next-step 4.
 - **Shuffle wands** are flagged in the panel title ("order varies!") — the
-  slot-order sim is one possible outcome.
+  slot-order sim is one possible outcome. Since 2026-06-11 they also draw
+  **no slot brackets** (user call): the panel can hedge with its warning,
+  but brackets painted on the cards would assert a structure the random
+  draw won't honor.
 - `cast count > 1` (spells/cast) is now fully modeled — that *is* the cast
   grouping feature.
 

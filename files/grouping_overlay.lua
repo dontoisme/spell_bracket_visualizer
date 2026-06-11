@@ -487,7 +487,12 @@ end
 local function draw_box_brackets(gui, sw, wands)
 	local idc = { n = 0 }
 	for _, wd in ipairs(wands) do
-		if #wd.tokens > 0 then
+		-- Shuffle wands get NO brackets (user call 2026-06-11): the deck
+		-- order randomizes at cast time, so slot-order grouping painted on
+		-- the cards would assert a structure the wand won't honor. The
+		-- panel still shows the slot-order tree WITH its "order varies!"
+		-- warning -- text can hedge, brackets can't.
+		if #wd.tokens > 0 and not wd.cfg.shuffle then
 			-- displayed position of each card: wraps every per_row slots
 			local cols, rows = {}, {}
 			for k, x in ipairs(wd.xs) do

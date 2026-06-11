@@ -95,7 +95,9 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
 - The panel can't know your mana or spell uses, so a cast that fizzles on mana
   (or skips a depleted spell) may differ from the simulation.
 - Shuffle wands: the panel shows the slot-order outcome with a warning; the
-  real draw order randomizes each cycle.
+  real draw order randomizes each cycle. Shuffle wands get **no slot
+  brackets** — painting one possible grouping on the cards would be
+  misleading.
 - The slot brackets' geometry is calibrated at GUI 640×360 (constants scale as
   fractions of GUI width, so other sizes should track) — if brackets ever
   misalign after a game update, the calibration HUD in git history can
