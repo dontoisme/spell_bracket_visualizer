@@ -73,17 +73,26 @@ A wand-readability mod with two features:
 
 - `files/grouping_overlay.lua` → `draw_panel`: a "Wand structure" text tree with
   rainbow nesting spines, colored by type, localized names.
-- **UX rework 2026-06-11 (⚠ NOT yet verified in-game)** — pre-Workshop review
-  found the old center-top placement collided with wide wand boxes (a
-  capacity-26 box spans GUI x ≈ 21–571) and had no height limit (a 26×1/cast
-  wand → ~53 rows ≈ 591 GUI on a 360 screen). Now:
+- **UX rework 2026-06-11 (✅ dock verified in-game, user screenshots)** —
+  pre-Workshop review found the old center-top placement collided with wide
+  wand boxes (a capacity-26 box spans GUI x ≈ 21–571) and had no height limit
+  (a 26×1/cast wand → ~53 rows ≈ 591 GUI on a 360 screen). Now:
   - The panel **docks beside the selected wand's box** (right of the whole
     box stack at `stack_right + DOCK_GAP`, top-aligned with the held wand's
     own box top). Selection-anchored, NOT hover-anchored, by user decision:
     the panel must stay put while rearranging spells so the cast order can be
     watched live. Falls back to centered **below the stack** when the boxes
     leave no room beside them (`RIGHT_KEEPOUT` guards the right HUD).
-  - **Height-clamped to the screen**: overflow rows fold into "... +N more".
+  - **Slides up when the selected wand sits low** (user catch on the bottom
+    wand: top-aligning there folded most of the tree into "+7 more"):
+    docked panels bottom-anchor against the screen edge and grow upward,
+    floored at the stack top (the column right of the boxes is free).
+    A Spell-Lab-style scroll bar was considered and rejected: the gui is
+    deliberately NonInteractive (the fire-block fix, 7d9e3ac), and a scroll
+    container would recapture the mouse.
+  - **Height-clamped to the screen**: overflow rows fold into "... +N more"
+    (after the slide, this only triggers on trees taller than the screen,
+    or in the below-stack fallback which must not slide up over the boxes).
   - Geometry comes from `collect_wand_boxes` — the box-measuring pass split
     out of `draw_box_brackets`, shared by brackets and panel (also kills the
     duplicate per-frame simulate of the active wand).

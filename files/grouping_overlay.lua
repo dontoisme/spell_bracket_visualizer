@@ -679,6 +679,17 @@ local function draw_panel(gui, rows, title, sw, sh, anchor)
 	local px, y0
 	if anchor.dock_x + panel_w <= sw - RIGHT_KEEPOUT then
 		px, y0 = math.floor(anchor.dock_x), math.floor(anchor.dock_y)
+		-- Stay attached beside the stack but keep the WHOLE tree readable:
+		-- when the selected wand sits low, slide the panel up (bottom-anchor)
+		-- instead of truncating most of it at the screen edge. The column
+		-- right of the boxes is free all the way up; floor at the stack top
+		-- so we never ride into the top bar / right HUD. (No scroll container
+		-- on purpose: this gui is NonInteractive so hovering it can never
+		-- block firing or inventory clicks -- see the fire-block fix.)
+		local bottom = y0 + line_h + 2 + #rows * line_h
+		if bottom > sh - 8 then
+			y0 = math.max(math.floor(BOX.top0 * U * sw), y0 - (bottom - (sh - 8)))
+		end
 	else
 		px = math.floor((sw - panel_w) / 2)
 		y0 = math.floor(anchor.below_y)
