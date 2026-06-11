@@ -636,14 +636,11 @@ function M.update()
 		for _, b in ipairs(boxes) do
 			if b.e == wand then wd = b; break end
 		end
-		if wd and (#wd.tokens > 0 or #wd.always > 0) then
-			-- Shuffle wands randomize draw order at cast time, so the
-			-- slot-order simulation is only one possible outcome.
+		-- Shuffle wands get nothing at all (user call 2026-06-11): the deck
+		-- order randomizes at cast time, so even the panel's slot-order tree
+		-- is just one arrangement of many -- not worth showing.
+		if wd and not wd.cfg.shuffle and (#wd.tokens > 0 or #wd.always > 0) then
 			local title = "Wand structure  (" .. wd.cfg.spells_per_cast .. "/cast)"
-			if wd.cfg.shuffle then
-				title = "Wand structure  (" .. wd.cfg.spells_per_cast
-					.. "/cast, shuffle: order varies!)"
-			end
 			local anchor = {
 				dock_x  = stack_right + DOCK_GAP,
 				dock_y  = wd.top * U * sw,

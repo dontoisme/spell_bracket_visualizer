@@ -34,8 +34,8 @@ The panel simulates the engine's exact draw rules (verified from `gun.lua` in
 prefix-attach; multicasts gather N cards; triggers open nested payloads; and
 forced draws on an empty deck wrap the discard back in, in slot order, ending
 the recharge cycle. Always-cast spells are listed separately (they join every
-cast). Shuffle wands get an "order varies!" warning — the simulation shows
-the slot-order outcome, one possible draw order of many.
+cast). Shuffle wands show nothing at all — their draw order randomizes each
+cycle, so there is no fixed structure to display.
 
 The engine renders the inventory itself (no Lua hook exposes slot or box
 positions), so the panel draws on its own Gui at safe coordinates, while the
@@ -94,10 +94,9 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
   appear in the panel as plain leaves.
 - The panel can't know your mana or spell uses, so a cast that fizzles on mana
   (or skips a depleted spell) may differ from the simulation.
-- Shuffle wands: the panel shows the slot-order outcome with a warning; the
-  real draw order randomizes each cycle. Shuffle wands get **no slot
-  brackets** — painting one possible grouping on the cards would be
-  misleading.
+- Shuffle wands get **no panel and no brackets** — the real draw order
+  randomizes each cycle, so any displayed structure would be just one
+  arrangement of many.
 - The slot brackets' geometry is calibrated at GUI 640×360 (constants scale as
   fractions of GUI width, so other sizes should track) — if brackets ever
   misalign after a game update, the calibration HUD in git history can
