@@ -68,9 +68,11 @@ A wand-readability mod with two features:
   `ItemActionComponent.action_id` ordered by `ItemComponent.inventory_slot`,
   `AbilityComponent.gun_config` → `actions_per_round` /
   `shuffle_deck_when_empty` via `ComponentObjectGetValue2`,
-  `SpriteComponent.image_file` + `GuiGetImageDimensions` (box geometry).
-  Still unobserved (pcall-guarded, fails soft):
-  `ItemComponent.permanently_attached` (always-cast detection).
+  `SpriteComponent.image_file` + `GuiGetImageDimensions` (box geometry),
+  and — last one closed 2026-06-11 — `ItemComponent.permanently_attached`
+  (always-cast detection: an "always: Bounce" wand showed the always line
+  and correctly excluded Bounce from the cast tree; 11 bombs split 3/3/3/2
+  at 3/cast). Every runtime read is now verified in-game.
 
 ### Companion panel (✅ VERIFIED in-game, casts + wrapping included)
 
@@ -120,8 +122,9 @@ A wand-readability mod with two features:
   orange banner. Title showed `(1/cast, shuffle: order varies!)`, confirming
   the `gun_config` reads. Slot brackets also drew the wrap span in orange and
   sat correctly on a wand with a leading empty slot (the `inventory_slot.x`
-  fix). Not yet observed in-game: the "always:" line (no always-cast wand on
-  hand; the read is pcall-guarded and fails soft).
+  fix). The "always:" line — the last unobserved piece — was verified
+  2026-06-11 on an "always: Bounce" wand (line rendered, Bounce excluded
+  from the tree, 3/cast splits correct).
 
 ### Slot brackets — final form (shipped, user-approved 2026-06-09)
 

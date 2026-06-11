@@ -117,7 +117,8 @@ local function read_deck(wand)
 			if ic then
 				local vx, vy = ComponentGetValue2(ic, "inventory_slot")
 				sx, sy = vx or 0, vy or 0
-				-- pcall: not yet verified in-game; degrade to "not always-cast"
+				-- verified in-game 2026-06-11 ("always: Bounce" wand); pcall
+				-- kept so a future API change degrades to "not always-cast"
 				local ok, p = pcall(ComponentGetValue2, ic, "permanently_attached")
 				perm = ok and p == true
 			end
