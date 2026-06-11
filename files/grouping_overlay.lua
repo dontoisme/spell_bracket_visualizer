@@ -268,9 +268,9 @@ local STACK_Y = 1   -- vertical growth per stack level: outer brackets are talle
 -- ~2px outside the visible frame, so no extra nudges are needed.
 local CLOSE_NUDGE = 0 -- extra left shift of closing brackets
 local OPEN_NUDGE  = 0 -- extra left shift of opening brackets
-local OPEN_RAISE  = 2 -- GUI: opening brackets sit this much higher than the
-                      -- slot row, so their top hook overlaps the card frame's
-                      -- top edge (user-tuned from an in-game screenshot)
+local BRACKET_RAISE = 2 -- GUI: all bracket glyphs sit this much higher than
+                        -- the slot row, so the top hooks overlap the card
+                        -- frame's top edge (user-tuned from screenshots)
 local DEBUG_RULER = false -- set true to draw GUI dims + a 10% grid for calibration
 
 local function line(gui, id, x, y, w, h, c, a)
@@ -347,7 +347,7 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 		-- open: [ just left of the card, raised so its top hook overlaps the
 		-- slot's top edge (the ~wrap tag, when present, sits above in orange)
 		local lx = sw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
-		bracket(gui, idc, lx, ya.top - OPEN_RAISE, ya.bot - OPEN_RAISE, 1, g.c)
+		bracket(gui, idc, lx, ya.top - BRACKET_RAISE, ya.bot - BRACKET_RAISE, 1, g.c)
 		if g.w1 then
 			GuiColorSetForNextWidget(gui, WRAP_COLOR[1], WRAP_COLOR[2], WRAP_COLOR[3], 1)
 			GuiText(gui, lx, ya.top - 9, "~wrap")
@@ -362,7 +362,8 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 		local grow = (counts[key(g)] - 1 - s) * STACK_Y
 		local rx = sw * (BOX.slot0_x + g.cb * BOX.pitch + BOX.halfw)
 			- BAR_W - CLOSE_NUDGE - s * STACK_X
-		bracket(gui, idc, rx, yb.top - grow, yb.bot + grow, -1, g.c)
+		bracket(gui, idc, rx, yb.top - grow - BRACKET_RAISE,
+			yb.bot + grow - BRACKET_RAISE, -1, g.c)
 
 		-- wrap: the group continues at the wand's START. Bracket the
 		-- wrapped-in segment and draw a carriage-return line, from below the
@@ -374,13 +375,16 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 			local wlx = sw * (BOX.slot0_x + g.w1 * BOX.pitch - BOX.halfw) - OPEN_NUDGE
 			local wrx = sw * (BOX.slot0_x + g.w2 * BOX.pitch + BOX.halfw)
 				- BAR_W - CLOSE_NUDGE
-			bracket(gui, idc, wlx, yw.top - OPEN_RAISE, yw.bot - OPEN_RAISE, 1, WRAP_COLOR)
-			bracket(gui, idc, wrx, yw.top, yw.bot, -1, WRAP_COLOR)
+			bracket(gui, idc, wlx, yw.top - BRACKET_RAISE, yw.bot - BRACKET_RAISE, 1, WRAP_COLOR)
+			bracket(gui, idc, wrx, yw.top - BRACKET_RAISE, yw.bot - BRACKET_RAISE, -1, WRAP_COLOR)
 			local ry = yb.bot + grow + 2 -- return line sits just below the close's row
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, yb.bot + grow, 1, ry - (yb.bot + grow) + 1, WRAP_COLOR)
+			-- drop from the (raised) forward close's bottom down to the return line
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, yb.bot + grow - BRACKET_RAISE, 1,
+				ry - (yb.bot + grow - BRACKET_RAISE) + 1, WRAP_COLOR)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, ry, rx - wlx, 1, WRAP_COLOR)
 			-- riser meets the (raised) wrapped-segment open bracket's bottom
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, yw.bot - OPEN_RAISE, 1, ry - (yw.bot - OPEN_RAISE) + 1, WRAP_COLOR)
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, yw.bot - BRACKET_RAISE, 1,
+				ry - (yw.bot - BRACKET_RAISE) + 1, WRAP_COLOR)
 		end
 	end
 end

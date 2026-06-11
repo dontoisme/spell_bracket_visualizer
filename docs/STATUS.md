@@ -129,8 +129,10 @@ Iterated v1→final against in-game screenshots + user mockups. Final design:
   (user calls: first the multicast `xN` — the card art already says x2/x3
   and labels collided, e.g. "trig 1x3" — then `trig N` too; the panel's
   `xN` and `(trig N)` suffixes went with them). Only the orange `~wrap` tag
-  remains. Same day: opening brackets raised by `OPEN_RAISE = 2` GUI so the
-  top hook overlaps the card frame's top edge (user-tuned from screenshot).
+  remains. Same day: ALL bracket glyphs (opens, closes, the orange wrap
+  pair) raised by `BRACKET_RAISE = 2` GUI so the top hooks overlap the card
+  frame's top edge (user-tuned from screenshots; opens first, closes
+  matched after the next screenshot).
 - **"Post-wrap dead cards" is a NON-feature (analyzed 2026-06-11).** The UX
   review claimed cards after a wrapping cast "never fire" and deserve a
   marker. Wrong: a wrap only triggers on a forced draw with an EMPTY deck,
