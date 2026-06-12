@@ -347,10 +347,12 @@ Code-side everything is DONE — debug tooling stripped (in git history),
 mod id renamed pre-upload, manifest hardened, preview image in place,
 every runtime read verified in-game. The remaining steps are manual:
 
-1. **Retake `workshop_preview_image.png`** from the final build (the current
-   one is cropped from a pre-label-removal screenshot; must stay 16:9 —
-   official requirement). The crop tooling: reuse `tools/gen_icons.py`'s
-   PNG codec, as done for v1.
+1. ~~Retake `workshop_preview_image.png`~~ DONE 2026-06-12 (ed59ba9):
+   1408×792 (16:9) crop of an in-game 2560×1440 shot from the final
+   flush-bracket build. (Pillow is now available on the machine —
+   installed with `pip --user --break-system-packages` — so JPEG Steam
+   screenshots can be cropped directly; the stdlib codec in
+   `gen_icons.py` remains for PNG-only work.)
 2. **Upload** (Windows, Steam running): `workshop_upload.bat` in the Noita
    install folder (or `noita_dev.exe -workshop_upload`), type
    `spell_bracket_visualizer` at the prompt. The first upload starts
