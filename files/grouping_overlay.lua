@@ -268,7 +268,10 @@ local BOX = {
 	-- Tall-art boxes grow 2u/sprite-px but their slot row drops only ~30%
 	-- of the growth (pixel-measured 2026-06-12, one 13px-art sample; the
 	-- v9 probes were all floor-height boxes so this was never visible).
-	tall_row_slope = 0.30,
+	-- 0.41, not the raw 0.30: fitted END-TO-END through the model (whose
+	-- box-2 top sat 2px above the engine's on the sample stack), so it
+	-- absorbs that stack drift; engine row 459px == model row exactly.
+	tall_row_slope = 0.41,
 }
 local BAR_W   = 1   -- GUI width of a bracket's vertical bar
 local TICK_W  = 3   -- GUI length of the top/bottom hooks
@@ -509,8 +512,30 @@ end
 -- plumb lines, click probes, per-box readouts -- was removed for the
 -- Workshop release. It lives in git history; re-add it together with its
 -- settings.lua entry if the box geometry ever drifts after a game update.)
+-- TEMPORARY (2026-06-12): on-screen sprite-read probe. REMOVE BEFORE the
+-- Workshop upload. Shows, per wand box, what wand_sprite_h resolved (s=)
+-- and the raw image_file -- to find out why a 13px-art wand keeps reading
+-- as the floor (table miss vs live-read failure vs stale mod code).
+local DEBUG_SPRITE_READ = true
+
+local function draw_sprite_probe(gui, sw, wands)
+	for _, wd in ipairs(wands) do
+		local f = "?"
+		local sc = EntityGetFirstComponentIncludingDisabled(wd.e, "SpriteComponent")
+		if sc then
+			local ok, v = pcall(ComponentGetValue2, sc, "image_file")
+			if ok and type(v) == "string" then f = v end
+		end
+		local hit = sprite_h_meta[f] and "meta" or "miss"
+		GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
+		GuiText(gui, 168, wd.top * U * sw + 2,
+			string.format("v3 s=%d %s %s", wd.s, hit, f))
+	end
+end
+
 local function draw_box_brackets(gui, sw, wands)
 	local idc = { n = 0 }
+	if DEBUG_SPRITE_READ then draw_sprite_probe(gui, sw, wands) end
 	for _, wd in ipairs(wands) do
 		-- Shuffle wands get NO brackets (user call 2026-06-11): the deck
 		-- order randomizes at cast time, so slot-order grouping painted on
