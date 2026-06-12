@@ -217,7 +217,18 @@ GuiGetImageDimensions read (modded wands), then AbilityComponent
 sprite_file, then 18 (handgun-sized). ⚠ The threshold 14.5 and both slopes
 ride on ONE grown sample — exact for it, interpolated elsewhere;
 recalibrate from a screenshot when a bigger wand (D ≫ 16) drifts.
-⚠ Awaiting in-game confirmation (probe shows `v4 wh= D= meta|miss path`).
+
+✅ CONFIRMED in-game (probe screenshot, same day): all three wands
+meta-hit, brackets landed at the designed offset to the pixel. Probe
+removed (21d616d). Two follow-ups from the confirmation frame:
+
+- **Selection moves NOTHING** — truly nothing: the selected box draws
+  its decorative border inflated a few px outward; rows and content stay
+  put. (This also explains how v9 concluded selection contributes
+  nothing while v2-v5 kept "seeing" a taller selected box.)
+- **BRACKET_RAISE 2 → 0** (user call): the 2-GUI lift tuned 2026-06-11
+  was compensating the then-broken geometry; with rows engine-exact the
+  user wants the glyphs flush on the card frames.
 
 ### Box geometry — PROBE-CALIBRATED final values (v9, 2026-06-09)
 
