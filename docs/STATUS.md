@@ -198,6 +198,21 @@ frame_height). `wand_sprite_h` consults the table first, falls back to the
 live read for modded wands, then to AbilityComponent.sprite_file (vanilla
 wands carry the same path there), then 9. ⚠ Not yet verified in-game.
 
+Second tall-box bug, found from the user's first FULL-frame screenshot
+(2000×1125, retest of the same wand — the table fix hadn't loaded, the
+brackets still sat at the exact fallback-9 position, so the run was
+probably not reloaded): the engine boxes match the model perfectly
+(box-1 top = 30u dead on; box-3 top proves box-2 is 40u, confirming the
+2u/px height slope), BUT the tall box's card row is NOT bottom-anchored:
+it sits at box_top + 22.9u, not box_top + box_h − row_off = 25.4u. The
+row only drops ~30% of the box's extra height; the rest pads below the
+row. Invisible on floor boxes, where both rules coincide — every box
+ever calibrated was floor-height. Fix: rows are now TOP-anchored at
+`box_top + (min_h − row_off − slot_h) + tall_row_slope·(art_h − min_h)`
+with `tall_row_slope = 0.30` (fitted to this ONE 13px sample —
+recalibrate if a 15/17px wand drifts; multi-row wands now stack DOWN
+from the first row, frozen feature). ⚠ Not yet verified in-game.
+
 ### Box geometry — PROBE-CALIBRATED final values (v9, 2026-06-09)
 
 Supersedes the v8 numbers below. After the calibration HUD gained click

@@ -265,6 +265,10 @@ local BOX = {
 	-- calibrate row_step from the overlay.
 	per_row  = 99,    -- slots per displayed row before wrapping (99 = off)
 	row_step = 13,    -- units: vertical step between slot rows (unverified)
+	-- Tall-art boxes grow 2u/sprite-px but their slot row drops only ~30%
+	-- of the growth (pixel-measured 2026-06-12, one 13px-art sample; the
+	-- v9 probes were all floor-height boxes so this was never visible).
+	tall_row_slope = 0.30,
 }
 local BAR_W   = 1   -- GUI width of a bracket's vertical bar
 local TICK_W  = 3   -- GUI length of the top/bottom hooks
@@ -466,16 +470,23 @@ local function collect_wand_boxes(gui, sw)
 		for _, x in ipairs(wd.xs) do if x > max_slot then max_slot = x end end
 		wd.nrows = math.max(1, math.floor(max_slot / BOX.per_row) + 1)
 
-		wd.box_h = math.max(BOX.min_h, BOX.h_pad + BOX.s_scale * wd.s)
-			+ (wd.nrows - 1) * BOX.row_step
+		local art_h = math.max(BOX.min_h, BOX.h_pad + BOX.s_scale * wd.s)
+		wd.box_h = art_h + (wd.nrows - 1) * BOX.row_step
 		wd.top = box_top
-		-- the LAST slot row sits row_off above the box bottom; earlier rows
-		-- stack upward by row_step
+		-- Slot row is TOP-anchored (pixel-measured 2026-06-12 on a 13px-art
+		-- wand, the first tall-art box ever checked): the engine grows a
+		-- tall-art box by 2u/px but moves the row down only ~30% of the
+		-- extra -- the rest pads below the row. On floor boxes this equals
+		-- the old bottom-anchored row_off math exactly (row top at
+		-- min_h - row_off - slot_h = 21.86u; the tall box measured 22.9u at
+		-- box_h 40u -> slope (22.9-21.86)/(40-36.5) = 0.30). Extra rows of a
+		-- multi-row wand (per_row, frozen feature) stack DOWN from the first.
+		local row_top_u = box_top + (BOX.min_h - BOX.row_off - BOX.slot_h)
+			+ BOX.tall_row_slope * (art_h - BOX.min_h)
 		wd.rows_geo = {}
 		for r = 0, wd.nrows - 1 do
-			local bot = (box_top + wd.box_h - BOX.row_off
-				- (wd.nrows - 1 - r) * BOX.row_step) * U * sw
-			wd.rows_geo[r + 1] = { top = bot - BOX.slot_h * U * sw, bot = bot }
+			local top = (row_top_u + r * BOX.row_step) * U * sw
+			wd.rows_geo[r + 1] = { top = top, bot = top + BOX.slot_h * U * sw }
 		end
 
 		-- box right edge (GUI): the wider of the box's minimum (header-
