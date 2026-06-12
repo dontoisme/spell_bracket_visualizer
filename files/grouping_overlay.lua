@@ -288,9 +288,11 @@ local STACK_Y = 1   -- vertical growth per stack level: outer brackets are talle
 -- ~2px outside the visible frame, so no extra nudges are needed.
 local CLOSE_NUDGE = 0 -- extra left shift of closing brackets
 local OPEN_NUDGE  = 0 -- extra left shift of opening brackets
-local BRACKET_RAISE = 2 -- GUI: all bracket glyphs sit this much higher than
-                        -- the slot row, so the top hooks overlap the card
-                        -- frame's top edge (user-tuned from screenshots)
+local BRACKET_RAISE = 0 -- GUI: extra lift of all bracket glyphs above the
+                        -- slot row. Was 2 (tuned 2026-06-11) -- but that
+                        -- tuning compensated the then-broken box geometry;
+                        -- with the diagonal-bbox model placing rows
+                        -- engine-exact, the user chose FLUSH (2026-06-12).
 
 local function line(gui, id, x, y, w, h, c, a)
 	a = a or 1
@@ -517,30 +519,8 @@ end
 -- plumb lines, click probes, per-box readouts -- was removed for the
 -- Workshop release. It lives in git history; re-add it together with its
 -- settings.lua entry if the box geometry ever drifts after a game update.)
--- TEMPORARY (2026-06-12): on-screen sprite-read probe. REMOVE BEFORE the
--- Workshop upload. Shows, per wand box, what wand_art_wh resolved (wh=,
--- D=) and the raw image_file -- to verify the diagonal-bbox model against
--- the engine (table miss vs live-read failure vs stale mod code).
-local DEBUG_SPRITE_READ = true
-
-local function draw_sprite_probe(gui, sw, wands)
-	for _, wd in ipairs(wands) do
-		local f = "?"
-		local sc = EntityGetFirstComponentIncludingDisabled(wd.e, "SpriteComponent")
-		if sc then
-			local ok, v = pcall(ComponentGetValue2, sc, "image_file")
-			if ok and type(v) == "string" then f = v end
-		end
-		local hit = sprite_wh_meta[f] and "meta" or "miss"
-		GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
-		GuiText(gui, 168, wd.top * U * sw + 2,
-			string.format("v4 wh=%d D=%.1f %s %s", wd.wh, 0.7071 * wd.wh, hit, f))
-	end
-end
-
 local function draw_box_brackets(gui, sw, wands)
 	local idc = { n = 0 }
-	if DEBUG_SPRITE_READ then draw_sprite_probe(gui, sw, wands) end
 	for _, wd in ipairs(wands) do
 		-- Shuffle wands get NO brackets (user call 2026-06-11): the deck
 		-- order randomizes at cast time, so slot-order grouping painted on
