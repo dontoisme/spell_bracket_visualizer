@@ -13,6 +13,7 @@
 -- it never depends on the engine's (unexposed) spell-slot positions.
 
 local meta = dofile_once("mods/spell_bracket_visualizer/files/structure_meta.lua") or {}
+local sprite_h_meta = dofile_once("mods/spell_bracket_visualizer/files/wand_sprite_meta.lua") or {}
 local wand_structure = dofile_once("mods/spell_bracket_visualizer/files/wand_structure.lua")
 
 local M = {}
@@ -400,18 +401,31 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 	end
 end
 
--- Read the height of this wand's art in px (pcall-guarded; vanilla wand art
--- is 3..17 px tall; cap guards against odd mod art). A failed read returns 9:
--- small wands hit the min_h floor anyway, so only tall-art wands need an
--- accurate read.
+-- Read the height of this wand's art in px (vanilla wand art is 3..17 px
+-- tall). Vanilla paths resolve through the PREGENERATED table
+-- (wand_sprite_meta.lua): the GuiGetImageDimensions read silently returned
+-- the fallback for a 13px-art wand in-game (2026-06-12, brackets 5.6 GUI
+-- high on its box), so the live read is only a fallback for modded wands.
+-- The starting wands' image_file is a sprite XML (handgun.xml) -- the table
+-- carries those too (frame_height). A failed read returns 9: small wands
+-- hit the min_h floor anyway, so only tall-art wands need an accurate read.
 local function wand_sprite_h(gui, wand)
 	local sc = EntityGetFirstComponentIncludingDisabled(wand, "SpriteComponent")
 	if sc then
 		local ok, f = pcall(ComponentGetValue2, sc, "image_file")
 		if ok and type(f) == "string" and f ~= "" then
+			if sprite_h_meta[f] then return sprite_h_meta[f] end
 			local ok2, _, h = pcall(GuiGetImageDimensions, gui, f, 1)
 			if ok2 and tonumber(h) and h > 0 and h < 30 then return h end
-			return 9
+		end
+	end
+	-- image_file unreadable or unknown: vanilla wands carry the same art
+	-- path on their AbilityComponent (SetWandSprite sets both)
+	local ab = EntityGetFirstComponentIncludingDisabled(wand, "AbilityComponent")
+	if ab then
+		local ok, f = pcall(ComponentGetValue2, ab, "sprite_file")
+		if ok and type(f) == "string" and sprite_h_meta[f] then
+			return sprite_h_meta[f]
 		end
 	end
 	return 9

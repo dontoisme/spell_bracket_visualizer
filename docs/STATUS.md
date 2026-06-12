@@ -1,7 +1,8 @@
 # Spell Bracket Visualizer — project status
 
-_A Noita wand-building aid. Last updated 2026-06-11 (Workshop-ready: UX pass
-done, debug stripped, mod id renamed, every runtime read verified in-game)._
+_A Noita wand-building aid. Last updated 2026-06-12 (Workshop-ready: UX pass
+done, debug stripped, mod id renamed; sprite-height read replaced by a
+pregenerated table after it failed in-game — see Box geometry)._
 
 ## What the mod is
 
@@ -177,6 +178,25 @@ Iterated v1→final against in-game screenshots + user mockups. Final design:
 - Drawn at **z = -10**: in front of the engine's spell-frame layer ("lower z
   = front"; z 1 lost to the frames).
 - On by default (`show_slot_brackets`, RUNTIME scope).
+
+### Box geometry — sprite-height read FAILED in-game; table fix (2026-06-12)
+
+While staging the Workshop preview screenshot, a tall-art wand (purple,
+13px art — engine box 40u) drew its brackets 5.6 GUI too HIGH: the
+`GuiGetImageDimensions` runtime read silently returned the 9px fallback,
+so the model used the 36.5u floor. Pixel-measured from the user's
+2560×1440 screenshot: predicted-with-fallback bracket span matched the
+actual render within 2px; predicted-with-13px matched the engine box.
+Every previously verified wand had floor-height art, so the read path had
+NEVER actually been exercised — the v9 probe boxes were all floor-height.
+Why the live read fails is unknown (pcall masks it; the function exists in
+this build's API docs). Fix: `tools/gen_wand_sprite_meta.py` →
+`files/wand_sprite_meta.lua`, a pregenerated `image_file path → art px
+height` table for all 1376 data/items_gfx images (pngs by pixel height;
+sprite XMLs — the starting wands use handgun.xml etc. — by default-anim
+frame_height). `wand_sprite_h` consults the table first, falls back to the
+live read for modded wands, then to AbilityComponent.sprite_file (vanilla
+wands carry the same path there), then 9. ⚠ Not yet verified in-game.
 
 ### Box geometry — PROBE-CALIBRATED final values (v9, 2026-06-09)
 
