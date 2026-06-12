@@ -179,39 +179,45 @@ Iterated v1→final against in-game screenshots + user mockups. Final design:
   = front"; z 1 lost to the frames).
 - On by default (`show_slot_brackets`, RUNTIME scope).
 
-### Box geometry — sprite-height read FAILED in-game; table fix (2026-06-12)
+### Box geometry — DIAGONAL-BBOX model replaces the height law (2026-06-12)
 
-While staging the Workshop preview screenshot, a tall-art wand (purple,
-13px art — engine box 40u) drew its brackets 5.6 GUI too HIGH: the
-`GuiGetImageDimensions` runtime read silently returned the 9px fallback,
-so the model used the 36.5u floor. Pixel-measured from the user's
-2560×1440 screenshot: predicted-with-fallback bracket span matched the
-actual render within 2px; predicted-with-13px matched the engine box.
-Every previously verified wand had floor-height art, so the read path had
-NEVER actually been exercised — the v9 probe boxes were all floor-height.
-Why the live read fails is unknown (pcall masks it; the function exists in
-this build's API docs). Fix: `tools/gen_wand_sprite_meta.py` →
-`files/wand_sprite_meta.lua`, a pregenerated `image_file path → art px
-height` table for all 1376 data/items_gfx images (pngs by pixel height;
-sprite XMLs — the starting wands use handgun.xml etc. — by default-anim
-frame_height). `wand_sprite_h` consults the table first, falls back to the
-live read for modded wands, then to AbilityComponent.sprite_file (vanilla
-wands carry the same path there), then 9. ⚠ Not yet verified in-game.
+Found while staging the Workshop preview screenshot: a grown box (the
+purple wand) drew its brackets 13px (4.2 GUI) too high. THREE theories
+died before the on-screen probe (`DEBUG_SPRITE_READ`, temporary — REMOVE
+before upload) produced ground truth; the trap was that every art at or
+below the floor threshold renders pixel-IDENTICALLY, so wrong hypotheses
+kept "fitting":
 
-Second tall-box bug, found from the user's first FULL-frame screenshot
-(2000×1125, retest of the same wand — the table fix hadn't loaded, the
-brackets still sat at the exact fallback-9 position, so the run was
-probably not reloaded): the engine boxes match the model perfectly
-(box-1 top = 30u dead on; box-3 top proves box-2 is 40u, confirming the
-2u/px height slope), BUT the tall box's card row is NOT bottom-anchored:
-it sits at box_top + 22.9u, not box_top + box_h − row_off = 25.4u. The
-row only drops ~30% of the box's extra height; the rest pads below the
-row. Invisible on floor boxes, where both rules coincide — every box
-ever calibrated was floor-height. Fix: rows are now TOP-anchored at
-`box_top + (min_h − row_off − slot_h) + tall_row_slope·(art_h − min_h)`
-with `tall_row_slope = 0.30` (fitted to this ONE 13px sample —
-recalibrate if a 15/17px wand drifts; multi-row wands now stack DOWN
-from the first row, frozen feature). ⚠ Not yet verified in-game.
+1. "GuiGetImageDimensions silently fails → 9px fallback" — WRONG (but
+   numerically consistent: any s ≤ 11.25 gives the floor layout).
+2. "13px-tall art, table fixes it" — WRONG; the probe showed the wand is
+   `wand_0430.png`, art **14×9 px**: only 9 TALL, box grown anyway.
+3. The real law: the header draws the wand **rotated 45°** (at 1.5
+   GUI/px — the art bbox in the user's 2560×1440 crop measured
+   24×24.75 GUI = 1.5·0.7071·(14+9) exactly). The box grows with the
+   art's **diagonal D = 0.7071·(w+h)** GUI, NOT its height. v8's "2u per
+   px of art height" keyed on the wrong variable and the floor absorbed
+   it for every wand ever tested (v9 probe boxes: all floor).
+
+Second, independent bug, same screenshots: in a grown box the slot row is
+NOT bottom-anchored (`row_off`); the engine drops the row only ~half of
+the slope it grows the box by. Both laws, fitted to the measured stack
+(floor wands handgun D=12.73 + bomb wand D=14.14, grown wand_0430
+D=16.26; engine-exact to ≤1px on all three row tops at 2000×1125):
+
+- box_h(u)  = min_h + 1.59·max(0, D − 14.5)   (`diag_box_slope`)
+- row_top(u)= box_top + (min_h − row_off − slot_h) + 0.82·max(0, D − 14.5)
+  (`diag_row_slope`; floor boxes bit-identical to the old math)
+
+`tools/gen_wand_sprite_meta.py` → `files/wand_sprite_meta.lua` pregenerates
+`image_file path → w+h` for all 1371 data/items_gfx images (pngs by pixel
+dims; sprite XMLs — the starting wands use handgun.xml — by default-anim
+frame_width+frame_height). `wand_art_wh` consults the table, then the live
+GuiGetImageDimensions read (modded wands), then AbilityComponent
+sprite_file, then 18 (handgun-sized). ⚠ The threshold 14.5 and both slopes
+ride on ONE grown sample — exact for it, interpolated elsewhere;
+recalibrate from a screenshot when a bigger wand (D ≫ 16) drifts.
+⚠ Awaiting in-game confirmation (probe shows `v4 wh= D= meta|miss path`).
 
 ### Box geometry — PROBE-CALIBRATED final values (v9, 2026-06-09)
 

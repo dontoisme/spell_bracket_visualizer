@@ -13,7 +13,7 @@
 -- it never depends on the engine's (unexposed) spell-slot positions.
 
 local meta = dofile_once("mods/spell_bracket_visualizer/files/structure_meta.lua") or {}
-local sprite_h_meta = dofile_once("mods/spell_bracket_visualizer/files/wand_sprite_meta.lua") or {}
+local sprite_wh_meta = dofile_once("mods/spell_bracket_visualizer/files/wand_sprite_meta.lua") or {}
 local wand_structure = dofile_once("mods/spell_bracket_visualizer/files/wand_structure.lua")
 
 local M = {}
@@ -235,9 +235,22 @@ local BOX = {
 	-- step is 61.6 GUI (38.5u), not 62.4 -- the old values accumulated ~1.5u
 	-- of downward drift by box 4. Fractional units are fine (float math).
 	min_h   = 36.5,   -- units: minimum box height (floor)
-	h_pad   = 14,     -- units: box height = max(min_h, h_pad + s_scale * sprite_h)
-	s_scale = 2,      -- units of box height per wand-sprite pixel
 	gap     = 2,      -- units between consecutive boxes
+	-- Big-art boxes (2026-06-12, supersedes v8's "2u per px of art HEIGHT"):
+	-- the header draws the wand rotated 45 deg, so what grows the box is the
+	-- art's DIAGONAL bbox D = 0.7071*(w+h) -- pixel-proven by wand_0430.png,
+	-- 14x9: only 9px TALL (old law: floor) yet its box is ~2.8u over floor.
+	-- Both old "the read fell back to 9" fits matched the same pixels by
+	-- coincidence: any art at/below the floor threshold renders identically.
+	-- The box grows ~1.6u per D-GUI past the floor threshold, and the slot
+	-- row inside drops only ~0.8u per D-GUI -- NOT bottom-anchored; the
+	-- rest pads below the row. Fitted to ONE grown sample (D=16.26:
+	-- box 39.3u, row +1.44u, both engine-exact) plus two floor wands
+	-- (handgun D=12.73, bomb wand D=14.14); the threshold sits between
+	-- 14.14 and 16.26 -- 14.5 chosen. Recalibrate on the next big wand.
+	diag_floor     = 14.5, -- D (GUI) at/below which the box is floor-height
+	diag_box_slope = 1.59, -- u of box height per D-GUI past diag_floor
+	diag_row_slope = 0.82, -- u of slot-row drop per D-GUI past diag_floor
 	-- Horizontal-plumb probes confirmed the frames are SQUARE: 17.5 GUI
 	-- tall (= the probed width), not 19.2. slot_h shrinks to 10.94u and
 	-- row_off grows to 3.7u so the row TOPS stay where the probes put them
@@ -265,13 +278,6 @@ local BOX = {
 	-- calibrate row_step from the overlay.
 	per_row  = 99,    -- slots per displayed row before wrapping (99 = off)
 	row_step = 13,    -- units: vertical step between slot rows (unverified)
-	-- Tall-art boxes grow 2u/sprite-px but their slot row drops only ~30%
-	-- of the growth (pixel-measured 2026-06-12, one 13px-art sample; the
-	-- v9 probes were all floor-height boxes so this was never visible).
-	-- 0.41, not the raw 0.30: fitted END-TO-END through the model (whose
-	-- box-2 top sat 2px above the engine's on the sample stack), so it
-	-- absorbs that stack drift; engine row 459px == model row exactly.
-	tall_row_slope = 0.41,
 }
 local BAR_W   = 1   -- GUI width of a bracket's vertical bar
 local TICK_W  = 3   -- GUI length of the top/bottom hooks
@@ -408,22 +414,24 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 	end
 end
 
--- Read the height of this wand's art in px (vanilla wand art is 3..17 px
--- tall). Vanilla paths resolve through the PREGENERATED table
--- (wand_sprite_meta.lua): the GuiGetImageDimensions read silently returned
--- the fallback for a 13px-art wand in-game (2026-06-12, brackets 5.6 GUI
--- high on its box), so the live read is only a fallback for modded wands.
--- The starting wands' image_file is a sprite XML (handgun.xml) -- the table
--- carries those too (frame_height). A failed read returns 9: small wands
--- hit the min_h floor anyway, so only tall-art wands need an accurate read.
-local function wand_sprite_h(gui, wand)
+-- Read this wand's art WIDTH+HEIGHT in px (drives the diagonal-bbox box
+-- model; vanilla art is 3..29 px a side). Vanilla paths resolve through the
+-- PREGENERATED table (wand_sprite_meta.lua); the live GuiGetImageDimensions
+-- read is the fallback for modded wands. The starting wands' image_file is
+-- a sprite XML (handgun.xml) -- the table carries those too
+-- (frame_width+frame_height). A failed read returns 18 (handgun-sized:
+-- comfortably below the floor threshold, like most wands).
+local function wand_art_wh(gui, wand)
 	local sc = EntityGetFirstComponentIncludingDisabled(wand, "SpriteComponent")
 	if sc then
 		local ok, f = pcall(ComponentGetValue2, sc, "image_file")
 		if ok and type(f) == "string" and f ~= "" then
-			if sprite_h_meta[f] then return sprite_h_meta[f] end
-			local ok2, _, h = pcall(GuiGetImageDimensions, gui, f, 1)
-			if ok2 and tonumber(h) and h > 0 and h < 30 then return h end
+			if sprite_wh_meta[f] then return sprite_wh_meta[f] end
+			local ok2, w, h = pcall(GuiGetImageDimensions, gui, f, 1)
+			if ok2 and tonumber(w) and tonumber(h)
+				and w > 0 and w < 30 and h > 0 and h < 30 then
+				return w + h
+			end
 		end
 	end
 	-- image_file unreadable or unknown: vanilla wands carry the same art
@@ -431,11 +439,11 @@ local function wand_sprite_h(gui, wand)
 	local ab = EntityGetFirstComponentIncludingDisabled(wand, "AbilityComponent")
 	if ab then
 		local ok, f = pcall(ComponentGetValue2, ab, "sprite_file")
-		if ok and type(f) == "string" and sprite_h_meta[f] then
-			return sprite_h_meta[f]
+		if ok and type(f) == "string" and sprite_wh_meta[f] then
+			return sprite_wh_meta[f]
 		end
 	end
-	return 9
+	return 18
 end
 
 -- Measure every carried wand's box (quick-slot order): the stacking model plus
@@ -463,7 +471,7 @@ local function collect_wand_boxes(gui, sw)
 	for _, wd in ipairs(wands) do
 		wd.tokens, wd.always, wd.xs = read_deck(wd.e)
 		wd.cfg = read_config(wd.e)
-		wd.s = wand_sprite_h(gui, wd.e)
+		wd.wh = wand_art_wh(gui, wd.e)
 		wd.sim = wand_structure.simulate(wd.tokens, meta,
 			{ spells_per_cast = wd.cfg.spells_per_cast })
 
@@ -473,19 +481,16 @@ local function collect_wand_boxes(gui, sw)
 		for _, x in ipairs(wd.xs) do if x > max_slot then max_slot = x end end
 		wd.nrows = math.max(1, math.floor(max_slot / BOX.per_row) + 1)
 
-		local art_h = math.max(BOX.min_h, BOX.h_pad + BOX.s_scale * wd.s)
-		wd.box_h = art_h + (wd.nrows - 1) * BOX.row_step
-		wd.top = box_top
-		-- Slot row is TOP-anchored (pixel-measured 2026-06-12 on a 13px-art
-		-- wand, the first tall-art box ever checked): the engine grows a
-		-- tall-art box by 2u/px but moves the row down only ~30% of the
-		-- extra -- the rest pads below the row. On floor boxes this equals
-		-- the old bottom-anchored row_off math exactly (row top at
-		-- min_h - row_off - slot_h = 21.86u; the tall box measured 22.9u at
-		-- box_h 40u -> slope (22.9-21.86)/(40-36.5) = 0.30). Extra rows of a
+		-- diagonal growth past the floor threshold (see the BOX comments:
+		-- box height and row position grow on DIFFERENT slopes -- the row
+		-- is NOT bottom-anchored in a grown box). Extra rows of a
 		-- multi-row wand (per_row, frozen feature) stack DOWN from the first.
+		local g = math.max(0, 0.7071 * wd.wh - BOX.diag_floor)
+		wd.box_h = BOX.min_h + BOX.diag_box_slope * g
+			+ (wd.nrows - 1) * BOX.row_step
+		wd.top = box_top
 		local row_top_u = box_top + (BOX.min_h - BOX.row_off - BOX.slot_h)
-			+ BOX.tall_row_slope * (art_h - BOX.min_h)
+			+ BOX.diag_row_slope * g
 		wd.rows_geo = {}
 		for r = 0, wd.nrows - 1 do
 			local top = (row_top_u + r * BOX.row_step) * U * sw
@@ -513,9 +518,9 @@ end
 -- Workshop release. It lives in git history; re-add it together with its
 -- settings.lua entry if the box geometry ever drifts after a game update.)
 -- TEMPORARY (2026-06-12): on-screen sprite-read probe. REMOVE BEFORE the
--- Workshop upload. Shows, per wand box, what wand_sprite_h resolved (s=)
--- and the raw image_file -- to find out why a 13px-art wand keeps reading
--- as the floor (table miss vs live-read failure vs stale mod code).
+-- Workshop upload. Shows, per wand box, what wand_art_wh resolved (wh=,
+-- D=) and the raw image_file -- to verify the diagonal-bbox model against
+-- the engine (table miss vs live-read failure vs stale mod code).
 local DEBUG_SPRITE_READ = true
 
 local function draw_sprite_probe(gui, sw, wands)
@@ -526,10 +531,10 @@ local function draw_sprite_probe(gui, sw, wands)
 			local ok, v = pcall(ComponentGetValue2, sc, "image_file")
 			if ok and type(v) == "string" then f = v end
 		end
-		local hit = sprite_h_meta[f] and "meta" or "miss"
+		local hit = sprite_wh_meta[f] and "meta" or "miss"
 		GuiColorSetForNextWidget(gui, 1, 1, 0.4, 1)
 		GuiText(gui, 168, wd.top * U * sw + 2,
-			string.format("v3 s=%d %s %s", wd.s, hit, f))
+			string.format("v4 wh=%d D=%.1f %s %s", wd.wh, 0.7071 * wd.wh, hit, f))
 	end
 end
 
