@@ -519,8 +519,29 @@ end
 -- plumb lines, click probes, per-box readouts -- was removed for the
 -- Workshop release. It lives in git history; re-add it together with its
 -- settings.lua entry if the box geometry ever drifts after a game update.)
+-- TEMPORARY (2026-06-12): row-calibration probe. REMOVE BEFORE the next
+-- Workshop update. Draws the MODEL's computed slot-row top/bottom as 1-GUI
+-- magenta lines across every wand box + the wand's art wh. A screenshot of
+-- N varied wands gives N exact (D, row-error) samples to fit e(D) -- the
+-- single art-driven drop shared by row position AND box height.
+local DEBUG_ROW_PROBE = true
+
+local function draw_row_probe(gui, sw, wands)
+	for _, wd in ipairs(wands) do
+		local r = wd.rows_geo[1]
+		GuiColorSetForNextWidget(gui, 1, 0.2, 1, 0.9)
+		GuiImage(gui, 90001 + wd.slot * 10, 21, r.top, PIXEL, 0.9, wd.right - 21, 1)
+		GuiColorSetForNextWidget(gui, 1, 0.2, 1, 0.9)
+		GuiImage(gui, 90002 + wd.slot * 10, 21, r.bot, PIXEL, 0.9, wd.right - 21, 1)
+		GuiColorSetForNextWidget(gui, 1, 0.2, 1, 1)
+		GuiText(gui, wd.right + 4, r.top - 4,
+			string.format("v5 wh=%d D=%.1f", wd.wh, 0.7071 * wd.wh))
+	end
+end
+
 local function draw_box_brackets(gui, sw, wands)
 	local idc = { n = 0 }
+	if DEBUG_ROW_PROBE then draw_row_probe(gui, sw, wands) end
 	for _, wd in ipairs(wands) do
 		-- Shuffle wands get NO brackets (user call 2026-06-11): the deck
 		-- order randomizes at cast time, so slot-order grouping painted on
