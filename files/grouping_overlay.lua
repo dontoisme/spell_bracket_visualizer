@@ -21,7 +21,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.0"
+local VERSION = "v1.1"
 
 -- Calibration measuring tool (debug): middle-click drops a point, a second drops
 -- the other end and draws the measured span; a third starts a fresh pair. Lets
@@ -448,16 +448,33 @@ end
 -- a sprite XML (handgun.xml) -- the table carries those too
 -- (frame_width+frame_height). A failed read returns 18 (handgun-sized:
 -- comfortably below the floor threshold, like most wands).
+-- Per-sprite geometry overrides (reactive escape hatch). A few wands don't fit
+-- the diagonal box-height law: the custom sprites (bomb_wand, scepter, skull,
+-- ...) and the occasional big procedural wand. When a wand's brackets sit wrong,
+-- enable Debug Info and measure two things with the middle-click tool, reading
+-- the "(N.NNu)" UNIT value (not the GUI px):
+--   box_h   = box outline height  (panel top border -> bottom border)
+--   row_top = header offset       (panel top border -> slot-row top)
+-- then add an entry keyed by the sprite's image_file path. Overrides win over
+-- the computed model; box height stays position-independent, so one entry fixes
+-- that wand in every slot. (For reference: a floor wand is box_h ~35.6,
+-- row_top ~22.2.) Leave empty until a specific wand actually misbehaves.
+local SPRITE_OVERRIDES = {
+	-- ["data/items_gfx/bomb_wand.png"] = { box_h = 35.6, row_top = 22.2 },
+}
+
+-- Returns the wand art's w+h (drives the box-height model) AND its sprite path
+-- (used to look up SPRITE_OVERRIDES). Path is nil when unreadable.
 local function wand_art_wh(gui, wand)
 	local sc = EntityGetFirstComponentIncludingDisabled(wand, "SpriteComponent")
 	if sc then
 		local ok, f = pcall(ComponentGetValue2, sc, "image_file")
 		if ok and type(f) == "string" and f ~= "" then
-			if sprite_wh_meta[f] then return sprite_wh_meta[f] end
+			if sprite_wh_meta[f] then return sprite_wh_meta[f], f end
 			local ok2, w, h = pcall(GuiGetImageDimensions, gui, f, 1)
 			if ok2 and tonumber(w) and tonumber(h)
 				and w > 0 and w < 30 and h > 0 and h < 30 then
-				return w + h
+				return w + h, f
 			end
 		end
 	end
@@ -467,10 +484,10 @@ local function wand_art_wh(gui, wand)
 	if ab then
 		local ok, f = pcall(ComponentGetValue2, ab, "sprite_file")
 		if ok and type(f) == "string" and sprite_wh_meta[f] then
-			return sprite_wh_meta[f]
+			return sprite_wh_meta[f], f
 		end
 	end
-	return 18
+	return 18, nil
 end
 
 -- Measure every carried wand's box (quick-slot order): the stacking model plus
@@ -521,7 +538,7 @@ local function collect_wand_boxes(gui, sw, per_row)
 	for _, wd in ipairs(wands) do
 		wd.tokens, wd.always, wd.xs = read_deck(wd.e)
 		wd.cfg = read_config(wd.e)
-		wd.wh = wand_art_wh(gui, wd.e)
+		wd.wh, wd.sprite = wand_art_wh(gui, wd.e)
 		wd.sim = wand_structure.simulate(wd.tokens, meta,
 			{ spells_per_cast = wd.cfg.spells_per_cast })
 
@@ -538,12 +555,15 @@ local function collect_wand_boxes(gui, sw, per_row)
 		-- box height and row position grow on DIFFERENT slopes -- the row
 		-- is NOT bottom-anchored in a grown box). Extra rows of a
 		-- multi-row wand (per_row, frozen feature) stack DOWN from the first.
+		-- per-sprite override wins over the diagonal law (SPRITE_OVERRIDES)
+		local ov = wd.sprite and SPRITE_OVERRIDES[wd.sprite]
 		local g = math.max(0, 0.7071 * wd.wh - BOX.diag_floor)
-		wd.box_h = BOX.min_h + BOX.diag_box_slope * g
+		wd.box_h = (ov and ov.box_h
+			or (BOX.min_h + BOX.diag_box_slope * g))
 			+ (wd.nrows - 1) * BOX.row_step
 		wd.top = box_top
-		local row_top_u = box_top + (BOX.min_h - BOX.row_off - BOX.slot_h)
-			+ BOX.diag_row_slope * g
+		local row_top_u = box_top + (ov and ov.row_top
+			or ((BOX.min_h - BOX.row_off - BOX.slot_h) + BOX.diag_row_slope * g))
 		wd.rows_geo = {}
 		for r = 0, wd.nrows - 1 do
 			local top = (row_top_u + r * BOX.row_step) * U * sw
@@ -747,6 +767,8 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 		lines[#lines + 1] = string.format(
 			"rows modeled=%d   cast-wraps=%s",
 			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no")
+		-- exact SPRITE_OVERRIDES key for the held wand (copy if it sits wrong)
+		lines[#lines + 1] = "sprite: " .. (wd.sprite or "(unknown)")
 	else
 		lines[#lines + 1] = "wand:  (none held -- select/hold a wand)"
 	end
