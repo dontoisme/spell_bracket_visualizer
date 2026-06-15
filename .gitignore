@@ -10,3 +10,6 @@ mod_config.xml
 # Python bytecode (from tools/)
 __pycache__/
 *.pyc
+
+# Local planning scratch (not for the repo)
+/NEXT_UPDATE_PLAN.md
