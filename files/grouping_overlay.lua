@@ -19,6 +19,17 @@ local wand_structure = dofile_once("mods/spell_bracket_visualizer/files/wand_str
 local M = {}
 local gui = nil
 
+-- Shown in the debug info box so a bug-report screenshot self-identifies the
+-- build. Bump on each Workshop release.
+local VERSION = "v1.0"
+
+-- Calibration measuring tool (debug): middle-click drops a point, a second drops
+-- the other end and draws the measured span; a third starts a fresh pair. Lets
+-- us read a slot corner's exact GUI coords and the pitch/row-height between two
+-- corners -- the only way to pin engine-drawn geometry we can't query (see the
+-- data.wak scan: the inventory UI is engine C++, no Lua slot positions exist).
+local measure_pts = {}
+
 -- type -> RGB (0..1) for panel row labels. Brightened from the retired
 -- icon-recolor border palette: those values were tuned for icon frames, and
 -- as 1px text on the dark nine-piece panel the dark red/blue rows were
@@ -234,8 +245,11 @@ local BOX = {
 	-- min_h/row_off refit 2026-06-09 from 4-box corner probes: the per-box
 	-- step is 61.6 GUI (38.5u), not 62.4 -- the old values accumulated ~1.5u
 	-- of downward drift by box 4. Fractional units are fine (float math).
-	min_h   = 36.5,   -- units: minimum box height (floor)
-	gap     = 2,      -- units between consecutive boxes
+	min_h   = 35.6,   -- units: box height (floor) = 57 GUI. Box-outline probe +
+	                  -- a 3-row solve (2026-06-15 v3) pinned this; the old 36.5
+	                  -- (58.4 GUI) over-pushed every box below, sinking the stack.
+	gap     = 2.5,    -- units between boxes (~4 GUI; same probe: box-top step
+	                  -- minus height = 4 GUI on every floor pair)
 	-- Big-art boxes (2026-06-12, supersedes v8's "2u per px of art HEIGHT"):
 	-- the header draws the wand rotated 45 deg, so what grows the box is the
 	-- art's DIAGONAL bbox D = 0.7071*(w+h) -- pixel-proven by wand_0430.png,
@@ -248,15 +262,26 @@ local BOX = {
 	-- box 39.3u, row +1.44u, both engine-exact) plus two floor wands
 	-- (handgun D=12.73, bomb wand D=14.14); the threshold sits between
 	-- 14.14 and 16.26 -- 14.5 chosen. Recalibrate on the next big wand.
-	diag_floor     = 14.5, -- D (GUI) at/below which the box is floor-height
-	diag_box_slope = 1.59, -- u of box height per D-GUI past diag_floor
-	diag_row_slope = 0.82, -- u of slot-row drop per D-GUI past diag_floor
-	-- Horizontal-plumb probes confirmed the frames are SQUARE: 17.5 GUI
-	-- tall (= the probed width), not 19.2. slot_h shrinks to 10.94u and
-	-- row_off grows to 3.7u so the row TOPS stay where the probes put them
-	-- (tops fit +-0.7 GUI across all four boxes).
-	row_off = 3.7,    -- units: slot-row bottom sits this far above the box bottom
-	slot_h  = 10.94,  -- units: card frame height (17.5 GUI, square frame)
+	-- 2026-06-15 (v2): the REAL bug was the FLOOR, not the slope. Box-OUTLINE
+	-- pixel-measurement of a real-D stack: boxes stay at floor height (~57 GUI)
+	-- all the way up to D=21.9 -- only D=27.6 grew (+8 GUI). The old floor=14.5
+	-- grew mid-size wands that are actually flat, and that error compounded 40+
+	-- GUI down the stack. Floor raised to 22 so ~all wands stay flat; a gentle
+	-- slope models the rare big wand. box==row slope because the box grows
+	-- ENTIRELY above the row (a wand that grew +8 box also dropped its row +8).
+	-- Fits the real-D stack within ~2 GUI/box. (v1 tried slopes=0 outright; that
+	-- left ~8 GUI under any big wand -- raising the floor recovers it cleanly.)
+	diag_floor     = 22,   -- D (GUI) at/below which the box is floor-height
+	diag_box_slope = 0.89, -- u of box-height growth per D-GUI past diag_floor
+	diag_row_slope = 0.89, -- u of slot-row drop per D-GUI past diag_floor
+	-- Frames were thought SQUARE at 17.5 GUI, but the 2026-06-15 measure-tool
+	-- probe read the slot row at 15.0 GUI tall. slot_h dropped to match; row_off
+	-- raised in step so the row TOP holds at the measured box-top offset
+	-- (~34 GUI = 21.1u; floor wands probed 33-35 GUI offset, slot 15 GUI tall).
+	row_off = 4.0,    -- units: slot-row bottom sits this far above the box bottom;
+	                  -- = base offset 35.6 GUI (box top -> slot-row top). Raised
+	                  -- with the min_h drop so the row absolute position holds.
+	slot_h  = 9.375,  -- units: card frame height (15.0 GUI tall)
 	-- Horizontal: nailed by 8 plumb-line probes spanning columns 0..25
 	-- (2026-06-09): the layout is in GUI units -- pitch exactly 20.0 GUI
 	-- (62.5px), visible frame width 17.5 GUI, col-0 left edge at 26.0 GUI.
@@ -270,13 +295,13 @@ local BOX = {
 	-- wand (measured from a screenshot 2026-06-11 -- the panel used to dock
 	-- INSIDE the starting wands' boxes). Box width = max(this, slot row).
 	min_right = 0.25703, -- 164.5 GUI / 640
-	-- Multi-row: the machinery below supports wands whose slot row wraps,
-	-- but a capacity-26 wand renders as ONE long row at 2000x1125 (user
-	-- observation) -- so wrapping is either resolution-dependent or doesn't
-	-- happen. per_row=99 disables it until someone actually sees a second
-	-- row; if that day comes, set per_row to the observed wrap column and
-	-- calibrate row_step from the overlay.
-	per_row  = 99,    -- slots per displayed row before wrapping (99 = off)
+	-- Multi-row: the machinery below supports wands whose slot row wraps. The
+	-- wrap column is now computed per-frame from the screen aspect by
+	-- wrap_columns() (a capacity-26 wand is ONE row at 16:9 but wraps on
+	-- narrower aspects). This per_row is only the FALLBACK passed when the
+	-- aspect is >= 16:9 (99 = no wrap); row_step is still unverified -- if a
+	-- real second row appears, calibrate it from the debug box / a screenshot.
+	per_row  = 99,    -- fallback wrap column for >= 16:9 (99 = off; see wrap_columns)
 	row_step = 13,    -- units: vertical step between slot rows (unverified)
 }
 local BAR_W   = 1   -- GUI width of a bracket's vertical bar
@@ -453,7 +478,30 @@ end
 -- the slot brackets render from it, and the panel docks against it (the
 -- selected wand's box top + the stack's bottom/right extents).
 -- Returns wands, stack bottom (GUI y) and stack right edge (GUI x).
-local function collect_wand_boxes(gui, sw)
+-- Self-calibrating wrap column (2026-06-15). Noita keeps the GUI HEIGHT fixed
+-- and grows WIDTH with the screen aspect, laying out spell slots in absolute GUI
+-- units -- so an aspect NARROWER than 16:9 fits fewer slots per row before the
+-- engine wraps the row. Our slot geometry (slot0_x/pitch/halfw) is a fraction of
+-- width measured at 16:9; converting "columns that fit" to the live aspect needs
+-- only the RATIO aspect/CAL_ASPECT -- not the absolute GUI width (which the
+-- debug box reports, but we never have to assume).
+--   16:9 and WIDER  -> keep the shipped no-wrap behavior (return 99): the
+--                      released 16:9 build is validated and wider only adds room.
+--   NARROWER        -> compute the wrap column so the brackets follow the row.
+-- WRAP_EDGE is the fraction of the live width the engine wraps at (~1 = right
+-- screen edge). If a narrow-aspect screenshot shows the wrap one column off,
+-- nudge WRAP_EDGE (aspect + observed wrap column are both in the debug box).
+local CAL_ASPECT = 16 / 9
+local WRAP_EDGE  = 1.0
+local function wrap_columns(sw, sh)
+	local aspect = (sh > 0) and (sw / sh) or CAL_ASPECT
+	if aspect >= CAL_ASPECT - 0.01 then return 99 end
+	local c_max = math.floor(
+		(WRAP_EDGE * aspect / CAL_ASPECT - BOX.slot0_x - BOX.halfw) / BOX.pitch)
+	return math.max(1, c_max + 1)
+end
+
+local function collect_wand_boxes(gui, sw, per_row)
 	local players = EntityGetWithTag("player_unit")
 	if not players or #players == 0 then return {}, BOX.top0 * U * sw, 0 end
 	local items = GameGetAllInventoryItems(players[1]) or {}
@@ -478,10 +526,13 @@ local function collect_wand_boxes(gui, sw)
 			{ spells_per_cast = wd.cfg.spells_per_cast })
 
 		-- displayed slot rows: capacity wraps every per_row slots (fall back
-		-- to the highest occupied slot if the capacity read failed)
+		-- to the highest occupied slot if the capacity read failed). per_row is
+		-- the aspect-calibrated wrap column (wrap_columns); stamped on the box so
+		-- the brackets and the debug readout use the same value.
+		wd.per_row = per_row
 		local max_slot = wd.cfg.capacity - 1
 		for _, x in ipairs(wd.xs) do if x > max_slot then max_slot = x end end
-		wd.nrows = math.max(1, math.floor(max_slot / BOX.per_row) + 1)
+		wd.nrows = math.max(1, math.floor(max_slot / per_row) + 1)
 
 		-- diagonal growth past the floor threshold (see the BOX comments:
 		-- box height and row position grow on DIFFERENT slopes -- the row
@@ -504,7 +555,7 @@ local function collect_wand_boxes(gui, sw)
 		-- + ~5 GUI of border; col-0 frame left sits at 26 GUI, box at ~21)
 		wd.right = sw * BOX.min_right
 		if max_slot >= 0 then
-			local last_col = math.min(max_slot, BOX.per_row - 1)
+			local last_col = math.min(max_slot, per_row - 1)
 			wd.right = math.max(wd.right,
 				sw * (BOX.slot0_x + last_col * BOX.pitch + BOX.halfw) + 5)
 		end
@@ -519,13 +570,12 @@ end
 -- plumb lines, click probes, per-box readouts -- was removed for the
 -- Workshop release. It lives in git history; re-add it together with its
 -- settings.lua entry if the box geometry ever drifts after a game update.)
--- TEMPORARY (2026-06-12): row-calibration probe. REMOVE BEFORE the next
--- Workshop update. Draws the MODEL's computed slot-row top/bottom as 1-GUI
--- magenta lines across every wand box + the wand's art wh. A screenshot of
--- N varied wands gives N exact (D, row-error) samples to fit e(D) -- the
--- single art-driven drop shared by row position AND box height.
-local DEBUG_ROW_PROBE = true
-
+-- Row-calibration probe, now gated behind the show_debug setting (was a
+-- hardcoded constant that shipped =true by accident). Draws the MODEL's
+-- computed slot-row top/bottom as 1-GUI magenta lines across every wand box +
+-- the wand's art wh / diagonal D. A screenshot of N varied wands gives N exact
+-- (D, row-error) samples to refit the box-height law -- which is exactly what's
+-- needed when a long/tall wand throws off the stack below it.
 local function draw_row_probe(gui, sw, wands)
 	for _, wd in ipairs(wands) do
 		local r = wd.rows_geo[1]
@@ -539,9 +589,9 @@ local function draw_row_probe(gui, sw, wands)
 	end
 end
 
-local function draw_box_brackets(gui, sw, wands)
+local function draw_box_brackets(gui, sw, wands, show_probe)
 	local idc = { n = 0 }
-	if DEBUG_ROW_PROBE then draw_row_probe(gui, sw, wands) end
+	if show_probe then draw_row_probe(gui, sw, wands) end
 	for _, wd in ipairs(wands) do
 		-- Shuffle wands get NO brackets (user call 2026-06-11): the deck
 		-- order randomizes at cast time, so slot-order grouping painted on
@@ -552,8 +602,8 @@ local function draw_box_brackets(gui, sw, wands)
 			-- displayed position of each card: wraps every per_row slots
 			local cols, rows = {}, {}
 			for k, x in ipairs(wd.xs) do
-				cols[k] = x % BOX.per_row
-				rows[k] = math.floor(x / BOX.per_row)
+				cols[k] = x % wd.per_row
+				rows[k] = math.floor(x / wd.per_row)
 			end
 			local groups = {} -- all casts together: closes stack per row+column
 			for _, cast in ipairs(wd.sim.casts) do
@@ -670,6 +720,120 @@ local function draw_panel(gui, rows, title, sw, sh, anchor)
 	end
 end
 
+-- ---- debug info box (lightweight, user-facing) -----------------------------
+
+-- A small top-left panel a player can flip on in settings and screenshot when
+-- reporting a layout bug. It carries the exact facts we need to reproduce:
+-- the virtual GUI dimensions + aspect (resolution/aspect is what actually
+-- moves the wand-slot layout -- see the BOX.per_row note) and the held wand's
+-- size. NOT the heavy calibration HUD (rulers/probes) -- that lives in git
+-- history for dev recalibration; this is the one ordinary users turn on.
+local function draw_debug_info(gui, sw, sh, wd, per_row)
+	local lines = { "Spell Bracket Visualizer " .. VERSION .. "  (debug)" }
+
+	local aspect = (sh > 0) and (sw / sh) or 0
+	local off_169 = math.abs(aspect - 16 / 9) > 0.02
+	lines[#lines + 1] = string.format("GUI  %d x %d   aspect %.3f  %s",
+		math.floor(sw + 0.5), math.floor(sh + 0.5), aspect,
+		off_169 and "(NOT 16:9 -- layout calibrated for 16:9)" or "(16:9)")
+	lines[#lines + 1] = "slot-row wraps at col: " ..
+		((per_row and per_row < 99) and tostring(per_row) or "off (>= 16:9)")
+
+	if wd then
+		lines[#lines + 1] = string.format(
+			"wand:  cap=%d  spells=%d  per-cast=%d  shuffle=%s",
+			wd.cfg.capacity, #wd.tokens, wd.cfg.spells_per_cast,
+			wd.cfg.shuffle and "yes" or "no")
+		lines[#lines + 1] = string.format(
+			"rows modeled=%d   cast-wraps=%s",
+			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no")
+	else
+		lines[#lines + 1] = "wand:  (none held -- select/hold a wand)"
+	end
+	lines[#lines + 1] = "Reporting a bug? Screenshot this with the wand open."
+	lines[#lines + 1] = "Measure: middle-click two points (e.g. slot corners)."
+
+	local line_h, pad = 11, 4
+	local max_w = 0
+	for _, t in ipairs(lines) do
+		local w = (GuiGetTextDimensions(gui, t))
+		if w > max_w then max_w = w end
+	end
+	local panel_w = max_w + pad * 2
+	local panel_h = #lines * line_h + pad * 2
+	-- top-RIGHT corner: the wand panels you measure sit top-LEFT, so anchor here
+	-- to keep the whole left column clear (the HUD it may graze isn't a target)
+	local x, y = sw - panel_w - 8, 8
+
+	-- top-left corner is clear of Noita's centered inventory; lower z = front,
+	-- so this sits above the panel/boxes (brackets at z=-10 are elsewhere)
+	GuiZSet(gui, -7)
+	GuiImageNinePiece(gui, 90220, x - pad, y - pad, panel_w, panel_h, 0.9)
+	GuiZSet(gui, -8)
+	for i, t in ipairs(lines) do
+		local c = (i == 1) and HEADER_COLOR
+			or (i == 2 and off_169 and WRAP_COLOR)
+			or { 1, 1, 1 }
+		GuiColorSetForNextWidget(gui, c[1], c[2], c[3], 1)
+		GuiText(gui, x, y, t)
+		y = y + line_h
+	end
+	GuiZSet(gui, 1)
+end
+
+-- Click-to-measure overlay (only while show_debug). Reads the raw mouse (the
+-- engine reports it in a 1280x720 virtual screen = 2x the 640x360 GUI, verified
+-- against known slot corners), converts to GUI coords, and lets you drop two
+-- points to read the span. Axis split (dx/dy) is reported because slot geometry
+-- is axis-aligned: dx as a fraction of width == pitch/slot0 units; dy in U ==
+-- row-height units -- i.e. the exact numbers the BOX table is calibrated in.
+local function draw_measure(gui, sw, sh)
+	if type(InputGetMousePosOnScreen) ~= "function" then return end
+	local ok, mx, my = pcall(InputGetMousePosOnScreen)
+	if not ok or not mx then return end
+	local cx, cy = mx * sw / 1280, my * sh / 720
+
+	local okd, mid = pcall(InputIsMouseButtonJustDown, 3) -- middle: drop a point
+	if okd and mid then
+		if #measure_pts >= 2 then measure_pts = {} end
+		measure_pts[#measure_pts + 1] = { cx, cy }
+	end
+
+	local id = 91000
+	local function cross(x, y, c, len)
+		id = id + 1; line(gui, id, x - len, y, len * 2 + 1, 1, c, 0.9)
+		id = id + 1; line(gui, id, x, y - len, 1, len * 2 + 1, c, 0.9)
+	end
+
+	GuiZSet(gui, -9)
+	cross(cx, cy, { 0.4, 1, 1 }, 6) -- live cursor crosshair
+	GuiColorSetForNextWidget(gui, 0.4, 1, 1, 1)
+	GuiText(gui, cx + 7, cy + 2, string.format("(%.1f, %.1f)", cx, cy))
+
+	for i, p in ipairs(measure_pts) do
+		cross(p[1], p[2], { 1, 1, 0.2 }, 5)
+		GuiColorSetForNextWidget(gui, 1, 1, 0.2, 1)
+		GuiText(gui, p[1] + 6, p[2] - 12, string.format("P%d (%.1f, %.1f)", i, p[1], p[2]))
+	end
+
+	if #measure_pts == 2 then
+		local a, b = measure_pts[1], measure_pts[2]
+		-- L-guide: horizontal leg at a.y, vertical leg at b.x (slot edges are
+		-- axis-aligned, so dx and dy are the meaningful quantities, not a slant)
+		id = id + 1; line(gui, id, math.min(a[1], b[1]), a[2],
+			math.abs(b[1] - a[1]) + 1, 1, { 1, 0.5, 0.2 }, 0.9)
+		id = id + 1; line(gui, id, b[1], math.min(a[2], b[2]),
+			1, math.abs(b[2] - a[2]) + 1, { 1, 0.5, 0.2 }, 0.9)
+		local dx, dy = b[1] - a[1], b[2] - a[2]
+		local dist = math.sqrt(dx * dx + dy * dy)
+		GuiColorSetForNextWidget(gui, 1, 0.7, 0.3, 1)
+		GuiText(gui, (a[1] + b[1]) / 2 + 4, (a[2] + b[2]) / 2 + 2, string.format(
+			"dx=%.1f (%.5fw)  dy=%.1f (%.2fu)  d=%.1f",
+			dx, dx / sw, dy, dy / (U * sw), dist))
+	end
+	GuiZSet(gui, 1)
+end
+
 -- ---- per-frame entry point -------------------------------------------------
 
 function M.update()
@@ -692,18 +856,21 @@ function M.update()
 	local get = (type(ModSettingGet) == "function") and ModSettingGet or function() return nil end
 	local show_panel = get("spell_bracket_visualizer.show_grouping") ~= false
 	local show_slots = get("spell_bracket_visualizer.show_slot_brackets") ~= false
-	if not show_panel and not show_slots then return end
+	local show_debug = get("spell_bracket_visualizer.show_debug") == true
+	if not show_panel and not show_slots and not show_debug then return end
 
 	local sw, sh = GuiGetScreenDimensions(gui)
 
-	-- one measure/read pass shared by the brackets and the panel's dock anchor
-	local boxes, stack_bot = collect_wand_boxes(gui, sw)
+	-- one measure/read pass shared by the brackets and the panel's dock anchor.
+	-- per_row is the aspect-calibrated wrap column (99 = no wrap at >= 16:9)
+	local per_row = wrap_columns(sw, sh)
+	local boxes, stack_bot = collect_wand_boxes(gui, sw, per_row)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
 		-- strongly negative z = "bring to front": lower z draws on top, and
 		-- this must beat the engine's spell-frame layer, not just our own gui
 		GuiZSet(gui, -10)
-		draw_box_brackets(gui, sw, boxes)
+		draw_box_brackets(gui, sw, boxes, show_debug)
 		GuiZSet(gui, 1)
 	end
 
@@ -729,6 +896,16 @@ function M.update()
 			}
 			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always), title, sw, sh, anchor)
 		end
+	end
+
+	if show_debug then -- diagnostic readout for bug reports (top-left corner)
+		local wand = get_active_wand()
+		local dbg_wd = nil
+		for _, b in ipairs(boxes) do
+			if b.e == wand then dbg_wd = b; break end
+		end
+		draw_debug_info(gui, sw, sh, dbg_wd, per_row)
+		draw_measure(gui, sw, sh)
 	end
 end
 
