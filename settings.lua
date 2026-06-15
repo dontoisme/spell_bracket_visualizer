@@ -20,7 +20,7 @@ mod_settings = {
 	{
 		id = "show_debug",
 		ui_name = "Debug Info (for bug reports)",
-		ui_description = "Show a small box (top-left) with your screen/GUI size and the\nheld wand's stats, plus magenta guide-lines on each wand box.\nIf the brackets or panel look wrong, turn this on, open your\nwand, and send the author a screenshot -- it shows your\nresolution, wand size, and where the mod thinks each row is.",
+		ui_description = "Show a small box (top-right) with your screen/GUI size and\nthe held wand's stats, plus magenta guide-lines on each wand box.\nIf the brackets or panel look wrong, turn this on, open your\nwand, and send the author a screenshot -- it shows your\nresolution, wand size, and where the mod thinks each row is.",
 		value_default = false,
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
