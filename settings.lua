@@ -1,13 +1,21 @@
 dofile("data/scripts/lib/mod_settings.lua") -- see this file for documentation on the settings API
 
 local mod_id = "spell_bracket_visualizer"
-mod_settings_version = 1
+mod_settings_version = 2
 mod_settings = {
 	{
 		id = "show_grouping",
 		ui_name = "Wand Structure Panel",
 		ui_description = "While the inventory is open, show a Lisp-style tree of the\nactive wand's cast structure: what fires together each cast\n(multicasts, triggers, modifiers) and when the wand WRAPS.",
 		value_default = true,
+		scope = MOD_SETTING_SCOPE_RUNTIME,
+	},
+	{
+		id = "panel_text_size",
+		ui_name = "Wand Structure Panel: Text Size",
+		ui_description = "Text size for the wand structure panel.\nSmaller fits longer wands / more casts on screen.",
+		value_default = "small",
+		values = { { "tiny", "Tiny" }, { "small", "Small" }, { "medium", "Medium" } },
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{

@@ -21,7 +21,10 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.1"
+local VERSION = "v1.2"
+
+-- Panel text size, chosen by the panel_text_size mod setting (enum ids).
+local PANEL_SCALE_MAP = { tiny = 0.5, small = 0.6, medium = 0.75 }
 
 -- Calibration measuring tool (debug): middle-click drops a point, a second drops
 -- the other end and draws the measured span; a third starts a fresh pair. Lets
@@ -647,66 +650,84 @@ end
 -- frames and our slot brackets can't happen. (No scroll container on
 -- purpose: this gui is NonInteractive so hovering it can never block
 -- firing or inventory clicks -- see the fire-block fix.)
-local DOCK_GAP     = 14 -- GUI between the boxes and the docked panel
-local RIGHT_KEEPOUT = 64 -- GUI kept clear of the right-side HUD column
-local BOTTOM_MARGIN = 12 -- GUI kept clear at the screen bottom
-local function draw_panel(gui, rows, title, sw, sh, anchor)
+local RIGHT_MARGIN    = 3    -- GUI kept clear at the right screen edge
+local TOP_BAR_KEEPOUT = 58   -- panel top stays below the HP/mana/gold bars
+local BOTTOM_MARGIN   = 12   -- GUI kept clear at the screen bottom
+local MAX_PANEL_W     = 220  -- hard cap on panel width (also clamped to sw*0.5)
+local PANEL_BG_Z      = -20  -- lower z = front; beats the slot brackets (z -10)
+local PANEL_TEXT_Z    = -21  -- one layer in front of the panel background
+
+-- Trim a label with a trailing "..." until it measures within max_px at `scale`.
+-- (Labels are ASCII spell names, so #s byte length == char count.)
+local function fit_label(gui, text, scale, max_px)
+	if max_px <= 0 then return "..." end
+	if (GuiGetTextDimensions(gui, text, scale)) <= max_px then return text end
+	local s = text
+	while #s > 1 and (GuiGetTextDimensions(gui, s .. "...", scale)) > max_px do
+		s = s:sub(1, #s - 1)
+	end
+	return s .. "..."
+end
+
+-- Companion cast-structure panel for the held wand, drawn RIGHT-ANCHORED.
+-- Overlap with other wands is acceptable (the panel is opaque and topmost), so
+-- placement is simple: pin the right edge near the screen edge and grow the
+-- panel leftward. Vertically it is HYBRID -- a short structure pins at the
+-- selected wand's height (clamped below the HP bars); a long one that won't fit
+-- there takes over the full-height right column under the bars (may cover the
+-- Wet/Tinker status text, by design). Long labels are truncated to MAX_PANEL_W.
+local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	if #rows == 0 then return end
 
-	local line_h = 11
 	local pad = 4
-	local bar_w = (GuiGetTextDimensions(gui, "| ")) -- horizontal advance per nesting spine
+	-- GuiText()/GuiGetTextDimensions() both take a scale arg (verified against
+	-- tools_modding/lua_api_documentation.html); measure at the same scale so the
+	-- panel width/row height stay exact.
+	local _, th = GuiGetTextDimensions(gui, title, scale)
+	local line_h = th + 2
+	local bar_w = (GuiGetTextDimensions(gui, "| ", scale)) -- advance per nesting spine
 
-	local max_w = (GuiGetTextDimensions(gui, title))
+	-- width budget: cap at MAX_PANEL_W (and half-screen), truncate labels past it,
+	-- then hug the widest KEPT label. The title is never truncated, so the panel
+	-- never collapses even if every label is over-long.
+	local max_panel_w = math.min(MAX_PANEL_W, sw * 0.5)
+	local max_w = (GuiGetTextDimensions(gui, title, scale))
 	for _, r in ipairs(rows) do
-		local w = #r.bars * bar_w + (GuiGetTextDimensions(gui, r.label))
+		local bars_w = (r.header and 0 or #r.bars) * bar_w
+		r.label = fit_label(gui, r.label, scale, max_panel_w - pad * 2 - bars_w)
+		local w = bars_w + (GuiGetTextDimensions(gui, r.label, scale))
 		if w > max_w then max_w = w end
 	end
-
 	local panel_w = max_w + pad * 2
 
-	-- Placement. Boxes differ in width, so docking right of the WHOLE stack
-	-- wastes the space beside its narrow tail: a panel whose top is at box
-	-- j's top can only intersect the bands of boxes j..n (bands never
-	-- overlap vertically), so it only has to clear THEIR right edges. Try
-	-- j = 1..n in order -- top-aligned with the selected box when allowed
-	-- (j <= sel), else at box j's top -- with the bottom-anchored slide-up
-	-- floored at box j's top. Take the first candidate that shows every
-	-- row; otherwise remember the one showing the most, and fall back to
-	-- centered-below-the-stack only if it beats them all. This is what
-	-- pushes the panel BELOW a wide mid-stack box (17-slot wand above two
-	-- small ones) instead of folding it to a 2-row stub at the bottom.
-	-- fit_y0/rows_at share one budget with the row clamp below, so a slid
-	-- panel never folds rows it had room for.
-	local fit_y0 = sh - BOTTOM_MARGIN - pad - 2 - (#rows + 1) * line_h
-	local function rows_at(y)
-		return math.floor((sh - BOTTOM_MARGIN - y - pad - 2 - line_h) / line_h)
+	-- vertical placement (hybrid) --------------------------------------------
+	local screen_bot = sh - BOTTOM_MARGIN
+	local function rows_at(y, bot)
+		return math.floor((bot - y - pad - 2 - line_h) / line_h)
 	end
-	local sel_top = anchor.boxes[anchor.sel].top
-	local px, y0, best_n
-	for j = 1, #anchor.boxes do
-		local x = 0
-		for k = j, #anchor.boxes do
-			x = math.max(x, anchor.boxes[k].right)
-		end
-		x = math.floor(x) + DOCK_GAP
-		if x + panel_w <= sw - RIGHT_KEEPOUT then
-			local floor_y = anchor.boxes[j].top
-			local y = math.max(sel_top, floor_y)
-			if y > fit_y0 then y = math.max(floor_y, fit_y0) end
-			y = math.floor(y)
-			local n = rows_at(y)
-			if n >= #rows then px, y0, best_n = x, y, nil; break end
-			if best_n == nil or n > best_n then px, y0, best_n = x, y, n end
-		end
+	local stack_top = anchor.boxes[1].top
+	for _, b in ipairs(anchor.boxes) do
+		if b.top < stack_top then stack_top = b.top end
 	end
-	if px == nil or (best_n ~= nil and rows_at(anchor.below_y) > best_n) then
-		px = math.floor((sw - panel_w) / 2)
-		y0 = math.floor(anchor.below_y)
+	local sel_top = (anchor.sel and anchor.boxes[anchor.sel])
+		and anchor.boxes[anchor.sel].top or stack_top
+	-- candidate top: the selected wand's box top, never above the stack top and
+	-- never over the HP/mana/gold bars.
+	local cand_top = math.floor(math.max(TOP_BAR_KEEPOUT, stack_top, sel_top))
+	local y0
+	if rows_at(cand_top, screen_bot) >= #rows then
+		y0 = cand_top                    -- short: pin at the wand's height
+	else
+		y0 = math.floor(TOP_BAR_KEEPOUT) -- long: take over the full-height column
 	end
+	local bot_limit = screen_bot
 
-	-- clamp to the screen: keep the rows that fit, fold the rest
-	local max_rows = math.floor((sh - BOTTOM_MARGIN - y0 - pad - 2 - line_h) / line_h)
+	-- right-align: right edge = sw - RIGHT_MARGIN, panel grows leftward
+	local px = math.floor(sw - RIGHT_MARGIN - panel_w)
+	if px < 4 then px = 4 end
+
+	-- clamp rows to the band: keep what fits, fold the rest into "... +N more"
+	local max_rows = math.floor((bot_limit - y0 - pad - 2 - line_h) / line_h)
 	if max_rows < 2 then max_rows = 2 end
 	if #rows > max_rows then
 		local kept = {}
@@ -719,11 +740,13 @@ local function draw_panel(gui, rows, title, sw, sh, anchor)
 
 	local panel_h = (#rows + 1) * line_h + pad * 2
 
-	GuiZSet(gui, 4)
-	GuiImageNinePiece(gui, 90210, px - pad, y0 - pad, panel_w, panel_h, 0.85)
+	-- opaque + topmost: lower z draws in front, so the panel sits over any wand
+	-- boxes/brackets it overlaps and stays readable.
+	GuiZSet(gui, PANEL_BG_Z)
+	GuiImageNinePiece(gui, 90210, px - pad, y0 - pad, panel_w, panel_h, 1.0)
 
-	GuiZSet(gui, 1)
-	GuiText(gui, px, y0, title)
+	GuiZSet(gui, PANEL_TEXT_Z)
+	GuiText(gui, px, y0, title, scale)
 	local y = y0 + line_h + 2
 	for _, r in ipairs(rows) do
 		local x = px
@@ -731,13 +754,14 @@ local function draw_panel(gui, rows, title, sw, sh, anchor)
 		if r.header then bars = {} end -- headers sit flush left
 		for _, bc in ipairs(bars) do   -- rainbow nesting spines
 			GuiColorSetForNextWidget(gui, bc[1], bc[2], bc[3], 1)
-			GuiText(gui, x, y, "|")
+			GuiText(gui, x, y, "|", scale)
 			x = x + bar_w
 		end
 		GuiColorSetForNextWidget(gui, r.color[1], r.color[2], r.color[3], 1)
-		GuiText(gui, x, y, r.label)
+		GuiText(gui, x, y, r.label, scale)
 		y = y + line_h
 	end
+	GuiZSet(gui, 1)
 end
 
 -- ---- debug info box (lightweight, user-facing) -----------------------------
@@ -880,13 +904,14 @@ function M.update()
 	local show_slots = get("spell_bracket_visualizer.show_slot_brackets") ~= false
 	local show_debug = get("spell_bracket_visualizer.show_debug") == true
 	if not show_panel and not show_slots and not show_debug then return end
+	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
 
 	local sw, sh = GuiGetScreenDimensions(gui)
 
 	-- one measure/read pass shared by the brackets and the panel's dock anchor.
 	-- per_row is the aspect-calibrated wrap column (99 = no wrap at >= 16:9)
 	local per_row = wrap_columns(sw, sh)
-	local boxes, stack_bot = collect_wand_boxes(gui, sw, per_row)
+	local boxes = collect_wand_boxes(gui, sw, per_row)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
 		-- strongly negative z = "bring to front": lower z draws on top, and
@@ -907,16 +932,15 @@ function M.update()
 		-- is just one arrangement of many -- not worth showing.
 		if wd and not wd.cfg.shuffle and (#wd.tokens > 0 or #wd.always > 0) then
 			local title = "Wand structure  (" .. wd.cfg.spells_per_cast .. "/cast)"
-			local geo = {} -- per-box GUI geometry for the dock candidates
+			local geo = {} -- per-box GUI top edge for the right-anchored panel's vertical anchor
 			for i, b in ipairs(boxes) do
-				geo[i] = { top = b.top * U * sw, right = b.right }
+				geo[i] = { top = b.top * U * sw }
 			end
 			local anchor = {
-				boxes   = geo,
-				sel     = sel,
-				below_y = stack_bot + DOCK_GAP,
+				boxes = geo,
+				sel   = sel,
 			}
-			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always), title, sw, sh, anchor)
+			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always), title, sw, sh, anchor, panel_scale)
 		end
 	end
 
