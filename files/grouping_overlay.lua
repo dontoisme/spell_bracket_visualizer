@@ -21,7 +21,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.2"
+local VERSION = "v1.2.1"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 local PANEL_SCALE_MAP = { tiny = 0.5, small = 0.6, medium = 0.75 }
@@ -251,8 +251,15 @@ local BOX = {
 	min_h   = 35.6,   -- units: box height (floor) = 57 GUI. Box-outline probe +
 	                  -- a 3-row solve (2026-06-15 v3) pinned this; the old 36.5
 	                  -- (58.4 GUI) over-pushed every box below, sinking the stack.
-	gap     = 2.5,    -- units between boxes (~4 GUI; same probe: box-top step
-	                  -- minus height = 4 GUI on every floor pair)
+	gap     = 2.9,    -- units between boxes. min_h + gap = the per-box STEP,
+	                  -- measured at 61.6 GUI (38.5u) by the v9 4-box corner
+	                  -- probe. The 2026-06-15 min_h drop (36.5->35.6) wasn't
+	                  -- compensated here, shrinking the step to 38.1u (60.96
+	                  -- GUI) -- a 0.64 GUI/box deficit that accumulated UPWARD
+	                  -- down the stack (brackets drifted high on lower wands,
+	                  -- worse after add/remove reordered the stack). Restored
+	                  -- to 38.5u via gap so the within-box row offset (keyed on
+	                  -- min_h) stays calibrated.
 	-- Big-art boxes (2026-06-12, supersedes v8's "2u per px of art HEIGHT"):
 	-- the header draws the wand rotated 45 deg, so what grows the box is the
 	-- art's DIAGONAL bbox D = 0.7071*(w+h) -- pixel-proven by wand_0430.png,
@@ -274,7 +281,16 @@ local BOX = {
 	-- ENTIRELY above the row (a wand that grew +8 box also dropped its row +8).
 	-- Fits the real-D stack within ~2 GUI/box. (v1 tried slopes=0 outright; that
 	-- left ~8 GUI under any big wand -- raising the floor recovers it cleanly.)
-	diag_floor     = 22,   -- D (GUI) at/below which the box is floor-height
+	-- 2026-06-16: floor LOWERED 22 -> 16 from two Measure-tool samples on the
+	-- SAME stack (debug row-probe): a flat wand D=14.1 read row-offset 21.88u
+	-- (== the floor base 22.2u, confirms flat) and a big wand D=22.6
+	-- (wand_0315.png, Wh=32) read 28.13u -- +5.9u the floor=22 model missed
+	-- entirely. Solving 28.13 = 22.225 + 0.89*(22.6 - floor) gives floor ~16,
+	-- which keeps the flat wands flat and lands the big one. The 2026-06-15
+	-- "flat to D=21.9" pixel-read was wrong (or sprite-specific): the D=18.4 /
+	-- D=20.5 wands users reported as "brackets too high" were under-grown by it.
+	-- Still ONE grown sample for the SLOPE -- a 2nd big wand (D>=27) would pin it.
+	diag_floor     = 16,   -- D (GUI) at/below which the box is floor-height
 	diag_box_slope = 0.89, -- u of box-height growth per D-GUI past diag_floor
 	diag_row_slope = 0.89, -- u of slot-row drop per D-GUI past diag_floor
 	-- Frames were thought SQUARE at 17.5 GUI, but the 2026-06-15 measure-tool
