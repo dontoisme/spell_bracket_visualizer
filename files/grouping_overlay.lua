@@ -244,55 +244,32 @@ local PIXEL = "mods/spell_bracket_visualizer/files/ui/pixel.png"
 -- screenshot -- it shows computed rows + raw sprite reads to recalibrate.
 local U = 0.0025 -- one engine-UI unit, as a fraction of GUI width
 local BOX = {
-	top0    = 30,     -- units: top of wand box 1
-	-- min_h/row_off refit 2026-06-09 from 4-box corner probes: the per-box
-	-- step is 61.6 GUI (38.5u), not 62.4 -- the old values accumulated ~1.5u
-	-- of downward drift by box 4. Fractional units are fine (float math).
-	min_h   = 35.6,   -- units: box height (floor) = 57 GUI. Box-outline probe +
-	                  -- a 3-row solve (2026-06-15 v3) pinned this; the old 36.5
-	                  -- (58.4 GUI) over-pushed every box below, sinking the stack.
-	gap     = 2.9,    -- units between boxes. min_h + gap = the per-box STEP,
-	                  -- measured at 61.6 GUI (38.5u) by the v9 4-box corner
-	                  -- probe. The 2026-06-15 min_h drop (36.5->35.6) wasn't
-	                  -- compensated here, shrinking the step to 38.1u (60.96
-	                  -- GUI) -- a 0.64 GUI/box deficit that accumulated UPWARD
-	                  -- down the stack (brackets drifted high on lower wands,
-	                  -- worse after add/remove reordered the stack). Restored
-	                  -- to 38.5u via gap so the within-box row offset (keyed on
-	                  -- min_h) stays calibrated.
+	top0    = 30,   -- units: top of wand box 1 (anchor; measure-confirmed dead-on)
+	gap     = 2.9,  -- units: inter-box gap (box bottom -> next box top). A plain
+	                -- constant -- ALL sprite-driven height now lives in box_h
+	                -- (= row_offset + below_c, below), so there is no min_h floor
+	                -- and no STEP to keep in sync; the per-box step just varies
+	                -- with the sprite. tools/test_box_geometry.py guards box_h.
 	-- Big-art boxes (2026-06-12, supersedes v8's "2u per px of art HEIGHT"):
 	-- the header draws the wand rotated 45 deg, so what grows the box is the
-	-- art's DIAGONAL bbox D = 0.7071*(w+h) -- pixel-proven by wand_0430.png,
-	-- 14x9: only 9px TALL (old law: floor) yet its box is ~2.8u over floor.
-	-- Both old "the read fell back to 9" fits matched the same pixels by
-	-- coincidence: any art at/below the floor threshold renders identically.
-	-- The box grows ~1.6u per D-GUI past the floor threshold, and the slot
-	-- row inside drops only ~0.8u per D-GUI -- NOT bottom-anchored; the
-	-- rest pads below the row. Fitted to ONE grown sample (D=16.26:
-	-- box 39.3u, row +1.44u, both engine-exact) plus two floor wands
-	-- (handgun D=12.73, bomb wand D=14.14); the threshold sits between
-	-- 14.14 and 16.26 -- 14.5 chosen. Recalibrate on the next big wand.
-	-- 2026-06-15 (v2): the REAL bug was the FLOOR, not the slope. Box-OUTLINE
-	-- pixel-measurement of a real-D stack: boxes stay at floor height (~57 GUI)
-	-- all the way up to D=21.9 -- only D=27.6 grew (+8 GUI). The old floor=14.5
-	-- grew mid-size wands that are actually flat, and that error compounded 40+
-	-- GUI down the stack. Floor raised to 22 so ~all wands stay flat; a gentle
-	-- slope models the rare big wand. box==row slope because the box grows
-	-- ENTIRELY above the row (a wand that grew +8 box also dropped its row +8).
-	-- Fits the real-D stack within ~2 GUI/box. (v1 tried slopes=0 outright; that
-	-- left ~8 GUI under any big wand -- raising the floor recovers it cleanly.)
-	-- 2026-06-16: floor LOWERED 22 -> 16 from two Measure-tool samples on the
-	-- SAME stack (debug row-probe): a flat wand D=14.1 read row-offset 21.88u
-	-- (== the floor base 22.2u, confirms flat) and a big wand D=22.6
-	-- (wand_0315.png, Wh=32) read 28.13u -- +5.9u the floor=22 model missed
-	-- entirely. Solving 28.13 = 22.225 + 0.89*(22.6 - floor) gives floor ~16,
-	-- which keeps the flat wands flat and lands the big one. The 2026-06-15
-	-- "flat to D=21.9" pixel-read was wrong (or sprite-specific): the D=18.4 /
-	-- D=20.5 wands users reported as "brackets too high" were under-grown by it.
-	-- Still ONE grown sample for the SLOPE -- a 2nd big wand (D>=27) would pin it.
-	diag_floor     = 16,   -- D (GUI) at/below which the box is floor-height
-	diag_box_slope = 0.89, -- u of box-height growth per D-GUI past diag_floor
-	diag_row_slope = 0.89, -- u of slot-row drop per D-GUI past diag_floor
+	-- art's DIAGONAL bbox D = 0.7071*(w+h) -- pixel-proven by wand_0430.png
+	-- (14x9: only 9px tall yet its box sits over floor). 2026-06-16 (v3 LINEAR):
+	-- three Measure-tool samples on one stack -- D=12.0 -> row-offset 19.38u,
+	-- D=14.1 -> 21.88u, D=22.6 -> 28.13u -- form a straight LINE, NOT a flat
+	-- floor + slope. The old "flat below a threshold" law could only be right
+	-- near one D (it fit ~D14 by luck); D=12 sat ~2.5u too low and D=22.6 ~6u
+	-- too high. So the slot-row offset is LINEAR in D with no floor:
+	--   row_offset = row_a + row_b * D     (fits all three within 0.5u).
+	-- BOX HEIGHT is then a dead-constant below_c BELOW the row top -- box-bottom
+	-- vs row-top measured 14.97/14.97/15.03u across D=12/14.1/22.6 (2026-06-16),
+	-- so box_h = row_offset + below_c, NO min_h floor (the D=12 box is actually
+	-- ~34.4u, under the old 35.6 "floor"). This is what fixed the residual
+	-- cascade: box_h had been ~1.6u too small on big wands, sinking the boxes
+	-- below. Calibrated on D 12-22.6; a D>=27 sample would extend it up-range.
+	-- (Superseded the diag_floor/diag_box_slope/diag_row_slope + min_h model.)
+	row_a   = 10.15, -- units: slot-row offset (box top -> row top) at D=0 (intercept)
+	row_b   = 0.80,  -- units: row-offset growth per unit of D = 0.7071*(w+h)
+	below_c = 15.0,  -- units: box bottom sits this far below the row top (measured)
 	-- Frames were thought SQUARE at 17.5 GUI, but the 2026-06-15 measure-tool
 	-- probe read the slot row at 15.0 GUI tall. slot_h dropped to match; row_off
 	-- raised in step so the row TOP holds at the measured box-top offset
@@ -570,19 +547,20 @@ local function collect_wand_boxes(gui, sw, per_row)
 		for _, x in ipairs(wd.xs) do if x > max_slot then max_slot = x end end
 		wd.nrows = math.max(1, math.floor(max_slot / per_row) + 1)
 
-		-- diagonal growth past the floor threshold (see the BOX comments:
-		-- box height and row position grow on DIFFERENT slopes -- the row
-		-- is NOT bottom-anchored in a grown box). Extra rows of a
-		-- multi-row wand (per_row, frozen feature) stack DOWN from the first.
-		-- per-sprite override wins over the diagonal law (SPRITE_OVERRIDES)
+		-- Both the slot-row offset AND the box height grow LINEARLY with the
+		-- rotated-art diagonal D = 0.7071*(w+h): row_offset = row_a + row_b*D, and
+		-- the box bottom is a constant below_c beneath the row top, so
+		-- box_h = row_offset + below_c (no floor; see the BOX comments). Getting
+		-- box_h right is what stops the downward stacking cascade.
+		-- Extra rows of a multi-row wand (per_row, frozen feature) stack DOWN.
+		-- A per-sprite override wins over the model (SPRITE_OVERRIDES).
 		local ov = wd.sprite and SPRITE_OVERRIDES[wd.sprite]
-		local g = math.max(0, 0.7071 * wd.wh - BOX.diag_floor)
-		wd.box_h = (ov and ov.box_h
-			or (BOX.min_h + BOX.diag_box_slope * g))
+		local D = 0.7071 * wd.wh
+		local row_offset = (ov and ov.row_top) or (BOX.row_a + BOX.row_b * D)
+		wd.box_h = ((ov and ov.box_h) or (row_offset + BOX.below_c))
 			+ (wd.nrows - 1) * BOX.row_step
 		wd.top = box_top
-		local row_top_u = box_top + (ov and ov.row_top
-			or ((BOX.min_h - BOX.row_off - BOX.slot_h) + BOX.diag_row_slope * g))
+		local row_top_u = box_top + row_offset
 		wd.rows_geo = {}
 		for r = 0, wd.nrows - 1 do
 			local top = (row_top_u + r * BOX.row_step) * U * sw
@@ -618,13 +596,25 @@ end
 local function draw_row_probe(gui, sw, wands)
 	for _, wd in ipairs(wands) do
 		local r = wd.rows_geo[1]
+		-- MAGENTA: the model's estimated slot-ROW top/bottom (bracket position).
 		GuiColorSetForNextWidget(gui, 1, 0.2, 1, 0.9)
 		GuiImage(gui, 90001 + wd.slot * 10, 21, r.top, PIXEL, 0.9, wd.right - 21, 1)
 		GuiColorSetForNextWidget(gui, 1, 0.2, 1, 0.9)
 		GuiImage(gui, 90002 + wd.slot * 10, 21, r.bot, PIXEL, 0.9, wd.right - 21, 1)
-		GuiColorSetForNextWidget(gui, 1, 0.2, 1, 1)
-		GuiText(gui, wd.right + 4, r.top - 4,
-			string.format("v5 wh=%d D=%.1f", wd.wh, 0.7071 * wd.wh))
+		-- CYAN: the model's estimated BOX top/bottom edges. Compare each to the
+		-- engine's actual box outline -- the vertical gap is this box's stacking
+		-- error (what drives the cascade). Read it (or Measure it) and report
+		-- per box; the label prints the model's box top + height in UNITS.
+		local box_top = wd.top * U * sw
+		local box_bot = (wd.top + wd.box_h) * U * sw
+		GuiColorSetForNextWidget(gui, 0.2, 1, 1, 0.9)
+		GuiImage(gui, 90003 + wd.slot * 10, 21, box_top, PIXEL, 0.9, wd.right - 21, 1)
+		GuiColorSetForNextWidget(gui, 0.2, 1, 1, 0.9)
+		GuiImage(gui, 90004 + wd.slot * 10, 21, box_bot, PIXEL, 0.9, wd.right - 21, 1)
+		GuiColorSetForNextWidget(gui, 0.2, 1, 1, 1)
+		GuiText(gui, wd.right + 4, box_top - 4,
+			string.format("D=%.1f  box top=%.1fu  h=%.1fu  row+%.1fu",
+				0.7071 * wd.wh, wd.top, wd.box_h, r.top / (U * sw) - wd.top))
 	end
 end
 
