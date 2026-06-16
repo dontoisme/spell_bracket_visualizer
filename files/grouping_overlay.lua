@@ -651,6 +651,7 @@ end
 -- purpose: this gui is NonInteractive so hovering it can never block
 -- firing or inventory clicks -- see the fire-block fix.)
 local RIGHT_MARGIN    = 3    -- GUI kept clear at the right screen edge
+local PANEL_GAP       = 6    -- GUI between the active wand's box edge and the panel
 local TOP_BAR_KEEPOUT = 58   -- panel top stays below the HP/mana/gold bars
 local BOTTOM_MARGIN   = 12   -- GUI kept clear at the screen bottom
 local MAX_PANEL_W     = 220  -- hard cap on panel width (also clamped to sw*0.5)
@@ -687,10 +688,16 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	local line_h = th + 2
 	local bar_w = (GuiGetTextDimensions(gui, "| ", scale)) -- advance per nesting spine
 
-	-- width budget: cap at MAX_PANEL_W (and half-screen), truncate labels past it,
-	-- then hug the widest KEPT label. The title is never truncated, so the panel
-	-- never collapses even if every label is over-long.
-	local max_panel_w = math.min(MAX_PANEL_W, sw * 0.5)
+	-- width budget: cap at MAX_PANEL_W (and half-screen), AND keep the panel's
+	-- LEFT edge clear of the active wand's box right edge so its spell slots stay
+	-- clickable (the panel right-anchors and grows leftward). Truncate labels past
+	-- the budget, then hug the widest KEPT label. The title is never truncated, so
+	-- the panel never collapses even if every label is over-long.
+	local sel_right = (anchor.sel and anchor.boxes[anchor.sel])
+		and anchor.boxes[anchor.sel].right or 0
+	local avail = sw - RIGHT_MARGIN - PANEL_GAP - sel_right
+	local max_panel_w = math.min(MAX_PANEL_W, sw * 0.5, avail)
+	if max_panel_w < 60 then max_panel_w = 60 end -- floor for a near-full-width active wand
 	local max_w = (GuiGetTextDimensions(gui, title, scale))
 	for _, r in ipairs(rows) do
 		local bars_w = (r.header and 0 or #r.bars) * bar_w
@@ -932,9 +939,9 @@ function M.update()
 		-- is just one arrangement of many -- not worth showing.
 		if wd and not wd.cfg.shuffle and (#wd.tokens > 0 or #wd.always > 0) then
 			local title = "Wand structure  (" .. wd.cfg.spells_per_cast .. "/cast)"
-			local geo = {} -- per-box GUI top edge for the right-anchored panel's vertical anchor
+			local geo = {} -- per-box GUI geometry: top edge (vertical anchor) + right edge (width clamp)
 			for i, b in ipairs(boxes) do
-				geo[i] = { top = b.top * U * sw }
+				geo[i] = { top = b.top * U * sw, right = b.right }
 			end
 			local anchor = {
 				boxes = geo,
