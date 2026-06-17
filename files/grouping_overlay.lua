@@ -21,7 +21,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.2.1"
+local VERSION = "v1.2.2"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 local PANEL_SCALE_MAP = { tiny = 0.5, small = 0.6, medium = 0.75 }
@@ -245,31 +245,30 @@ local PIXEL = "mods/spell_bracket_visualizer/files/ui/pixel.png"
 local U = 0.0025 -- one engine-UI unit, as a fraction of GUI width
 local BOX = {
 	top0    = 30,   -- units: top of wand box 1 (anchor; measure-confirmed dead-on)
-	gap     = 2.9,  -- units: inter-box gap (box bottom -> next box top). A plain
+	gap     = 2.5,  -- units: inter-box gap (box bottom -> next box top). A plain
 	                -- constant -- ALL sprite-driven height now lives in box_h
 	                -- (= row_offset + below_c, below), so there is no min_h floor
 	                -- and no STEP to keep in sync; the per-box step just varies
 	                -- with the sprite. tools/test_box_geometry.py guards box_h.
-	-- Big-art boxes (2026-06-12, supersedes v8's "2u per px of art HEIGHT"):
-	-- the header draws the wand rotated 45 deg, so what grows the box is the
-	-- art's DIAGONAL bbox D = 0.7071*(w+h) -- pixel-proven by wand_0430.png
-	-- (14x9: only 9px tall yet its box sits over floor). 2026-06-16 (v3 LINEAR):
-	-- three Measure-tool samples on one stack -- D=12.0 -> row-offset 19.38u,
-	-- D=14.1 -> 21.88u, D=22.6 -> 28.13u -- form a straight LINE, NOT a flat
-	-- floor + slope. The old "flat below a threshold" law could only be right
-	-- near one D (it fit ~D14 by luck); D=12 sat ~2.5u too low and D=22.6 ~6u
-	-- too high. So the slot-row offset is LINEAR in D with no floor:
-	--   row_offset = row_a + row_b * D     (fits all three within 0.5u).
-	-- BOX HEIGHT is then a dead-constant below_c BELOW the row top -- box-bottom
-	-- vs row-top measured 14.97/14.97/15.03u across D=12/14.1/22.6 (2026-06-16),
-	-- so box_h = row_offset + below_c, NO min_h floor (the D=12 box is actually
-	-- ~34.4u, under the old 35.6 "floor"). This is what fixed the residual
-	-- cascade: box_h had been ~1.6u too small on big wands, sinking the boxes
-	-- below. Calibrated on D 12-22.6; a D>=27 sample would extend it up-range.
-	-- (Superseded the diag_floor/diag_box_slope/diag_row_slope + min_h model.)
-	row_a   = 10.15, -- units: slot-row offset (box top -> row top) at D=0 (intercept)
-	row_b   = 0.80,  -- units: row-offset growth per unit of D = 0.7071*(w+h)
-	below_c = 15.0,  -- units: box bottom sits this far below the row top (measured)
+	-- 2026-06-17 THICKNESS MODEL (supersedes every diagonal-D law before it).
+	-- Box height is driven by sprite THICKNESS (art height h in px), NOT the
+	-- diagonal 0.7071*(w+h). The D-laws failed because a long-thin wand and a
+	-- short-fat wand share a w+h yet render different boxes; thickness separates
+	-- them. The slot-row offset is LINEAR in h, and the box bottom is a constant
+	-- below_c beneath the row top, so:  row_offset = row_a + row_b*h  and
+	-- box_h = row_offset + below_c, i.e. box_h = 26.9 + 1.25*h.
+	-- Ground truth (sprite thickness h -> measured box_h, via box-bottom reads +
+	-- "Shuffle"-row stacking checks): h7 -> 35.0/36.2u, h9 -> 38.2u, h15 ->
+	-- 45.6u. Fit nails all within ~0.65u INCLUDING big wands (h15: 26.9+1.25*15
+	-- = 45.6). below_c 15.6u, gap 2.5u (both re-confirmed at h15). h comes from
+	-- wand_art_wh (sprite_wh_meta now stores height; GuiGetImageDimensions gives
+	-- the live w/h split as fallback, so this is version-proof). Secondary: wand
+	-- LENGTH adds ~0.17u/px (the two h7 wands differ ~1u) -- left out for now,
+	-- add a length term + index if a wand visibly annoys (SPRITE_OVERRIDES is the
+	-- escape hatch). Calibrated on h 7-15.
+	row_a   = 11.3,  -- units: slot-row offset (box top -> row top) at h=0 (intercept)
+	row_b   = 1.25,  -- units: row-offset growth per px of sprite thickness h
+	below_c = 15.6,  -- units: box bottom sits this far below the row top (measured)
 	-- Frames were thought SQUARE at 17.5 GUI, but the 2026-06-15 measure-tool
 	-- probe read the slot row at 15.0 GUI tall. slot_h dropped to match; row_off
 	-- raised in step so the row TOP holds at the measured box-top offset
@@ -461,6 +460,10 @@ local SPRITE_OVERRIDES = {
 
 -- Returns the wand art's w+h (drives the box-height model) AND its sprite path
 -- (used to look up SPRITE_OVERRIDES). Path is nil when unreadable.
+-- Returns the wand sprite's art HEIGHT (thickness, px) and its image path.
+-- Box height is driven by thickness, not the diagonal -- sprite_wh_meta now
+-- stores h (see gen_wand_sprite_meta.py). GuiGetImageDimensions returns w AND h
+-- separately, so the live fallback stays correct even if a sprite changed.
 local function wand_art_wh(gui, wand)
 	local sc = EntityGetFirstComponentIncludingDisabled(wand, "SpriteComponent")
 	if sc then
@@ -470,7 +473,7 @@ local function wand_art_wh(gui, wand)
 			local ok2, w, h = pcall(GuiGetImageDimensions, gui, f, 1)
 			if ok2 and tonumber(w) and tonumber(h)
 				and w > 0 and w < 30 and h > 0 and h < 30 then
-				return w + h, f
+				return h, f
 			end
 		end
 	end
@@ -483,7 +486,7 @@ local function wand_art_wh(gui, wand)
 			return sprite_wh_meta[f], f
 		end
 	end
-	return 18, nil
+	return 9, nil  -- fallback: typical wand thickness (px)
 end
 
 -- Measure every carried wand's box (quick-slot order): the stacking model plus
@@ -534,7 +537,7 @@ local function collect_wand_boxes(gui, sw, per_row)
 	for _, wd in ipairs(wands) do
 		wd.tokens, wd.always, wd.xs = read_deck(wd.e)
 		wd.cfg = read_config(wd.e)
-		wd.wh, wd.sprite = wand_art_wh(gui, wd.e)
+		wd.h, wd.sprite = wand_art_wh(gui, wd.e)
 		wd.sim = wand_structure.simulate(wd.tokens, meta,
 			{ spells_per_cast = wd.cfg.spells_per_cast })
 
@@ -548,15 +551,14 @@ local function collect_wand_boxes(gui, sw, per_row)
 		wd.nrows = math.max(1, math.floor(max_slot / per_row) + 1)
 
 		-- Both the slot-row offset AND the box height grow LINEARLY with the
-		-- rotated-art diagonal D = 0.7071*(w+h): row_offset = row_a + row_b*D, and
-		-- the box bottom is a constant below_c beneath the row top, so
-		-- box_h = row_offset + below_c (no floor; see the BOX comments). Getting
-		-- box_h right is what stops the downward stacking cascade.
+		-- sprite THICKNESS (art height h): row_offset = row_a + row_b*h, and the
+		-- box bottom is a constant below_c beneath the row top, so box_h =
+		-- row_offset + below_c (no floor; see the BOX comments). Getting box_h
+		-- right is what stops the downward stacking cascade.
 		-- Extra rows of a multi-row wand (per_row, frozen feature) stack DOWN.
 		-- A per-sprite override wins over the model (SPRITE_OVERRIDES).
 		local ov = wd.sprite and SPRITE_OVERRIDES[wd.sprite]
-		local D = 0.7071 * wd.wh
-		local row_offset = (ov and ov.row_top) or (BOX.row_a + BOX.row_b * D)
+		local row_offset = (ov and ov.row_top) or (BOX.row_a + BOX.row_b * wd.h)
 		wd.box_h = ((ov and ov.box_h) or (row_offset + BOX.below_c))
 			+ (wd.nrows - 1) * BOX.row_step
 		wd.top = box_top
@@ -612,9 +614,13 @@ local function draw_row_probe(gui, sw, wands)
 		GuiColorSetForNextWidget(gui, 0.2, 1, 1, 0.9)
 		GuiImage(gui, 90004 + wd.slot * 10, 21, box_bot, PIXEL, 0.9, wd.right - 21, 1)
 		GuiColorSetForNextWidget(gui, 0.2, 1, 1, 1)
+		-- th = sprite THICKNESS (art height px) -- the box-height driver; box_h =
+		-- 26.9 + 1.25*th. The sprite basename lets one screenshot tie each box to
+		-- its exact art for calibration.
+		local spr = wd.sprite and wd.sprite:match("([^/]+)%.[^.]+$") or "?"
 		GuiText(gui, wd.right + 4, box_top - 4,
-			string.format("D=%.1f  box top=%.1fu  h=%.1fu  row+%.1fu",
-				0.7071 * wd.wh, wd.top, wd.box_h, r.top / (U * sw) - wd.top))
+			string.format("th=%d  box top=%.1fu  h=%.1fu  row+%.1fu  [%s]",
+				wd.h, wd.top, wd.box_h, r.top / (U * sw) - wd.top, spr))
 	end
 end
 
