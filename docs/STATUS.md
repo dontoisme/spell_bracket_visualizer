@@ -1,8 +1,8 @@
 # Spell Bracket Visualizer — project status
 
-_A Noita wand-building aid. Last updated 2026-06-12 (Workshop-ready: UX pass
-done, debug stripped, mod id renamed; sprite-height read replaced by a
-pregenerated table after it failed in-game — see Box geometry)._
+_A Noita wand-building aid. Last updated 2026-06-18 (v1.2.3: fixed bracket/box
+drift on non-640x360 GUI resolutions — scale geometry by a constant, not live GUI
+width; see "GUI-resolution drift fix"). Prior: 2026-06-12 Workshop-ready UX pass._
 
 ## What the mod is
 
@@ -178,6 +178,42 @@ Iterated v1→final against in-game screenshots + user mockups. Final design:
 - Drawn at **z = -10**: in front of the engine's spell-frame layer ("lower z
   = front"; z 1 lost to the frames).
 - On by default (`show_slot_brackets`, RUNTIME scope).
+
+### GUI-resolution drift fix — scale geometry by a constant, not live width (v1.2.3, 2026-06-18)
+
+Bug report: "doesn't work on some super-wide gaming monitors." Root cause turned
+out NOT to be aspect ratio. Verified in-game via the `show_debug` GUI readout:
+Noita always renders the GUI at **16:9** (it letterboxes other window aspects) but
+**varies the GUI resolution** with the window/monitor — observed `GUI 640x360`
+(1920x1080, 640x480, 1080x1024 windows) vs `GUI 720x405` (720x480, 720x576,
+1152x864). The engine draws the spell inventory at **fixed GUI-unit positions**
+that do NOT scale with that resolution, but `grouping_overlay.lua` scaled every
+bracket/box coordinate by the **live GUI width** `sw`. `sw` only equals the
+calibration width (640) when the GUI is 640x360, so any other GUI resolution
+mis-scaled everything — drift compounding DOWN the box stack and RIGHT across
+columns. (At the common 640x360 it happened to be correct, which is why typical
+1080p/1440p users never saw it.)
+
+Fix: introduced `local CAL_W = 640` (the calibration width all of
+`slot0_x`/`pitch`/`halfw`/`U` are fractions of) and scale ALL geometry by this
+CONSTANT (threaded as `refw` through `collect_wand_boxes` / `draw_delims` /
+`draw_row_probe` / `draw_box_brackets`, and the panel's box anchor). Live `sw`/`sh`
+still drive the genuine screen-edge consumers (wrap column, panel docking, debug
+box, measure tool). At GUI 640x360 `CAL_W == sw`, so the shipped case is
+byte-identical — no regression on normal monitors.
+
+A dead-end first attempt (`refw = sh * CAL_ASPECT`) assumed the GUI *height* was
+fixed and width grew with aspect; the 720x405 data (height 360→405 at 16:9) killed
+that — it's pure resolution scaling, no aspect component.
+
+Guarded by `tools/test_gui_scale_geometry.py`: parses the live constants + the
+actual draw-line scale factor and asserts bracket/box positions are identical
+across the GUI resolutions Noita produces (640x360, 720x405, 480x270, 854x480,
+1024x576, 1280x720). It rejects both prior broken models (live `sw`, and
+`sh*CAL_ASPECT`). In-game confirmed across all of P1/P2/P3 test resolutions.
+
+Open: a one-off Lua error seen once at a 1280x1440 window did not recur and was
+not captured; the lean error handler GamePrints any future overlay throw.
 
 ### Box geometry — DIAGONAL-BBOX model replaces the height law (2026-06-12)
 

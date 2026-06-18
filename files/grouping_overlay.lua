@@ -21,7 +21,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.2.2"
+local VERSION = "v1.2.3"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 local PANEL_SCALE_MAP = { tiny = 0.5, small = 0.6, medium = 0.75 }
@@ -242,7 +242,17 @@ local PIXEL = "mods/spell_bracket_visualizer/files/ui/pixel.png"
 -- Calibrated against the circled 4-wand screenshot, all rows within 1u.
 -- If rows drift again: flip the "Calibration Overlay" mod setting, take one
 -- screenshot -- it shows computed rows + raw sprite reads to recalibrate.
-local U = 0.0025 -- one engine-UI unit, as a fraction of GUI width
+-- CAL_W: the GUI WIDTH the layout was calibrated against (slot0_x/pitch/halfw and
+-- U are all fractions of THIS). Noita draws the spell inventory in FIXED GUI-unit
+-- positions, but it varies the GUI *resolution* with the window/monitor while
+-- always keeping it 16:9 (it letterboxes other window aspects -- verified
+-- 2026-06-18: 640x480 & 1080x1024 windows -> GUI 640x360; 720x480 & 1152x864 ->
+-- GUI 720x405; all report aspect 1.778). The engine's inventory positions DON'T
+-- scale with that resolution, so geometry must scale by this CONSTANT, not the
+-- live GUI width sw -- otherwise everything drifts (down the box stack, right
+-- across columns) whenever the GUI resolution isn't 640x360. See update().
+local CAL_W = 640
+local U = 0.0025 -- one engine-UI unit, as a fraction of GUI width (of CAL_W)
 local BOX = {
 	top0    = 30,   -- units: top of wand box 1 (anchor; measure-confirmed dead-on)
 	gap     = 2.5,  -- units: inter-box gap (box bottom -> next box top). A plain
@@ -377,7 +387,13 @@ end
 
 -- rows_geo[r+1] = { top, bot } for displayed slot-row r (0-based): brackets
 -- anchor to the row their card actually sits on.
-local function draw_delims(gui, groups, sw, rows_geo, idc)
+-- refw is the GEOMETRY reference width = the CONSTANT CAL_W (640), NOT the live
+-- GUI width sw. The engine draws the inventory in fixed GUI-unit positions
+-- calibrated at CAL_W; Noita varies the GUI RESOLUTION (640x360, 720x405, ...,
+-- always 16:9) but those positions don't scale with it, so scaling by live sw
+-- drifts the brackets off the cards whenever GUI res != 640x360. refw == sw at
+-- GUI 640x360. See update(); tools/test_gui_scale_geometry.py.
+local function draw_delims(gui, groups, refw, rows_geo, idc)
 	local counts, seen = {}, {}
 	local function key(g) return g.rb * 100 + g.cb end
 	for _, g in ipairs(groups) do counts[key(g)] = (counts[key(g)] or 0) + 1 end
@@ -387,7 +403,7 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 
 		-- open: [ just left of the card, raised so its top hook overlaps the
 		-- slot's top edge (the ~wrap tag, when present, sits above in orange)
-		local lx = sw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
+		local lx = refw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
 		bracket(gui, idc, lx, ya.top - BRACKET_RAISE, ya.bot - BRACKET_RAISE, 1, g.c)
 		if g.w1 then
 			-- "wraps to front": reads toward the orange segment at the wand's
@@ -407,7 +423,7 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 		seen[key(g)] = s + 1
 		local o = counts[key(g)] - 1 - s -- 0 = innermost (collected last)
 		local grow = o * STACK_Y
-		local rx = sw * (BOX.slot0_x + g.cb * BOX.pitch + BOX.halfw)
+		local rx = refw * (BOX.slot0_x + g.cb * BOX.pitch + BOX.halfw)
 			- BAR_W - CLOSE_NUDGE + o * STACK_X
 		bracket(gui, idc, rx, yb.top - grow - BRACKET_RAISE,
 			yb.bot + grow - BRACKET_RAISE, -1, g.c)
@@ -419,8 +435,8 @@ local function draw_delims(gui, groups, sw, rows_geo, idc)
 		-- Always WRAP orange: orange marks the wrap, rainbow marks groups.
 		if g.w1 then
 			local yw = rows_geo[(g.w1r or 0) + 1] or rows_geo[1]
-			local wlx = sw * (BOX.slot0_x + g.w1 * BOX.pitch - BOX.halfw) - OPEN_NUDGE
-			local wrx = sw * (BOX.slot0_x + g.w2 * BOX.pitch + BOX.halfw)
+			local wlx = refw * (BOX.slot0_x + g.w1 * BOX.pitch - BOX.halfw) - OPEN_NUDGE
+			local wrx = refw * (BOX.slot0_x + g.w2 * BOX.pitch + BOX.halfw)
 				- BAR_W - CLOSE_NUDGE
 			bracket(gui, idc, wlx, yw.top - BRACKET_RAISE, yw.bot - BRACKET_RAISE, 1, WRAP_COLOR)
 			bracket(gui, idc, wrx, yw.top - BRACKET_RAISE, yw.bot - BRACKET_RAISE, -1, WRAP_COLOR)
@@ -517,9 +533,11 @@ local function wrap_columns(sw, sh)
 	return math.max(1, c_max + 1)
 end
 
-local function collect_wand_boxes(gui, sw, per_row)
+-- sw param is the GEOMETRY reference width (refw = sh*CAL_ASPECT), not live
+-- screen width -- everything here is layout. See draw_delims / update().
+local function collect_wand_boxes(gui, refw, per_row)
 	local players = EntityGetWithTag("player_unit")
-	if not players or #players == 0 then return {}, BOX.top0 * U * sw, 0 end
+	if not players or #players == 0 then return {}, BOX.top0 * U * refw, 0 end
 	local items = GameGetAllInventoryItems(players[1]) or {}
 
 	local wands = {}
@@ -565,23 +583,23 @@ local function collect_wand_boxes(gui, sw, per_row)
 		local row_top_u = box_top + row_offset
 		wd.rows_geo = {}
 		for r = 0, wd.nrows - 1 do
-			local top = (row_top_u + r * BOX.row_step) * U * sw
-			wd.rows_geo[r + 1] = { top = top, bot = top + BOX.slot_h * U * sw }
+			local top = (row_top_u + r * BOX.row_step) * U * refw
+			wd.rows_geo[r + 1] = { top = top, bot = top + BOX.slot_h * U * refw }
 		end
 
 		-- box right edge (GUI): the wider of the box's minimum (header-
 		-- driven, BOX.min_right) and the slot row (last slot's frame edge
 		-- + ~5 GUI of border; col-0 frame left sits at 26 GUI, box at ~21)
-		wd.right = sw * BOX.min_right
+		wd.right = refw * BOX.min_right
 		if max_slot >= 0 then
 			local last_col = math.min(max_slot, per_row - 1)
 			wd.right = math.max(wd.right,
-				sw * (BOX.slot0_x + last_col * BOX.pitch + BOX.halfw) + 5)
+				refw * (BOX.slot0_x + last_col * BOX.pitch + BOX.halfw) + 5)
 		end
 
 		box_top = box_top + wd.box_h + BOX.gap
 	end
-	return wands, box_top * U * sw
+	return wands, box_top * U * refw
 end
 
 -- Delimit each measured wand box's spell row.
@@ -595,7 +613,7 @@ end
 -- the wand's art wh / diagonal D. A screenshot of N varied wands gives N exact
 -- (D, row-error) samples to refit the box-height law -- which is exactly what's
 -- needed when a long/tall wand throws off the stack below it.
-local function draw_row_probe(gui, sw, wands)
+local function draw_row_probe(gui, refw, wands)
 	for _, wd in ipairs(wands) do
 		local r = wd.rows_geo[1]
 		-- MAGENTA: the model's estimated slot-ROW top/bottom (bracket position).
@@ -607,8 +625,8 @@ local function draw_row_probe(gui, sw, wands)
 		-- engine's actual box outline -- the vertical gap is this box's stacking
 		-- error (what drives the cascade). Read it (or Measure it) and report
 		-- per box; the label prints the model's box top + height in UNITS.
-		local box_top = wd.top * U * sw
-		local box_bot = (wd.top + wd.box_h) * U * sw
+		local box_top = wd.top * U * refw
+		local box_bot = (wd.top + wd.box_h) * U * refw
 		GuiColorSetForNextWidget(gui, 0.2, 1, 1, 0.9)
 		GuiImage(gui, 90003 + wd.slot * 10, 21, box_top, PIXEL, 0.9, wd.right - 21, 1)
 		GuiColorSetForNextWidget(gui, 0.2, 1, 1, 0.9)
@@ -620,13 +638,13 @@ local function draw_row_probe(gui, sw, wands)
 		local spr = wd.sprite and wd.sprite:match("([^/]+)%.[^.]+$") or "?"
 		GuiText(gui, wd.right + 4, box_top - 4,
 			string.format("th=%d  box top=%.1fu  h=%.1fu  row+%.1fu  [%s]",
-				wd.h, wd.top, wd.box_h, r.top / (U * sw) - wd.top, spr))
+				wd.h, wd.top, wd.box_h, r.top / (U * refw) - wd.top, spr))
 	end
 end
 
-local function draw_box_brackets(gui, sw, wands, show_probe)
+local function draw_box_brackets(gui, refw, wands, show_probe)
 	local idc = { n = 0 }
-	if show_probe then draw_row_probe(gui, sw, wands) end
+	if show_probe then draw_row_probe(gui, refw, wands) end
 	for _, wd in ipairs(wands) do
 		-- Shuffle wands get NO brackets (user call 2026-06-11): the deck
 		-- order randomizes at cast time, so slot-order grouping painted on
@@ -644,7 +662,7 @@ local function draw_box_brackets(gui, sw, wands, show_probe)
 			for _, cast in ipairs(wd.sim.casts) do
 				collect_delims(cast.nodes, 0, cols, rows, groups)
 			end
-			draw_delims(gui, groups, sw, wd.rows_geo, idc)
+			draw_delims(gui, groups, refw, wd.rows_geo, idc)
 		end
 	end
 end
@@ -926,17 +944,26 @@ function M.update()
 	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
 
 	local sw, sh = GuiGetScreenDimensions(gui)
+	-- refw: the GEOMETRY reference width. The engine draws the inventory in fixed
+	-- GUI-unit positions calibrated at CAL_W (640), but Noita varies the GUI
+	-- RESOLUTION with the window/monitor (always 16:9; it letterboxes other
+	-- aspects). So all bracket/box layout must scale by the CONSTANT CAL_W, NOT
+	-- the live GUI width sw -- else it drifts whenever the GUI res isn't 640x360
+	-- (e.g. a window that yields GUI 720x405). At GUI 640x360, refw == sw, so the
+	-- common case stays byte-identical. Real sw/sh still drive the screen-edge
+	-- consumers below (wrap column, panel docking, debug box, measure tool).
+	local refw = CAL_W
 
 	-- one measure/read pass shared by the brackets and the panel's dock anchor.
 	-- per_row is the aspect-calibrated wrap column (99 = no wrap at >= 16:9)
 	local per_row = wrap_columns(sw, sh)
-	local boxes = collect_wand_boxes(gui, sw, per_row)
+	local boxes = collect_wand_boxes(gui, refw, per_row)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
 		-- strongly negative z = "bring to front": lower z draws on top, and
 		-- this must beat the engine's spell-frame layer, not just our own gui
 		GuiZSet(gui, -10)
-		draw_box_brackets(gui, sw, boxes, show_debug)
+		draw_box_brackets(gui, refw, boxes, show_debug)
 		GuiZSet(gui, 1)
 	end
 
@@ -953,7 +980,7 @@ function M.update()
 			local title = "Wand structure  (" .. wd.cfg.spells_per_cast .. "/cast)"
 			local geo = {} -- per-box GUI geometry: top edge (vertical anchor) + right edge (width clamp)
 			for i, b in ipairs(boxes) do
-				geo[i] = { top = b.top * U * sw, right = b.right }
+				geo[i] = { top = b.top * U * refw, right = b.right }
 			end
 			local anchor = {
 				boxes = geo,
