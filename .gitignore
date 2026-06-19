@@ -13,3 +13,7 @@ __pycache__/
 
 # Local planning scratch (not for the repo)
 /NEXT_UPDATE_PLAN.md
+
+# Internal-only docs: kept local for development, not published to the repo
+/CLAUDE.md
+/docs/STATUS.md
