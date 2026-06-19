@@ -11,8 +11,10 @@ GuiGetImageDimensions read (which returns w AND h separately) stays as the live
 fallback for modded/changed wands, so this stays correct across game updates.
 
 Covers every image under data/items_gfx/: pngs by their pixel HEIGHT, sprite
-xmls (the starting wands' image_file is e.g. handgun.xml) by the frame_height of
-their default RectAnimation.
+xmls (the starting wands' image_file is e.g. handgun.xml) by the HEIGHT of the
+PNG they reference (<Sprite filename=...>) -- the engine sizes the wand box by
+the image, not the RectAnimation frame (frame_height undersized starter wands;
+fixed 2026-06-19). frame_height is used only if the png can't be read.
 """
 import re
 import sys
@@ -21,6 +23,28 @@ sys.path.insert(0, __file__.rsplit("/", 1)[0])
 from gen_icons import load_wak, decode_png
 
 MAX_DIM = 30  # per-dimension sanity cap, matches the runtime read's guard
+
+
+def xml_png_h(src, wak):
+    """HEIGHT of the PNG named by <Sprite filename="...">. The inventory wand
+    panel is sized by the sprite IMAGE (what GuiGetImageDimensions returns at
+    runtime), NOT the RectAnimation frame: a starter wand's handgun.xml frame is
+    6px but its png is 8px, and the live box measures the 8px height (box_h
+    36.9u, confirmed with the middle-click tool 2026-06-19). Keying xml sprites
+    on frame_height undersized the box and drifted the whole wand stack down.
+    Returns None if the filename is missing or the png won't decode (caller then
+    falls back to frame_height)."""
+    m = re.search(r'<Sprite\b[^>]*\bfilename="([^"]+)"', src)
+    if not m:
+        return None
+    data = wak.get(m.group(1))
+    if not data:
+        return None
+    try:
+        _w, h, _ = decode_png(data)
+    except Exception:
+        return None
+    return h
 
 
 def xml_frame_h(src):
@@ -57,7 +81,14 @@ def main():
             if 0 < h < MAX_DIM and 0 < w < MAX_DIM:
                 out[path] = h
         elif path.endswith(".xml"):
-            h = xml_frame_h(data.decode("utf-8", "replace"))
+            src = data.decode("utf-8", "replace")
+            # png height = what the engine sizes the box by; frame_height only
+            # if the backing png is missing/undecodable. A spritesheet png taller
+            # than MAX_DIM is dropped (matches the runtime read's >=30 reject) --
+            # none of those are carriable wand sprites.
+            h = xml_png_h(src, wak)
+            if not h:
+                h = xml_frame_h(src)
             if h and 0 < h < MAX_DIM:
                 out[path] = h
 

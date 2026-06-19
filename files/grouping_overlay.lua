@@ -21,7 +21,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.2.3"
+local VERSION = "v1.2.4"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 local PANEL_SCALE_MAP = { tiny = 0.5, small = 0.6, medium = 0.75 }
@@ -471,7 +471,13 @@ end
 -- that wand in every slot. (For reference: a floor wand is box_h ~35.6,
 -- row_top ~22.2.) Leave empty until a specific wand actually misbehaves.
 local SPRITE_OVERRIDES = {
-	-- ["data/items_gfx/bomb_wand.png"] = { box_h = 35.6, row_top = 22.2 },
+	-- Starter wands (seen every run) draw an XML sprite with offset_y=3, so the
+	-- slot row sits ~0.6u lower than the thickness model predicts. gen_wand_sprite_meta
+	-- now keys these on png height (h=8) which nails box_h; these measured values
+	-- (middle-click, 2026-06-19: box top->bottom = 36.9u, box top->row top = 21.9u)
+	-- also pin the row exactly. Same sprite on both starters -> identical numbers.
+	["data/items_gfx/handgun.xml"]   = { box_h = 36.9, row_top = 21.9 },
+	["data/items_gfx/bomb_wand.xml"] = { box_h = 36.9, row_top = 21.9 },
 }
 
 -- Returns the wand art's w+h (drives the box-height model) AND its sprite path

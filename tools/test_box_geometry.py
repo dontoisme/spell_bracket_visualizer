@@ -16,6 +16,11 @@ This test parses the LIVE constants out of grouping_overlay.lua and asserts the
 model still reproduces every measured anchor. Run it (and test_wand_structure.py)
 after any BOX edit. Add a row to the anchor lists each time a new wand is measured.
 
+It also guards the v1.2.4 starter-wand fix: XML wand sprites (handgun, bomb_wand)
+must be keyed on backing PNG height in the generated wand_sprite_meta.lua (NOT the
+RectAnimation frame_height), and the SPRITE_OVERRIDES must pin those starters to
+their measured box. Run gen_wand_sprite_meta.py if the meta check fails.
+
 No Lua runtime here -- we re-implement the (tiny) formula and check it against
 the same constants the mod ships.
 """
@@ -41,6 +46,24 @@ BOX_H_ANCHORS = [
     ("h15 wand (wand_0860)",     15, 45.60, 0.6),
 ]
 
+# v1.2.4 starter-wand fix. Wands whose image_file is a sprite XML must be keyed on
+# their backing PNG height (the engine sizes the box by the image), NOT the
+# RectAnimation frame_height -- the frame-height bug undersized the box and drifted
+# the whole stack down, and shipped silently. Two guards:
+#   1. the GENERATED meta table resolves these to png height (regen if this fails),
+#   2. the SPRITE_OVERRIDES pin the every-run starters to their measured box.
+# (sprite key, expected wand_sprite_meta height [px] = backing png height).
+META = os.path.join(os.path.dirname(__file__), "..", "files", "wand_sprite_meta.lua")
+META_ANCHORS = [
+    ("data/items_gfx/handgun.xml",   8),
+    ("data/items_gfx/bomb_wand.xml", 8),
+]
+# (sprite key, measured box_h [u], measured row_top [u], tol). Middle-click 2026-06-19.
+OVERRIDE_ANCHORS = [
+    ("data/items_gfx/handgun.xml",   36.9, 21.9, 0.2),
+    ("data/items_gfx/bomb_wand.xml", 36.9, 21.9, 0.2),
+]
+
 
 def grab(src, name, kind="field"):
     pat = (r"\blocal\s+%s\s*=\s*(-?[\d.]+)" if kind == "local"
@@ -49,6 +72,23 @@ def grab(src, name, kind="field"):
     if not m:
         raise SystemExit("FAIL: could not find constant %r in grouping_overlay.lua" % name)
     return float(m.group(1))
+
+
+def grab_meta(meta_src, key):
+    m = re.search(r'\["%s"\]\s*=\s*(\d+)' % re.escape(key), meta_src)
+    return int(m.group(1)) if m else None
+
+
+def grab_override(src, key):
+    """box_h, row_top from a SPRITE_OVERRIDES entry (None,None if absent)."""
+    m = re.search(r'\["%s"\]\s*=\s*\{([^}]*)\}' % re.escape(key), src)
+    if not m:
+        return None, None
+    body = m.group(1)
+    bh = re.search(r"box_h\s*=\s*(-?[\d.]+)", body)
+    rt = re.search(r"row_top\s*=\s*(-?[\d.]+)", body)
+    return (float(bh.group(1)) if bh else None,
+            float(rt.group(1)) if rt else None)
 
 
 def main():
@@ -81,6 +121,31 @@ def main():
               % ("PASS" if ok else "FAIL", h, got, meas, got - meas, label))
         if not ok:
             fails.append("%s box_h off %+.2fu (tol %.2f)" % (label, got - meas, tol))
+
+    # --- v1.2.4: XML wand sprites keyed on png height (generator output) ---
+    meta_src = open(META, encoding="utf-8").read()
+    for key, exp in META_ANCHORS:
+        got = grab_meta(meta_src, key)
+        ok = got == exp
+        print("%s meta[%s] = %s  (expected %d = backing png height)"
+              % ("PASS" if ok else "FAIL", key.rsplit("/", 1)[-1], got, exp))
+        if not ok:
+            fails.append("%s meta height %s != %d -- regen wand_sprite_meta.lua "
+                         "(frame_height regression?)" % (key, got, exp))
+
+    # --- v1.2.4: starter-wand SPRITE_OVERRIDES pin the measured box ---
+    for key, mbh, mrt, tol in OVERRIDE_ANCHORS:
+        gbh, grt = grab_override(src, key)
+        if gbh is None or grt is None:
+            print("FAIL override[%s] missing box_h/row_top" % key.rsplit("/", 1)[-1])
+            fails.append("%s SPRITE_OVERRIDES entry missing box_h/row_top" % key)
+            continue
+        ok = abs(gbh - mbh) <= tol and abs(grt - mrt) <= tol
+        print("%s override[%s]: box_h %.1fu (meas %.1f), row_top %.1fu (meas %.1f)"
+              % ("PASS" if ok else "FAIL", key.rsplit("/", 1)[-1], gbh, mbh, grt, mrt))
+        if not ok:
+            fails.append("%s override box_h %.1f/row_top %.1f off measured %.1f/%.1f "
+                         "(tol %.2f)" % (key, gbh, grt, mbh, mrt, tol))
 
     # sanity: both linear & strictly increasing, and the box bottom is always
     # below the row top by exactly below_c (the stacking depends on box_h).
