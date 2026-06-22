@@ -20,7 +20,8 @@ The fix: scale geometry by the CONSTANT CAL_W (640, the calibration width), not 
 Then bracket/box positions are identical at every GUI resolution -- which is exactly
 what the engine does. At GUI 640x360, CAL_W == sw, so the common case is unchanged.
 
-What this test does (no Lua runtime, like test_box_geometry.py):
+What this test does (parses constants rather than executing the Lua, since the
+scaling is engine-coupled -- like test_box_geometry.py):
   1. Parses the LIVE constants (slot0_x/pitch/halfw/U/top0/CAL_W) AND the live SCALE
      expression actually used in the draw lines (now `refw`, resolved through its
      `local refw = CAL_W` definition) straight out of grouping_overlay.lua.

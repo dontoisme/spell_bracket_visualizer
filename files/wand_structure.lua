@@ -1,5 +1,6 @@
 -- Pure deck -> cast-structure simulator. No game APIs; unit-testable
--- (tools/test_wand_structure.py is a line-for-line Python mirror with tests).
+-- Tested by tools/test_wand_structure.lua (runs THIS file under Lua -- the
+-- primary test) with tools/test_wand_structure.py as a Python cross-check mirror.
 --
 -- Mirrors data/scripts/gun/gun.lua exactly (verified against the source):
 --   * A CAST draws `spells_per_cast` (gun.actions_per_round) expressions off

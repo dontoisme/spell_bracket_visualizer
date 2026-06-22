@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """Python mirror of files/wand_structure.lua + hand-traced test wands.
 
-There is no Lua runtime on the dev machine, so this mirrors the simulator
-line-for-line (same draw/wrap/chain rules, same node shapes) and asserts the
-structure of known wands -- including cast splitting and wand wrapping. If you
-change wand_structure.lua, change simulate() here to match and re-run:
+CROSS-CHECK only. tools/test_wand_structure.lua is now the PRIMARY test --
+it runs the real wand_structure.lua under Lua. This file re-implements the
+simulator line-for-line (same draw/wrap/chain rules, same node shapes) as an
+independent second opinion: a divergence shows up as one harness passing and
+the other failing. If you change wand_structure.lua, change simulate() here to
+match and re-run BOTH:
 
+    lua tools/test_wand_structure.lua   # real source (primary)
     python3 tools/test_wand_structure.py
 
-It loads per-card metadata from the real generated files/structure_meta.lua,
-so it also catches generator regressions.
+(The mirror is slated to be retired in a later release once the Lua harness is
+fully trusted; until then keep the two in sync.) It loads per-card metadata
+from the real generated files/structure_meta.lua, so it also catches generator
+regressions.
 """
 import os, re, sys
 

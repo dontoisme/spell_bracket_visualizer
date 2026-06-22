@@ -58,8 +58,9 @@ node parsed across a wrap (the wrapping group *and* the wrapped-in cards),
 Lisp-wise modifiers sit outside the parens), and `wfirst`/`wlast` = the span
 of cards drawn *after* the wrap (tagged at draw time), which renderers use to
 show forward-segment + carriage-return + wrapped-segment.
-Validated by `tools/test_wand_structure.py` — a line-for-line Python mirror
-(no Lua runtime on the dev machine) with hand-traced wands: cast splitting,
+Validated by `tools/test_wand_structure.lua` (runs the real simulator under Lua)
+with `tools/test_wand_structure.py` as a line-for-line Python cross-check mirror,
+over hand-traced wands: cast splitting,
 the classic trigger-at-deck-end wrap, trailing-modifier wrap, under-filled
 multicast wrap, slot-order restore on wrap, BURST_X, RANDOM_MODIFIER.
 

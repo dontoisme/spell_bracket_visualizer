@@ -59,7 +59,8 @@ files/structure_meta.lua     # generated per-spell structural metadata (draws/gr
 files/wand_structure.lua     # pure deck simulator: casts, chaining, multicasts, wrap
 files/grouping_overlay.lua   # reads the live wand + draws the panel / slot brackets
 tools/gen_structure_meta.py  # regenerates structure_meta.lua from data.wak
-tools/test_wand_structure.py # Python mirror of wand_structure.lua + tests
+tools/test_wand_structure.lua # runs the real wand_structure.lua + tests (primary)
+tools/test_wand_structure.py # Python cross-check mirror of wand_structure.lua
 tools/gen_icons.py           # (retired icon-recolor feature; see below)
 mod.xml, compatibility.xml
 workshop.xml                 # Steam Workshop manifest (name/desc/tags/excludes)
@@ -77,8 +78,10 @@ python3 tools/gen_structure_meta.py
 1. Enable **Spell Bracket Visualizer** in the mod menu, start/continue a run.
 2. Hold a wand and open the inventory: the panel docks beside its box; with
    Slot Brackets enabled, rainbow strips mark each group in the wand boxes.
-3. `python3 tools/test_wand_structure.py` runs the simulator's test suite
-   (a Python mirror — no Lua needed).
+3. `lua tools/test_wand_structure.lua` runs the simulator's test suite against
+   the real `wand_structure.lua`; `python3 tools/test_wand_structure.py` runs the
+   Python cross-check mirror (kept in sync; slated for retirement once the Lua
+   harness is fully trusted).
 
 Unsafe Lua APIs are not requested (`request_no_api_restrictions="0"` in `mod.xml`).
 

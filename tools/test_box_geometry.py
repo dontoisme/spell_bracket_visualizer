@@ -21,8 +21,11 @@ must be keyed on backing PNG height in the generated wand_sprite_meta.lua (NOT t
 RectAnimation frame_height), and the SPRITE_OVERRIDES must pin those starters to
 their measured box. Run gen_wand_sprite_meta.py if the meta check fails.
 
-No Lua runtime here -- we re-implement the (tiny) formula and check it against
-the same constants the mod ships.
+This re-implements the (tiny) box-geometry formula and checks it against the
+same constants the mod ships -- the geometry is engine-coupled (it feeds live
+inventory reads), so it's validated by parsing the constants, not by executing
+the Lua. (Pure simulator logic IS run directly now -- see
+tools/test_wand_structure.lua.)
 """
 import os
 import re
