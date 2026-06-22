@@ -138,5 +138,31 @@ passck("wrapped span tracked",
 	node.head == 2 and node.last == 4 and node.wfirst == 1 and node.wlast == 1 and node.wrap,
 	string.format(" (head=%s last=%s wfirst=%s wlast=%s)", node.head, node.last, node.wfirst, node.wlast))
 
+-- Depleted-card rule (read_deck drops uses_remaining == 0 before simulating).
+-- The engine test is literally `== 0`: only 0 is depleted.
+passck("card_fires: 0 depleted", S.card_fires(0) == false)
+passck("card_fires: -1 unlimited keeps", S.card_fires(-1) == true)
+passck("card_fires: -2 unlimited-unlimited keeps", S.card_fires(-2) == true)
+passck("card_fires: 3 charges keeps", S.card_fires(3) == true)
+passck("card_fires: nil (unreadable) keeps", S.card_fires(nil) == true)
+
+-- End-to-end: a depleted MODIFIER drops out, so it no longer chains onto the
+-- next projectile. [LIGHT, DAMAGE@0, LIGHT] @1/cast -> filter -> [LIGHT, LIGHT].
+local function keep_fires(cards) -- cards = { {id=, uses=}, ... }, mirrors read_deck
+	local out = {}
+	for _, c in ipairs(cards) do
+		if S.card_fires(c.uses) then out[#out + 1] = c.id end
+	end
+	return out
+end
+local filtered = keep_fires({
+	{ id = "LIGHT_BULLET", uses = -1 },
+	{ id = "DAMAGE", uses = 0 }, -- depleted modifier: must NOT chain
+	{ id = "LIGHT_BULLET", uses = 5 },
+})
+check("depleted modifier filtered before sim",
+	filtered, 1,
+	"{LIGHT_BULLET} | {LIGHT_BULLET}")
+
 print(string.format("\n%d failure(s)", failures))
 os.exit(failures > 0 and 1 or 0)

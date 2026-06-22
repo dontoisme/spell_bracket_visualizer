@@ -43,6 +43,18 @@
 
 local M = {}
 
+-- Will a card with this many uses left actually fire? A depleted (0-use) card is
+-- DRAWN but never fires and never wraps: gun.lua draw_action() discards a card
+-- whose uses_remaining == 0 and returns false, then draw_actions() skips on to the
+-- next card -- so a depleted card behaves exactly as if it weren't in the deck.
+-- read_deck() filters these out before simulating. The engine test is literally
+-- `== 0`, so only 0 is depleted: -1 = unlimited, -2 = unlimited-unlimited, and any
+-- positive count all keep. Pure + exported so the test harnesses cover the rule
+-- without game APIs (a nil uses count -- e.g. an unreadable field -- keeps the card).
+function M.card_fires(uses_remaining)
+	return uses_remaining ~= 0
+end
+
 local function meta_for(meta, id)
 	return meta[id] or { type = "OTHER" }
 end

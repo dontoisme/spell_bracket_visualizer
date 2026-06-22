@@ -40,6 +40,11 @@ def meta_for(meta, aid):
     return meta.get(aid, {"type": "OTHER"})
 
 
+def card_fires(uses_remaining):
+    # Mirror of M.card_fires: a 0-use card is depleted (won't fire); -1/-2/>0 keep.
+    return uses_remaining != 0
+
+
 def chains(m):
     return m.get("draws") == 1 and "payload" not in m and m["type"] != "DRAW_MANY"
 
@@ -298,6 +303,27 @@ def main():
     print("%s wrapped span tracked (head=%s last=%s wfirst=%s wlast=%s)" %
           ("PASS" if wrap_ok else "FAIL", node["head"], node["last"],
            node["wfirst"], node["wlast"]))
+
+    # Depleted-card rule (read_deck drops uses_remaining == 0 before simulating).
+    def passck(name, ok):
+        nonlocal failures
+        if not ok:
+            failures += 1
+        print("%s %s" % ("PASS" if ok else "FAIL", name))
+
+    passck("card_fires: 0 depleted", card_fires(0) is False)
+    passck("card_fires: -1 unlimited keeps", card_fires(-1) is True)
+    passck("card_fires: -2 unlimited-unlimited keeps", card_fires(-2) is True)
+    passck("card_fires: 3 charges keeps", card_fires(3) is True)
+    passck("card_fires: None (unreadable) keeps", card_fires(None) is True)
+
+    # End-to-end: a depleted MODIFIER drops out, so it no longer chains onto the
+    # next projectile. [LIGHT, DAMAGE@0, LIGHT] @1/cast -> filter -> [LIGHT, LIGHT].
+    def keep_fires(cards):  # cards = [(id, uses)], mirrors read_deck's filter
+        return [cid for cid, uses in cards if card_fires(uses)]
+    filtered = keep_fires([("LIGHT_BULLET", -1), ("DAMAGE", 0), ("LIGHT_BULLET", 5)])
+    check("depleted modifier filtered before sim", filtered, 1,
+          "{LIGHT_BULLET} | {LIGHT_BULLET}")
 
     print("\n%d failure(s)" % failures)
     sys.exit(1 if failures else 0)

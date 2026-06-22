@@ -21,7 +21,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.2.5"
+local VERSION = "v1.2.6"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 local PANEL_SCALE_MAP = { tiny = 0.5, small = 0.6, medium = 0.75 }
@@ -127,7 +127,7 @@ local function read_deck(wand)
 		local iac = EntityGetFirstComponentIncludingDisabled(child, "ItemActionComponent")
 		if iac then
 			local aid = ComponentGetValue2(iac, "action_id")
-			local sx, sy, perm = 0, 0, false
+			local sx, sy, perm, depleted = 0, 0, false, false
 			local ic = EntityGetFirstComponentIncludingDisabled(child, "ItemComponent")
 			if ic then
 				local vx, vy = ComponentGetValue2(ic, "inventory_slot")
@@ -136,8 +136,15 @@ local function read_deck(wand)
 				-- kept so a future API change degrades to "not always-cast"
 				local ok, p = pcall(ComponentGetValue2, ic, "permanently_attached")
 				perm = ok and p == true
+				-- A limited-charge spell at 0 uses won't fire (gun.lua skips it),
+				-- so drop it from the deck entirely -- the wand brackets/wrap as
+				-- though the slot were empty. xs already maps surviving cards to
+				-- their real columns, so the depleted card just renders bracket-
+				-- less. pcall'd; an unreadable field keeps the card (unlimited).
+				local oku, uses = pcall(ComponentGetValue2, ic, "uses_remaining")
+				depleted = oku and not wand_structure.card_fires(uses)
 			end
-			if aid and aid ~= "" then
+			if aid and aid ~= "" and not depleted then
 				if perm then
 					always[#always + 1] = aid
 				else
