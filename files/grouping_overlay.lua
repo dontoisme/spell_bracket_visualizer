@@ -21,7 +21,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.2.4"
+local VERSION = "v1.2.5"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 local PANEL_SCALE_MAP = { tiny = 0.5, small = 0.6, medium = 0.75 }
@@ -323,6 +323,15 @@ local BRACKET_RAISE = 0 -- GUI: extra lift of all bracket glyphs above the
                         -- tuning compensated the then-broken box geometry;
                         -- with the diagonal-bbox model placing rows
                         -- engine-exact, the user chose FLUSH (2026-06-12).
+-- Fine vertical placement of the bracket glyphs relative to the calibrated slot
+-- row (rows_geo top..bot, what the debug probe draws in magenta). bracket() puts
+-- the top hook at `top` and the bottom hook at `bot - 1`. User-tuned in-game
+-- against the engine's teal card frame (2026-06-22): EXTEND_TOP = -1 drops the
+-- top hook 1px below the row top onto the frame's top edge; EXTEND_BOT = 2 sits
+-- the bottom hook 1px below the row bottom for the look the user wanted. These
+-- are the two tuning knobs; adjust from a screenshot.
+local BRACKET_EXTEND_TOP = -1 -- GUI: bracket top relative to the row top (- = lower)
+local BRACKET_EXTEND_BOT = 2  -- GUI: bracket bottom relative to the row bottom (+ = lower)
 
 local function line(gui, id, x, y, w, h, c, a)
 	a = a or 1
@@ -404,7 +413,8 @@ local function draw_delims(gui, groups, refw, rows_geo, idc)
 		-- open: [ just left of the card, raised so its top hook overlaps the
 		-- slot's top edge (the ~wrap tag, when present, sits above in orange)
 		local lx = refw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
-		bracket(gui, idc, lx, ya.top - BRACKET_RAISE, ya.bot - BRACKET_RAISE, 1, g.c)
+		bracket(gui, idc, lx, ya.top - BRACKET_RAISE - BRACKET_EXTEND_TOP,
+			ya.bot - BRACKET_RAISE + BRACKET_EXTEND_BOT, 1, g.c)
 		if g.w1 then
 			-- "wraps to front": reads toward the orange segment at the wand's
 			-- start (was "~wrap", but Noita's font renders ~ as a double
@@ -425,8 +435,9 @@ local function draw_delims(gui, groups, refw, rows_geo, idc)
 		local grow = o * STACK_Y
 		local rx = refw * (BOX.slot0_x + g.cb * BOX.pitch + BOX.halfw)
 			- BAR_W - CLOSE_NUDGE + o * STACK_X
-		bracket(gui, idc, rx, yb.top - grow - BRACKET_RAISE,
-			yb.bot + grow - BRACKET_RAISE, -1, g.c)
+		local close_bot = yb.bot + grow - BRACKET_RAISE + BRACKET_EXTEND_BOT
+		bracket(gui, idc, rx, yb.top - grow - BRACKET_RAISE - BRACKET_EXTEND_TOP,
+			close_bot, -1, g.c)
 
 		-- wrap: the group continues at the wand's START. Bracket the
 		-- wrapped-in segment and draw a carriage-return line, from below the
@@ -438,16 +449,17 @@ local function draw_delims(gui, groups, refw, rows_geo, idc)
 			local wlx = refw * (BOX.slot0_x + g.w1 * BOX.pitch - BOX.halfw) - OPEN_NUDGE
 			local wrx = refw * (BOX.slot0_x + g.w2 * BOX.pitch + BOX.halfw)
 				- BAR_W - CLOSE_NUDGE
-			bracket(gui, idc, wlx, yw.top - BRACKET_RAISE, yw.bot - BRACKET_RAISE, 1, WRAP_COLOR)
-			bracket(gui, idc, wrx, yw.top - BRACKET_RAISE, yw.bot - BRACKET_RAISE, -1, WRAP_COLOR)
-			local ry = yb.bot + grow + 2 -- return line sits just below the close's row
-			-- drop from the (raised) forward close's bottom down to the return line
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, yb.bot + grow - BRACKET_RAISE, 1,
-				ry - (yb.bot + grow - BRACKET_RAISE) + 1, WRAP_COLOR)
+			local wrap_bot = yw.bot - BRACKET_RAISE + BRACKET_EXTEND_BOT
+			bracket(gui, idc, wlx, yw.top - BRACKET_RAISE - BRACKET_EXTEND_TOP, wrap_bot, 1, WRAP_COLOR)
+			bracket(gui, idc, wrx, yw.top - BRACKET_RAISE - BRACKET_EXTEND_TOP, wrap_bot, -1, WRAP_COLOR)
+			local ry = close_bot + 2 -- return line sits just below the close's bottom
+			-- drop from the forward close's (extended) bottom down to the return line
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, close_bot, 1,
+				ry - close_bot + 1, WRAP_COLOR)
 			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, ry, rx - wlx, 1, WRAP_COLOR)
-			-- riser meets the (raised) wrapped-segment open bracket's bottom
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, yw.bot - BRACKET_RAISE, 1,
-				ry - (yw.bot - BRACKET_RAISE) + 1, WRAP_COLOR)
+			-- riser meets the wrapped-segment open bracket's (extended) bottom
+			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, wrap_bot, 1,
+				ry - wrap_bot + 1, WRAP_COLOR)
 		end
 	end
 end
