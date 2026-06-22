@@ -45,6 +45,15 @@ def card_fires(uses_remaining):
     return uses_remaining != 0
 
 
+# Mirror of M.GREEK_SPELLS / M.has_greek: the 8 Greek alphabet spells re-cast cards
+# by position, so a wand containing any of them keeps depleted cards (filter off).
+GREEK_SPELLS = {"ALPHA", "GAMMA", "TAU", "OMEGA", "MU", "PHI", "SIGMA", "ZETA"}
+
+
+def has_greek(ids):
+    return any(i in GREEK_SPELLS for i in ids)
+
+
 def chains(m):
     return m.get("draws") == 1 and "payload" not in m and m["type"] != "DRAW_MANY"
 
@@ -324,6 +333,19 @@ def main():
     filtered = keep_fires([("LIGHT_BULLET", -1), ("DAMAGE", 0), ("LIGHT_BULLET", 5)])
     check("depleted modifier filtered before sim", filtered, 1,
           "{LIGHT_BULLET} | {LIGHT_BULLET}")
+
+    # Greek override: a wand with a Greek spell KEEPS depleted cards.
+    passck("has_greek: TAU present", has_greek(["LIGHT_BULLET", "TAU", "DAMAGE"]) is True)
+    passck("has_greek: none", has_greek(["LIGHT_BULLET", "DAMAGE"]) is False)
+    passck("has_greek: DIVIDE is not Greek", has_greek(["DIVIDE_10", "LIGHT_BULLET"]) is False)
+
+    def read_deck_keep(cards):  # [(id, uses)]; mirrors read_deck's Greek gate
+        greek = has_greek([cid for cid, _ in cards])
+        return [cid for cid, uses in cards if greek or card_fires(uses)]
+    greek_kept = read_deck_keep(
+        [("TAU", -1), ("LIGHT_BULLET", -1), ("DAMAGE", 0), ("LIGHT_BULLET", 5)])
+    check("greek wand keeps depleted card", greek_kept, 1,
+          "{[TAU]LIGHT_BULLET} | {[DAMAGE]LIGHT_BULLET}")
 
     print("\n%d failure(s)" % failures)
     sys.exit(1 if failures else 0)

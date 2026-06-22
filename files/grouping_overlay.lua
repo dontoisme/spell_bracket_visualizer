@@ -21,7 +21,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.2.6"
+local VERSION = "v1.3.0"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 local PANEL_SCALE_MAP = { tiny = 0.5, small = 0.6, medium = 0.75 }
@@ -120,36 +120,50 @@ end
 -- Returns the deck tokens (slot order) and the always-cast ids separately:
 -- always-cast cards never sit in the deck -- the engine plays them at the
 -- start of every cast -- so they must not take part in the deck simulation.
-local function read_deck(wand)
-	local cards, always = {}, {}
+local function read_deck(wand, ignore_depleted, greek_keeps)
+	-- First pass: gather every card (id, slot, always-cast flag, uses). We need
+	-- the whole id list before filtering, because a Greek spell anywhere on the
+	-- wand disables the depleted-card filter (see wand_structure.has_greek).
+	local raw, ids = {}, {}
 	local children = EntityGetAllChildren(wand) or {}
 	for _, child in ipairs(children) do
 		local iac = EntityGetFirstComponentIncludingDisabled(child, "ItemActionComponent")
 		if iac then
 			local aid = ComponentGetValue2(iac, "action_id")
-			local sx, sy, perm, depleted = 0, 0, false, false
-			local ic = EntityGetFirstComponentIncludingDisabled(child, "ItemComponent")
-			if ic then
-				local vx, vy = ComponentGetValue2(ic, "inventory_slot")
-				sx, sy = vx or 0, vy or 0
-				-- verified in-game 2026-06-11 ("always: Bounce" wand); pcall
-				-- kept so a future API change degrades to "not always-cast"
-				local ok, p = pcall(ComponentGetValue2, ic, "permanently_attached")
-				perm = ok and p == true
-				-- A limited-charge spell at 0 uses won't fire (gun.lua skips it),
-				-- so drop it from the deck entirely -- the wand brackets/wrap as
-				-- though the slot were empty. xs already maps surviving cards to
-				-- their real columns, so the depleted card just renders bracket-
-				-- less. pcall'd; an unreadable field keeps the card (unlimited).
-				local oku, uses = pcall(ComponentGetValue2, ic, "uses_remaining")
-				depleted = oku and not wand_structure.card_fires(uses)
-			end
-			if aid and aid ~= "" and not depleted then
-				if perm then
-					always[#always + 1] = aid
-				else
-					cards[#cards + 1] = { id = aid, x = sx, y = sy }
+			if aid and aid ~= "" then
+				local sx, sy, perm, uses, oku = 0, 0, false, nil, false
+				local ic = EntityGetFirstComponentIncludingDisabled(child, "ItemComponent")
+				if ic then
+					local vx, vy = ComponentGetValue2(ic, "inventory_slot")
+					sx, sy = vx or 0, vy or 0
+					-- verified in-game 2026-06-11 ("always: Bounce" wand); pcall
+					-- kept so a future API change degrades to "not always-cast"
+					local ok, p = pcall(ComponentGetValue2, ic, "permanently_attached")
+					perm = ok and p == true
+					oku, uses = pcall(ComponentGetValue2, ic, "uses_remaining")
 				end
+				raw[#raw + 1] = { id = aid, x = sx, y = sy, perm = perm, uses = uses, oku = oku }
+				ids[#ids + 1] = aid
+			end
+		end
+	end
+
+	-- A limited-charge spell at 0 uses won't fire (gun.lua skips it), so drop it
+	-- from the deck -- the wand brackets/wraps as though the slot were empty; xs
+	-- maps survivors to their real columns so the depleted card renders bracket-
+	-- less. Gated by the Ignore Depleted Spells setting (ignore_depleted), with a
+	-- Greek exception: on a Greek wand the Greeks re-cast cards by position so a
+	-- depleted card still matters -- keep the full structure when greek_keeps is on.
+	local cards, always = {}, {}
+	local greek = wand_structure.has_greek(ids)
+	local apply_filter = ignore_depleted and not (greek and greek_keeps)
+	for _, r in ipairs(raw) do
+		local depleted = apply_filter and r.oku and not wand_structure.card_fires(r.uses)
+		if not depleted then
+			if r.perm then
+				always[#always + 1] = r.id
+			else
+				cards[#cards + 1] = { id = r.id, x = r.x, y = r.y }
 			end
 		end
 	end
@@ -164,7 +178,9 @@ local function read_deck(wand)
 		tokens[#tokens + 1] = c.id
 		xs[#xs + 1] = c.x
 	end
-	return tokens, always, xs
+	-- greek = the wand has a Greek spell, so the depleted-card filter was off
+	-- (surfaced in the debug readout).
+	return tokens, always, xs, greek
 end
 
 -- ---- flatten the simulation into colored, indented display lines -------------
@@ -560,7 +576,7 @@ end
 
 -- sw param is the GEOMETRY reference width (refw = sh*CAL_ASPECT), not live
 -- screen width -- everything here is layout. See draw_delims / update().
-local function collect_wand_boxes(gui, refw, per_row)
+local function collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_keeps)
 	local players = EntityGetWithTag("player_unit")
 	if not players or #players == 0 then return {}, BOX.top0 * U * refw, 0 end
 	local items = GameGetAllInventoryItems(players[1]) or {}
@@ -578,7 +594,7 @@ local function collect_wand_boxes(gui, refw, per_row)
 
 	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
 	for _, wd in ipairs(wands) do
-		wd.tokens, wd.always, wd.xs = read_deck(wd.e)
+		wd.tokens, wd.always, wd.xs, wd.greek = read_deck(wd.e, ignore_depleted, greek_keeps)
 		wd.cfg = read_config(wd.e)
 		wd.h, wd.sprite = wand_art_wh(gui, wd.e)
 		wd.sim = wand_structure.simulate(wd.tokens, meta,
@@ -712,6 +728,11 @@ local BOTTOM_MARGIN   = 12   -- GUI kept clear at the screen bottom
 local MAX_PANEL_W     = 220  -- hard cap on panel width (also clamped to sw*0.5)
 local PANEL_BG_Z      = -20  -- lower z = front; beats the slot brackets (z -10)
 local PANEL_TEXT_Z    = -21  -- one layer in front of the panel background
+-- Debug overlays (readout box, measure tool) must sit in FRONT of the cast panel
+-- (z -20/-21) -- lower z = front, so these go lower still. They used to draw at
+-- z -7/-8, BEHIND the panel, so the readout hid behind it (user 2026-06-22).
+local DEBUG_BG_Z      = -22  -- debug readout background, in front of the panel
+local DEBUG_TEXT_Z    = -23  -- debug text + measure overlay, frontmost
 
 -- Trim a label with a trailing "..." until it measures within max_px at `scale`.
 -- (Labels are ASCII spell names, so #s byte length == char count.)
@@ -851,8 +872,9 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 			wd.cfg.capacity, #wd.tokens, wd.cfg.spells_per_cast,
 			wd.cfg.shuffle and "yes" or "no")
 		lines[#lines + 1] = string.format(
-			"rows modeled=%d   cast-wraps=%s",
-			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no")
+			"rows modeled=%d   cast-wraps=%s   greek=%s",
+			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no",
+			wd.greek and "yes (keeping depleted)" or "no")
 		-- exact SPRITE_OVERRIDES key for the held wand (copy if it sits wrong)
 		lines[#lines + 1] = "sprite: " .. (wd.sprite or "(unknown)")
 	else
@@ -873,11 +895,11 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 	-- to keep the whole left column clear (the HUD it may graze isn't a target)
 	local x, y = sw - panel_w - 8, 8
 
-	-- top-left corner is clear of Noita's centered inventory; lower z = front,
-	-- so this sits above the panel/boxes (brackets at z=-10 are elsewhere)
-	GuiZSet(gui, -7)
+	-- lower z = front, so this sits above the cast panel (z -20/-21), the boxes,
+	-- and the brackets (z -10) -- the debug readout must never be hidden
+	GuiZSet(gui, DEBUG_BG_Z)
 	GuiImageNinePiece(gui, 90220, x - pad, y - pad, panel_w, panel_h, 0.9)
-	GuiZSet(gui, -8)
+	GuiZSet(gui, DEBUG_TEXT_Z)
 	for i, t in ipairs(lines) do
 		local c = (i == 1) and HEADER_COLOR
 			or (i == 2 and off_169 and WRAP_COLOR)
@@ -913,7 +935,7 @@ local function draw_measure(gui, sw, sh)
 		id = id + 1; line(gui, id, x, y - len, 1, len * 2 + 1, c, 0.9)
 	end
 
-	GuiZSet(gui, -9)
+	GuiZSet(gui, DEBUG_TEXT_Z) -- in front of the panel too, so you can measure over it
 	cross(cx, cy, { 0.4, 1, 1 }, 6) -- live cursor crosshair
 	GuiColorSetForNextWidget(gui, 0.4, 1, 1, 1)
 	GuiText(gui, cx + 7, cy + 2, string.format("(%.1f, %.1f)", cx, cy))
@@ -966,6 +988,11 @@ function M.update()
 	local show_slots = get("spell_bracket_visualizer.show_slot_brackets") ~= false
 	local show_debug = get("spell_bracket_visualizer.show_debug") == true
 	if not show_panel and not show_slots and not show_debug then return end
+	-- Ignore depleted (0-use) spells in the structure (default on), unless the wand
+	-- has a Greek spell and the Greek exception is on (default on). Both gate the
+	-- filter in read_deck. See settings.lua / wand_structure.has_greek.
+	local ignore_depleted = get("spell_bracket_visualizer.ignore_depleted_spells") ~= false
+	local greek_keeps = get("spell_bracket_visualizer.greek_keeps_depleted") ~= false
 	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
 
 	local sw, sh = GuiGetScreenDimensions(gui)
@@ -982,7 +1009,7 @@ function M.update()
 	-- one measure/read pass shared by the brackets and the panel's dock anchor.
 	-- per_row is the aspect-calibrated wrap column (99 = no wrap at >= 16:9)
 	local per_row = wrap_columns(sw, sh)
-	local boxes = collect_wand_boxes(gui, refw, per_row)
+	local boxes = collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_keeps)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
 		-- strongly negative z = "bring to front": lower z draws on top, and

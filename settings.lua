@@ -26,6 +26,20 @@ mod_settings = {
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{
+		id = "ignore_depleted_spells",
+		ui_name = "Ignore Depleted Spells",
+		ui_description = "Spells with 0 charges left can't fire. When on, they're left\nout of the brackets and panel, and the wand groups and WRAPS\nas if those slots were empty.",
+		value_default = true,
+		scope = MOD_SETTING_SCOPE_RUNTIME,
+	},
+	{
+		id = "greek_keeps_depleted",
+		ui_name = "Greek Wands: Keep Depleted Spells",
+		ui_description = "Greek spells (Alpha, Tau, Omega...) re-cast spells by their\nposition, so a depleted spell still affects the structure.\nWhen on, wands with a Greek spell keep all spells even if\n'Ignore Depleted Spells' is enabled. Turn off to ignore\ndepleted spells on every wand.",
+		value_default = true,
+		scope = MOD_SETTING_SCOPE_RUNTIME,
+	},
+	{
 		id = "show_debug",
 		ui_name = "Debug Info (for bug reports)",
 		ui_description = "Show a small box (top-right) with your screen/GUI size and\nthe held wand's stats, plus magenta guide-lines on each wand box.\nIf the brackets or panel look wrong, turn this on, open your\nwand, and send the author a screenshot -- it shows your\nresolution, wand size, and where the mod thinks each row is.",

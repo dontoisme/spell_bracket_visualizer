@@ -55,6 +55,27 @@ function M.card_fires(uses_remaining)
 	return uses_remaining ~= 0
 end
 
+-- The 8 Greek alphabet spells RE-CAST cards by position from the deck/hand/discard
+-- piles (verified in gun_actions.lua): Alpha/Gamma/Tau copy a neighbour
+-- (deck[1]/deck[#deck]/...), Omega/Mu/Phi/Sigma re-cast the discard pile, Zeta
+-- builds its own option set. So in a wand containing ANY Greek, a depleted card is
+-- still structurally relevant -- it can be re-cast, and dropping it would shift the
+-- positions the Greeks read -- so the depleted-card filter is DISABLED for that wand
+-- and the full structure stays bracketed. (The DIVIDE_* spells multicast the NEXT
+-- card rather than re-casting by position, so they are deliberately not included.)
+M.GREEK_SPELLS = {
+	ALPHA = true, GAMMA = true, TAU = true, OMEGA = true,
+	MU = true, PHI = true, SIGMA = true, ZETA = true,
+}
+
+-- Does this id list (a wand's action_ids, deck + always-cast) contain a Greek spell?
+function M.has_greek(ids)
+	for _, id in ipairs(ids) do
+		if M.GREEK_SPELLS[id] then return true end
+	end
+	return false
+end
+
 local function meta_for(meta, id)
 	return meta[id] or { type = "OTHER" }
 end

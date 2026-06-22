@@ -164,5 +164,33 @@ check("depleted modifier filtered before sim",
 	filtered, 1,
 	"{LIGHT_BULLET} | {LIGHT_BULLET}")
 
+-- Greek override: a wand containing a Greek spell KEEPS depleted cards (Greeks
+-- re-cast by position). Mirrors read_deck: filter only when no Greek present.
+passck("has_greek: TAU present", S.has_greek({ "LIGHT_BULLET", "TAU", "DAMAGE" }) == true)
+passck("has_greek: none", S.has_greek({ "LIGHT_BULLET", "DAMAGE" }) == false)
+passck("has_greek: DIVIDE is not Greek", S.has_greek({ "DIVIDE_10", "LIGHT_BULLET" }) == false)
+
+local function read_deck_keep(cards) -- {id,uses}; mirrors read_deck's Greek gate
+	local ids = {}
+	for _, c in ipairs(cards) do ids[#ids + 1] = c.id end
+	local greek = S.has_greek(ids)
+	local out = {}
+	for _, c in ipairs(cards) do
+		if greek or S.card_fires(c.uses) then out[#out + 1] = c.id end
+	end
+	return out
+end
+-- Same wand WITH a Greek (Tau) in slot 1: the depleted DAMAGE is now kept and
+-- chains onto the trailing LIGHT (Tau itself is type OTHER, draws 1 -> chains).
+local greek_kept = read_deck_keep({
+	{ id = "TAU", uses = -1 },
+	{ id = "LIGHT_BULLET", uses = -1 },
+	{ id = "DAMAGE", uses = 0 }, -- depleted but KEPT because the wand has a Greek
+	{ id = "LIGHT_BULLET", uses = 5 },
+})
+check("greek wand keeps depleted card",
+	greek_kept, 1,
+	"{[TAU]LIGHT_BULLET} | {[DAMAGE]LIGHT_BULLET}")
+
 print(string.format("\n%d failure(s)", failures))
 os.exit(failures > 0 and 1 or 0)
