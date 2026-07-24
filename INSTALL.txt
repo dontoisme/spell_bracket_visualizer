@@ -1,0 +1,161 @@
+===============================================================================
+ Spell Bracket Visualizer -- manual install guide
+ A Noita mod: rainbow nesting brackets + a cast-structure panel on the wand UI.
+ https://github.com/dontoisme/spell_bracket_visualizer
+===============================================================================
+
+This guide is for installing WITHOUT Steam Workshop (GOG, DRM-free, or if you
+just prefer installing mods by hand). Nothing else is required -- the mod is
+pure Lua, has no dependencies, and does not request unsafe API access.
+
+
+-------------------------------------------------------------------------------
+ 1. FIND YOUR NOITA "mods" FOLDER
+-------------------------------------------------------------------------------
+
+It sits next to noita.exe, inside your Noita install folder:
+
+  Steam    C:\Program Files (x86)\Steam\steamapps\common\Noita\mods\
+           (or wherever your Steam library lives -- in Steam, right-click
+            Noita > Manage > Browse local files)
+
+  GOG      C:\GOG Games\Noita\mods\
+
+  Other    <wherever noita.exe is>\mods\
+
+If there is no "mods" folder there, create one, spelled exactly: mods
+
+
+-------------------------------------------------------------------------------
+ 2. UNZIP THE MOD INTO IT
+-------------------------------------------------------------------------------
+
+Extract this zip so you end up with a folder named
+
+  spell_bracket_visualizer
+
+inside "mods". When it is right, this file exists:
+
+  ...\Noita\mods\spell_bracket_visualizer\init.lua
+
+IMPORTANT: the folder must be named exactly "spell_bracket_visualizer".
+The mod loads its own files by that name, so a renamed folder (for example
+"spell_bracket_visualizer-1.3.0" or "spell_bracket_visualizer-main", which is
+what GitHub's "Download ZIP" button gives you) will NOT work.
+
+Also make sure you did not end up with a doubled folder --
+"mods\spell_bracket_visualizer\spell_bracket_visualizer\init.lua" is wrong;
+move the inner folder up one level.
+
+
+-------------------------------------------------------------------------------
+ 3. ENABLE IT IN THE GAME
+-------------------------------------------------------------------------------
+
+  1. Start Noita.
+  2. From the main menu choose "Mods".
+  3. Accept the modding warning if the game asks (mods disable Steam
+     achievements for that save -- that is Noita's own rule, not this mod's).
+  4. Tick the checkbox next to "Spell Bracket Visualizer".
+  5. Start a new run, or continue an existing one.
+
+The mod is purely visual: it only reads your wands and draws on top of the UI.
+It does not change spells, wands, or world generation, so it is safe to add to
+a run in progress and safe to remove again.
+
+
+-------------------------------------------------------------------------------
+ 4. USING IT
+-------------------------------------------------------------------------------
+
+Open your inventory and select a wand. You get:
+
+  * Slot brackets -- rainbow "[ ]" brackets drawn right on the wand's spell
+    slots, marking which spells fire together in one cast. Colors cycle by
+    nesting depth, like nested code brackets. If the wand WRAPS (a cast runs
+    past the last spell and pulls from the front again, forcing the recharge),
+    the wrap is marked in orange with a "wraps to front" tag.
+
+  * Wand structure panel -- a text tree on the right side of the screen: one
+    section per cast, indented by nesting, spell names colored by type, with a
+    loud orange "WRAPS! -> recharge" banner on a wrapping cast.
+
+Both update live as you drag spells around.
+
+Note: SHUFFLE wands intentionally show nothing at all -- their draw order is
+randomized every cycle, so any structure shown would be just one of many
+possible arrangements. This is not a bug.
+
+
+-------------------------------------------------------------------------------
+ 5. SETTINGS
+-------------------------------------------------------------------------------
+
+In the game's mod settings menu (reachable from the Mods menu) you can toggle:
+
+  Wand Structure Panel ............ the text tree on/off
+  ...Text Size .................... Tiny / Small / Medium
+  Slot Brackets ................... the in-UI rainbow brackets on/off
+  Ignore Depleted Spells .......... leave 0-charge spells out of the structure
+                                    (they cannot fire, so the wand really does
+                                    group and wrap as if the slot were empty)
+  Greek Wands: Keep Depleted ...... Greek spells (Alpha, Tau, Omega, ...) re-cast
+                                    by slot POSITION, so on those wands a
+                                    depleted spell still matters -- keep it
+  Debug Info (for bug reports) .... small readout + guide-lines, see below
+
+All of these apply immediately -- no restart needed.
+
+
+-------------------------------------------------------------------------------
+ 6. UNINSTALLING
+-------------------------------------------------------------------------------
+
+Untick it in the Mods menu, and/or delete the
+"mods\spell_bracket_visualizer" folder. It stores nothing in your save.
+
+
+-------------------------------------------------------------------------------
+ 7. TROUBLESHOOTING
+-------------------------------------------------------------------------------
+
+The mod does not appear in the Mods list
+  The folder is in the wrong place or misnamed. Check that
+  ...\Noita\mods\spell_bracket_visualizer\init.lua exists, and that you are
+  looking in the Noita folder the game actually launches from.
+
+It is ticked, but nothing is drawn
+  * Make sure you have the inventory OPEN and a wand SELECTED.
+  * Shuffle wands are blank by design (see section 4).
+  * Check both "Wand Structure Panel" and "Slot Brackets" are on in settings.
+  * The mod prints "[Spell Bracket Visualizer] overlay error: ..." on screen if
+    something actually broke -- please report that message.
+
+Brackets look slightly off / misaligned
+  Noita draws the wand boxes itself, so the mod uses a model of that layout.
+  Please report it: turn on "Debug Info (for bug reports)", open your wand,
+  and send a screenshot. It shows your resolution, GUI size and the wand's
+  measurements, which is exactly what is needed to fix the alignment.
+
+Report issues at:
+  https://github.com/dontoisme/spell_bracket_visualizer/issues
+
+
+-------------------------------------------------------------------------------
+ WHAT IS IN THIS PACKAGE
+-------------------------------------------------------------------------------
+
+  init.lua .................... entry point, runs the overlay each frame
+  settings.lua ................ the mod settings menu
+  mod.xml, compatibility.xml,
+  mod_id.txt .................. Noita's mod manifest files
+  files\grouping_overlay.lua .. reads the live wand, draws panel + brackets
+  files\wand_structure.lua .... pure simulator of the engine's draw rules
+  files\structure_meta.lua .... generated per-spell structural data
+  files\wand_sprite_meta.lua .. generated wand-sprite sizes (box layout)
+  files\ui\pixel.png .......... 1x1 pixel used to draw the bracket lines
+  LICENSE ..................... MIT
+  INSTALL.txt ................. this file
+
+Source, development tools and test harnesses are on GitHub; they are left out
+of this package on purpose, since the game does not need them.

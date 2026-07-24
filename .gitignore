@@ -11,6 +11,9 @@ mod_config.xml
 __pycache__/
 *.pyc
 
+# Release zips built by tools/make_release.sh (uploaded to GitHub Releases)
+/dist/
+
 # Local planning scratch (not for the repo)
 /NEXT_UPDATE_PLAN.md
 

@@ -9,14 +9,14 @@ from the wand's start and forces the recharge).
 
 Two views, both live while the inventory is open:
 
-1. **Wand structure panel** (docked beside the held wand's box, so it tracks
-   your selection and updates live as you rearrange spells): an indented tree
+1. **Wand structure panel** (anchored to the right of the screen, tracking the
+   selected wand and updating live as you rearrange spells): an indented tree
    of the held wand, one cast per section, rainbow nesting spines by depth,
    spell names colored by action type. Wrapping casts get a loud orange
-   `WRAPS! -> recharge` banner and wrapped-in cards are marked `~`. The
-   panel finds free space automatically — beside the boxes, below a wider
-   one, or under the whole stack — and clamps to the screen (`... +N more`)
-   instead of overflowing.
+   `WRAPS! -> recharge` banner and wrapped-in cards are marked `~`. It pins to
+   the selected wand's box when the structure is short and takes over the full
+   right column when it isn't, drawing opaque and on top so it stays readable;
+   long structures clamp to the screen (`... +N more`) instead of overflowing.
 2. **Slot brackets** (in the wand UI itself): `[ ]` bracket glyphs hugging
    each group's first and last card — SLIME rainbow parens, color cycling by
    nesting depth, no text labels (the card art already says what the group
@@ -26,6 +26,23 @@ Two views, both live while the inventory is open:
    group the wrap happened in gets an orange `wraps to front` tag, orange brackets
    around the wrapped-in cards at the wand's start, and a carriage-return
    line under the row connecting the two — "the draw continues here".
+
+## Install
+
+**Steam:** subscribe on the
+[Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3743473994).
+
+**Everyone else (GOG / DRM-free / by hand):** grab the zip from the
+[latest release](https://github.com/dontoisme/spell_bracket_visualizer/releases/latest)
+and extract it into your Noita `mods` folder (the one next to `noita.exe`), so
+that `Noita/mods/spell_bracket_visualizer/init.lua` exists. Then enable
+**Spell Bracket Visualizer** in the game's Mods menu.
+
+The folder must be named exactly `spell_bracket_visualizer` — the mod loads its
+own files by that path, so GitHub's green "Download ZIP" button (which produces
+`spell_bracket_visualizer-main`) will *not* work unless you rename it. The
+release zip is already laid out correctly and contains only the files the game
+needs; `INSTALL.txt` inside it has the long-form walkthrough and troubleshooting.
 
 ## How it works
 
@@ -40,15 +57,26 @@ cycle, so there is no fixed structure to display.
 
 The engine renders the inventory itself (no Lua hook exposes slot or box
 positions), so the panel draws on its own Gui at safe coordinates, while the
-slot brackets use a calibrated model of the wand-box layout: boxes stack with
-per-wand heights of `max(37, 14 + 2 × sprite px)` engine units (each wand's
-art height is read at runtime), so brackets stay put across wand pickups,
+slot brackets use a calibrated model of the wand-box layout: a wand's box height
+is driven by its sprite THICKNESS (`26.9 + 1.25 x art height` engine units, read
+live via `GuiGetImageDimensions`, with `wand_sprite_meta.lua` as the offline
+lookup), and boxes stack from there — so brackets stay put across wand pickups,
 reordering, and selection changes.
 
 ## Settings (in the in-game mod settings menu)
 
-- **Wand Structure Panel** — on/off (runtime; applies immediately).
-- **Slot Brackets** — the in-UI rainbow brackets (runtime; on by default).
+All settings are runtime-scoped and apply immediately.
+
+- **Wand Structure Panel** — the text tree on/off.
+- **Wand Structure Panel: Text Size** — Tiny / Small / Medium.
+- **Slot Brackets** — the in-UI rainbow brackets (on by default).
+- **Ignore Depleted Spells** — leave 0-charge spells out of the structure,
+  since they can't fire (on by default).
+- **Greek Wands: Keep Depleted Spells** — Greek spells (Alpha, Tau, Omega…)
+  re-cast by slot *position*, so a depleted spell still shifts what they read;
+  on those wands keep everything (on by default).
+- **Debug Info (for bug reports)** — resolution/GUI readout plus per-box guide
+  lines; screenshot this if the brackets ever misalign.
 
 ## Project layout
 
@@ -62,6 +90,8 @@ tools/gen_structure_meta.py  # regenerates structure_meta.lua from data.wak
 tools/test_wand_structure.lua # runs the real wand_structure.lua + tests (primary)
 tools/test_wand_structure.py # Python cross-check mirror of wand_structure.lua
 tools/gen_icons.py           # (retired icon-recolor feature; see below)
+tools/make_release.sh        # builds dist/<mod>-<version>.zip for manual installs
+INSTALL.txt                  # manual-install guide (shipped in the release zip)
 mod.xml, compatibility.xml
 workshop.xml                 # Steam Workshop manifest (name/desc/tags/excludes)
 workshop_preview_image.png   # Workshop thumbnail (16:9)
@@ -98,13 +128,15 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
 
 - Only the standard spell set (`gun_actions.lua`) is modeled; mod-added spells
   appear in the panel as plain leaves.
-- The panel can't know your mana or spell uses, so a cast that fizzles on mana
-  (or skips a depleted spell) may differ from the simulation.
+- The panel can't know your mana, so a cast that fizzles mid-way on mana may
+  differ from the simulation. (Depleted 0-charge spells *are* handled — see
+  the settings above.)
 - Shuffle wands get **no panel and no brackets** — the real draw order
   randomizes each cycle, so any displayed structure would be just one
   arrangement of many.
-- The slot brackets' geometry is calibrated at GUI 640×360 (constants scale as
-  fractions of GUI width, so other sizes should track) — if brackets ever
-  misalign after a game update, the calibration HUD in git history can
-  re-measure everything from one screenshot; the panel is always reliable
-  regardless.
+- The slot brackets' geometry is a *model* of the engine's wand-box layout (no
+  Lua API exposes the real positions). It's calibrated against GUI 640×360 and
+  scaled by that constant, so it holds at every GUI resolution Noita produces,
+  but an unusual wand sprite can still sit ~1 engine unit off, and a game update
+  could shift the layout. Turn on **Debug Info** and send a screenshot if so;
+  the panel is always reliable regardless.
