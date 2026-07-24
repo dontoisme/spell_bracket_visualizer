@@ -1,0 +1,43 @@
+Ever stared at a rapid-fire wand and wondered what actually fires together each cast? This mod draws your wand's cast structure right onto the inventory UI, Lisp/SLIME style, so the grouping is visible instead of guessed.
+
+[h2]Two views[/h2]
+[list]
+[*][b]Slot brackets[/b] — rainbow nesting brackets on the spell cards themselves, hugging each group's first and last card. Colors cycle by nesting depth, like nested code brackets: you can see what a multicast gathers, which modifiers feed which projectile, and what payload a trigger opens.
+[*][b]Wand structure panel[/b] — an indented text tree of the selected wand, one section per cast, spell names colored by type. Always-cast spells are listed separately.
+[/list]
+Both update live as you drag spells around, so you can see a wand reshape itself while you build it.
+
+[h2]It shows you the WRAP[/h2]
+The one that actually costs you damage: when a cast runs past the last spell in the wand, the draw wraps back to the front and forces the recharge. That cast fires a mix you probably didn't intend, and nothing in the vanilla UI tells you it's happening.
+
+The wrap gets marked in orange — an orange [i]wraps to front[/i] tag on the group it happened in, orange brackets around the wrapped-in cards at the wand's start, and a carriage-return line connecting the two. The panel gets a loud [b]WRAPS! -> recharge[/b] banner on that cast.
+
+[h2]New in v1.3.0 — depleted spells[/h2]
+A spell with 0 charges left can't fire: the engine discards it and draws the next card instead. So the mod now leaves depleted spells out of the structure entirely, and your wand groups — and [b]wraps[/b] — as if that slot were empty. A single spent spell can move the wrap point, which is exactly the kind of thing that's invisible mid-run.
+
+One exception, on by default: the Greek spells (Alpha, Gamma, Tau, Omega, Mu, Phi, Sigma, Zeta) re-cast spells by their [i]position[/i] in the wand, so a depleted spell still changes what they pick up. On a wand holding a Greek spell, everything is kept. Both behaviors are toggleable.
+
+[h2]Settings[/h2]
+All settings are in the mod settings menu and apply immediately, no restart:
+[list]
+[*][b]Wand Structure Panel[/b] — the text tree on/off
+[*][b]Wand Structure Panel: Text Size[/b] — Tiny / Small / Medium
+[*][b]Slot Brackets[/b] — the in-UI rainbow brackets on/off
+[*][b]Ignore Depleted Spells[/b] — leave 0-charge spells out of the structure
+[*][b]Greek Wands: Keep Depleted Spells[/b] — the exception described above
+[*][b]Debug Info (for bug reports)[/b] — resolution/GUI readout plus per-box guide lines
+[/list]
+
+[h2]Good to know[/h2]
+[list]
+[*]Purely visual. It reads your wands and draws on top of the UI — it changes no spells, wands, or world generation, and requests no unsafe Lua APIs. Safe to add to a run in progress, and safe to remove again.
+[*][b]Shuffle wands show nothing at all[/b], on purpose. Their draw order re-randomizes every cycle, so any structure drawn would be one arrangement out of many — a confident-looking lie.
+[*]The panel simulates the engine's real draw rules, read out of the game's own gun.lua. It can't know your mana, though, so a cast that fizzles part-way through may differ from what's shown.
+[*]Mod-added spells aren't modeled structurally; they appear in the panel as plain leaves.
+[/list]
+
+[h2]Bugs, source, non-Steam installs[/h2]
+If the brackets ever look misaligned, turn on [b]Debug Info (for bug reports)[/b], open your wand, and send the screenshot — it captures your resolution and the wand's measurements, which is exactly what's needed to fix it.
+
+Source is MIT licensed on GitHub, along with a downloadable zip and install guide for anyone playing outside Steam:
+[url=https://github.com/dontoisme/spell_bracket_visualizer]github.com/dontoisme/spell_bracket_visualizer[/url]

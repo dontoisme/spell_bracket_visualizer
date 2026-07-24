@@ -94,6 +94,7 @@ tools/make_release.sh        # builds dist/<mod>-<version>.zip for manual instal
 INSTALL.txt                  # manual-install guide (shipped in the release zip)
 mod.xml, compatibility.xml
 workshop.xml                 # Steam Workshop manifest (name/desc/tags/excludes)
+docs/workshop_description.bbcode # the Workshop page description (BBCode, pasted by hand)
 workshop_preview_image.png   # Workshop thumbnail (16:9)
 ```
 
