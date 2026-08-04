@@ -21,10 +21,13 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.3.0"
+local VERSION = "v1.3.1"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
-local PANEL_SCALE_MAP = { tiny = 0.5, small = 0.6, medium = 0.75 }
+-- "large" (1.0) exists for non-pixel fonts: fractional scales only render
+-- crisply with the vanilla pixel font, and font mods / TTF-font languages
+-- (Japanese etc.) turn them into unreadable mush (see docs/FONT_COMPAT.md).
+local PANEL_SCALE_MAP = { tiny = 0.5, small = 0.6, medium = 0.75, large = 1.0 }
 
 -- Calibration measuring tool (debug): middle-click drops a point, a second drops
 -- the other end and draws the measured span; a third starts a fresh pair. Lets
@@ -734,14 +737,71 @@ local PANEL_TEXT_Z    = -21  -- one layer in front of the panel background
 local DEBUG_BG_Z      = -22  -- debug readout background, in front of the panel
 local DEBUG_TEXT_Z    = -23  -- debug text + measure overlay, frontmost
 
+-- ---- font-metric safety -----------------------------------------------------
+--
+-- Workshop reports (2026-07-24..26): the panel renders "compressed and smaller
+-- than it should", pushed against the right screen edge, barely readable --
+-- with the "Better Font (English)" font mod (Workshop id 2098567286) and
+-- equally with the default fonts of the non-pixelated languages (Japanese and
+-- so on). The common factor is a NON-PIXEL (TrueType) UI font. Everything the
+-- panel draws is sized from GuiGetTextDimensions, which we have only ever
+-- calibrated against the vanilla pixel font; a TTF measures smaller (in the
+-- worst case degenerate) values. The panel is right-anchored and grows
+-- LEFTWARD from sw - RIGHT_MARGIN, so under-reported widths don't move it off
+-- position -- they shrink it into a sliver AT the right edge, and a collapsed
+-- line height stacks the rows onto each other: exactly the reported symptom.
+-- Full analysis: docs/FONT_COMPAT.md.
+--
+-- Mitigation: never trust a measurement below a floor shaped like the pixel
+-- font's smallest plausible metrics. The floors sit BELOW everything the
+-- vanilla pixel font actually returns (narrow glyphs like "|" and "i" advance
+-- ~3-4 GUI at scale 1), so they are inert in the shipped configuration and
+-- only engage when a font measures degenerately. Legibility itself is the
+-- "Large" text-size option's job: 1.0 is the one scale every font renders
+-- crisply.
+local CHAR_W_FLOOR = 3 -- GUI advance per character at scale 1, lower bound
+local CHAR_H_FLOOR = 6 -- GUI text height at scale 1, lower bound
+
+-- Spell names come from GameTextGet and can be UTF-8 (Japanese etc.), so #s
+-- counts bytes, not characters. Count characters = non-continuation bytes.
+local function utf8_chars(s)
+	local n = 0
+	for i = 1, #s do
+		local b = s:byte(i)
+		if b < 0x80 or b >= 0xC0 then n = n + 1 end
+	end
+	return n
+end
+
+-- Drop the last CHARACTER (not byte: byte-trimming split multi-byte glyphs
+-- and fed GuiText invalid UTF-8 on localized names).
+local function trim_last_char(s)
+	local i = #s
+	while i > 1 and s:byte(i) >= 0x80 and s:byte(i) < 0xC0 do i = i - 1 end
+	return s:sub(1, i - 1)
+end
+
+-- GuiGetTextDimensions with the collapse floors applied. All panel sizing
+-- goes through here; the raw engine reading is still surfaced verbatim in the
+-- debug info box so bug reports show what the active font really measures.
+local function text_dims(gui, text, scale)
+	scale = scale or 1
+	local w, h = GuiGetTextDimensions(gui, text, scale)
+	w, h = tonumber(w) or 0, tonumber(h) or 0
+	local wf = CHAR_W_FLOOR * utf8_chars(text) * scale
+	if w < wf then w = wf end
+	local hf = CHAR_H_FLOOR * scale
+	if h < hf then h = hf end
+	return w, h
+end
+
 -- Trim a label with a trailing "..." until it measures within max_px at `scale`.
--- (Labels are ASCII spell names, so #s byte length == char count.)
 local function fit_label(gui, text, scale, max_px)
 	if max_px <= 0 then return "..." end
-	if (GuiGetTextDimensions(gui, text, scale)) <= max_px then return text end
+	if (text_dims(gui, text, scale)) <= max_px then return text end
 	local s = text
-	while #s > 1 and (GuiGetTextDimensions(gui, s .. "...", scale)) > max_px do
-		s = s:sub(1, #s - 1)
+	while utf8_chars(s) > 1 and (text_dims(gui, s .. "...", scale)) > max_px do
+		s = trim_last_char(s)
 	end
 	return s .. "..."
 end
@@ -759,10 +819,11 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	local pad = 4
 	-- GuiText()/GuiGetTextDimensions() both take a scale arg (verified against
 	-- tools_modding/lua_api_documentation.html); measure at the same scale so the
-	-- panel width/row height stay exact.
-	local _, th = GuiGetTextDimensions(gui, title, scale)
+	-- panel width/row height stay exact. text_dims (not the raw engine call):
+	-- a non-pixel font measuring degenerately must not collapse the layout.
+	local _, th = text_dims(gui, title, scale)
 	local line_h = th + 2
-	local bar_w = (GuiGetTextDimensions(gui, "| ", scale)) -- advance per nesting spine
+	local bar_w = (text_dims(gui, "| ", scale)) -- advance per nesting spine
 
 	-- width budget: cap at MAX_PANEL_W (and half-screen), AND keep the panel's
 	-- LEFT edge clear of the active wand's box right edge so its spell slots stay
@@ -774,11 +835,11 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	local avail = sw - RIGHT_MARGIN - PANEL_GAP - sel_right
 	local max_panel_w = math.min(MAX_PANEL_W, sw * 0.5, avail)
 	if max_panel_w < 60 then max_panel_w = 60 end -- floor for a near-full-width active wand
-	local max_w = (GuiGetTextDimensions(gui, title, scale))
+	local max_w = (text_dims(gui, title, scale))
 	for _, r in ipairs(rows) do
 		local bars_w = (r.header and 0 or #r.bars) * bar_w
 		r.label = fit_label(gui, r.label, scale, max_panel_w - pad * 2 - bars_w)
-		local w = bars_w + (GuiGetTextDimensions(gui, r.label, scale))
+		local w = bars_w + (text_dims(gui, r.label, scale))
 		if w > max_w then max_w = w end
 	end
 	local panel_w = max_w + pad * 2
@@ -880,13 +941,31 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 	else
 		lines[#lines + 1] = "wand:  (none held -- select/hold a wand)"
 	end
+	-- Font probe: the panel sizes everything from GuiGetTextDimensions, and a
+	-- non-pixel font (font mods, Japanese, ...) mis-measuring is the prime
+	-- suspect when the panel collapses (docs/FONT_COMPAT.md) -- so surface the
+	-- RAW engine readings, no floors. With the vanilla pixel font the 0.6
+	-- numbers are ~0.6x the 1.0 numbers and none of them are near zero; a
+	-- wildly different or zero reading in a screenshot confirms the font.
+	local probe = "MWli0 |[]"
+	local okp, pw1, ph1 = pcall(GuiGetTextDimensions, gui, probe, 1)
+	local okq, pw6, ph6 = pcall(GuiGetTextDimensions, gui, probe, 0.6)
+	lines[#lines + 1] = string.format(
+		"font probe \"%s\"  @1.0: %.1f x %.1f   @0.6: %.1f x %.1f",
+		probe,
+		okp and tonumber(pw1) or -1, okp and tonumber(ph1) or -1,
+		okq and tonumber(pw6) or -1, okq and tonumber(ph6) or -1)
 	lines[#lines + 1] = "Reporting a bug? Screenshot this with the wand open."
 	lines[#lines + 1] = "Measure: middle-click two points (e.g. slot corners)."
 
-	local line_h, pad = 11, 4
+	-- line height from the measured font (floored via text_dims), not a
+	-- hardcoded 11: a tall TTF must not overlap the very readout used to
+	-- diagnose font problems
+	local _, mh = text_dims(gui, lines[1], 1)
+	local line_h, pad = math.max(11, mh + 2), 4
 	local max_w = 0
 	for _, t in ipairs(lines) do
-		local w = (GuiGetTextDimensions(gui, t))
+		local w = (text_dims(gui, t, 1))
 		if w > max_w then max_w = w end
 	end
 	local panel_w = max_w + pad * 2

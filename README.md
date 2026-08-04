@@ -68,7 +68,10 @@ reordering, and selection changes.
 All settings are runtime-scoped and apply immediately.
 
 - **Wand Structure Panel** — the text tree on/off.
-- **Wand Structure Panel: Text Size** — Tiny / Small / Medium.
+- **Wand Structure Panel: Text Size** — Tiny / Small / Medium / Large. Pick
+  **Large** if you use a font mod (e.g. Better Font) or a language with a
+  smooth non-pixel font (Japanese, …): fractional sizes only render crisply
+  with the default pixel font (see `docs/FONT_COMPAT.md`).
 - **Slot Brackets** — the in-UI rainbow brackets (on by default).
 - **Ignore Depleted Spells** — leave 0-charge spells out of the structure,
   since they can't fire (on by default).
@@ -135,6 +138,13 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
 - Shuffle wands get **no panel and no brackets** — the real draw order
   randomizes each cycle, so any displayed structure would be just one
   arrangement of many.
+- The panel draws with the game's current UI font, and its layout is measured
+  via `GuiGetTextDimensions` — which is only calibrated against the vanilla
+  pixel font. Font mods ("Better Font") and TTF-font languages (Japanese, …)
+  used to collapse the panel into a tiny sliver at the right screen edge;
+  v1.3.1 floors the metrics so the layout survives, but with a non-pixel font
+  set **Text Size: Large** for readable output. Analysis and remaining work:
+  `docs/FONT_COMPAT.md`.
 - The slot brackets' geometry is a *model* of the engine's wand-box layout (no
   Lua API exposes the real positions). It's calibrated against GUI 640×360 and
   scaled by that constant, so it holds at every GUI resolution Noita produces,

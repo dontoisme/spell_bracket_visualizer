@@ -13,9 +13,9 @@ mod_settings = {
 	{
 		id = "panel_text_size",
 		ui_name = "Wand Structure Panel: Text Size",
-		ui_description = "Text size for the wand structure panel.\nSmaller fits longer wands / more casts on screen.",
+		ui_description = "Text size for the wand structure panel.\nSmaller fits longer wands / more casts on screen.\nPick Large if you use a font mod (e.g. Better Font) or a\nlanguage with a smooth font (Japanese...): fractional sizes\nonly render crisply with the default pixel font.",
 		value_default = "small",
-		values = { { "tiny", "Tiny" }, { "small", "Small" }, { "medium", "Medium" } },
+		values = { { "tiny", "Tiny" }, { "small", "Small" }, { "medium", "Medium" }, { "large", "Large" } },
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{
