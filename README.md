@@ -116,6 +116,10 @@ python3 tools/gen_structure_meta.py
    the real `wand_structure.lua`; `python3 tools/test_wand_structure.py` runs the
    Python cross-check mirror (kept in sync; slated for retirement once the Lua
    harness is fully trusted).
+4. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
+   (`docs/FONT_COMPAT.md`) by driving the real panel layout with stubbed
+   pixel-like / zero-measuring / nil-returning fonts, then prints the in-game
+   checklist for verifying against the Better Font mod or a TTF language.
 
 Unsafe Lua APIs are not requested (`request_no_api_restrictions="0"` in `mod.xml`).
 

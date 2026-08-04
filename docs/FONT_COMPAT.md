@@ -81,6 +81,18 @@ got split mid-character, feeding `GuiText` invalid byte sequences.
    own line height from the measured font instead of a hardcoded 11, so a
    tall TTF can't overlap the very readout used to diagnose it.)
 
+## Validating the fix
+
+`lua tools/test_font_compat.lua` (any Lua 5.1+/LuaJIT) drives the **real**
+`draw_panel` and font-safety helpers with three stubbed fonts — pixel-like
+(regression guard: floors must stay inert), zero-measuring (the worst-case
+non-pixel reading; pre-fix this produced the reported 8-GUI sliver with 2-GUI
+row pitch), and nil-returning — and asserts the panel keeps a usable width,
+on-screen right-anchoring, non-overlapping rows, and valid UTF-8 in every
+drawn label. On success it prints the in-game checklist for the half a script
+can't cover (real TTF measurements, crispness of the Large size, and the
+debug-box font probe screenshot to collect from affected users).
+
 ## Status / open questions
 
 The exact numbers a TTF returns from `GuiGetTextDimensions` (and whether

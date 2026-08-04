@@ -1132,4 +1132,17 @@ function M.update()
 	end
 end
 
+-- Test-only exports for tools/test_font_compat.lua, which drives the REAL
+-- font-safety helpers and the REAL draw_panel with a stubbed Gui (the
+-- non-pixel-font collapse can't be reproduced in-game on a dev machine
+-- without the font mod). Nothing in the mod reads _test at runtime.
+M._test = {
+	utf8_chars      = utf8_chars,
+	trim_last_char  = trim_last_char,
+	text_dims       = text_dims,
+	fit_label       = fit_label,
+	draw_panel      = draw_panel,
+	PANEL_SCALE_MAP = PANEL_SCALE_MAP,
+}
+
 return M
