@@ -12,6 +12,21 @@ The one that actually costs you damage: when a cast runs past the last spell in 
 
 The wrap gets marked in orange — an orange [i]wraps to front[/i] tag on the group it happened in, orange brackets around the wrapped-in cards at the wand's start, and a carriage-return line connecting the two. The panel gets a loud [b]WRAPS! -> recharge[/b] banner on that cast.
 
+[h2]New in v1.3.1 — font compatibility[/h2]
+If you use a font mod (such as [i]Better Font (English)[/i]) or play in a language with a smooth, non-pixelated font (Chinese, Japanese, …), the wand structure panel used to render squished against the right edge of the screen with its text running off it. That's fixed.
+
+The cause: with those fonts Noita ignores the smaller text sizes when [i]drawing[/i], while still applying them when [i]measuring[/i] — so the panel was built around three times too small for the text that landed in it. The panel now detects this and sizes itself to the one setting those fonts render faithfully.
+
+[b]With one of those fonts, Text Size will stay on Large and won't change.[/b] That's deliberate, not a broken setting — it's the only size that renders correctly. On the default pixel font nothing changes at all and every size works exactly as before.
+
+Also in this update:
+[list]
+[*]A new [b]Large[/b] text size for the structure panel.
+[*]Fixed truncation of non-English spell names, which could cut a character in half and leave a garbled glyph behind.
+[*]The Debug Info box now reports what your font is doing, so one screenshot is enough to pin down a font problem.
+[/list]
+Thanks to [b]BourbonCrow[/b] and [b]shinylavawarrior[/b] for reporting this — and to BourbonCrow for spotting that a font mod was the trigger, which is what made it findable at all.
+
 [h2]New in v1.3.0 — depleted spells[/h2]
 A spell with 0 charges left can't fire: the engine discards it and draws the next card instead. So the mod now leaves depleted spells out of the structure entirely, and your wand groups — and [b]wraps[/b] — as if that slot were empty. A single spent spell can move the wrap point, which is exactly the kind of thing that's invisible mid-run.
 
@@ -21,7 +36,7 @@ One exception, on by default: the Greek spells (Alpha, Gamma, Tau, Omega, Mu, Ph
 All settings are in the mod settings menu and apply immediately, no restart:
 [list]
 [*][b]Wand Structure Panel[/b] — the text tree on/off
-[*][b]Wand Structure Panel: Text Size[/b] — Tiny / Small / Medium
+[*][b]Wand Structure Panel: Text Size[/b] — Tiny / Small / Medium / Large (forced to Large with a font mod or a non-pixel-font language, see above)
 [*][b]Slot Brackets[/b] — the in-UI rainbow brackets on/off
 [*][b]Ignore Depleted Spells[/b] — leave 0-charge spells out of the structure
 [*][b]Greek Wands: Keep Depleted Spells[/b] — the exception described above
