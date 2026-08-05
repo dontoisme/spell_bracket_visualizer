@@ -76,6 +76,20 @@ end
 local function font_nil()
 	GuiGetTextDimensions = function() return nil end
 end
+-- The REAL reported font (Better Font (English), Workshop id 2098567286),
+-- reproduced from the mod's own in-game probe: "MWli0 |[]" measures
+-- 31.5 x 12.5 at scale 1.0 but 11.1 x 5.0 at 0.6 -- ratios 0.352 / 0.400
+-- instead of 0.6. GuiText meanwhile ignores scale and draws at ~1.0, so any
+-- layout computed at a fractional scale ends up ~2.8x too small for its text.
+local function font_nonlinear()
+	GuiGetTextDimensions = function(gui, text, scale)
+		scale = scale or 1
+		-- per-char metrics at 1.0, then the measured sub-linear shrink curve
+		local w1, h1 = 3.5 * T.utf8_chars(text), 12.5
+		if scale >= 1 then return w1 * scale, h1 * scale end
+		return w1 * (scale * 0.587), h1 * (scale * 0.667)
+	end
+end
 
 -- ---- UTF-8 helpers (fit_label used to byte-trim and split Japanese glyphs) --
 
@@ -119,6 +133,30 @@ eq("fit_label passthrough when it fits", T.fit_label(nil, "short", 1, 100), "sho
 eq("PANEL_SCALE_MAP.large is 1.0 (font-mod escape hatch)", T.PANEL_SCALE_MAP.large, 1.0)
 passck("settings.lua offers the large option",
 	assert(io.open(MOD .. "/settings.lua")):read("*a"):find('"large"') ~= nil)
+
+-- ---- faithful_scale: the actual fix ----------------------------------------
+--
+-- A font that scales linearly keeps the user's chosen size; one that doesn't
+-- (GuiText would draw it at ~1.0 anyway) gets clamped to 1.0 so measuring and
+-- drawing agree. This is what stops the reported off-screen overflow.
+
+font_pixel_like()
+for _, s in ipairs({ 0.5, 0.6, 0.75 }) do
+	eq("faithful_scale keeps " .. s .. " on a linear font", T.faithful_scale(nil, s), s)
+end
+eq("faithful_scale passes 1.0 through", T.faithful_scale(nil, 1.0), 1.0)
+
+font_nonlinear()
+for _, s in ipairs({ 0.5, 0.6, 0.75 }) do
+	eq("faithful_scale clamps " .. s .. " to 1.0 on the reported font",
+		T.faithful_scale(nil, s), 1)
+end
+eq("faithful_scale leaves 1.0 alone on the reported font", T.faithful_scale(nil, 1.0), 1.0)
+
+font_zero()
+eq("faithful_scale clamps when the font measures zero", T.faithful_scale(nil, 0.6), 1)
+font_nil()
+eq("faithful_scale clamps when the font measures nil", T.faithful_scale(nil, 0.6), 1)
 
 -- ---- draw_panel under each font: the reported symptom must not reproduce ----
 --
@@ -196,6 +234,55 @@ font_pixel_like(); run_panel(0.6); panel_asserts("pixel-like font @0.6", 0.6)
 font_zero();       run_panel(0.6); panel_asserts("zero font @0.6", 0.6)
 font_nil();        run_panel(0.6); panel_asserts("nil font @0.6", 0.6)
 font_zero();       run_panel(1.0); panel_asserts("zero font @Large(1.0)", 1.0)
+font_nonlinear();  run_panel(0.6); panel_asserts("reported font @0.6", 0.6)
+
+-- ---- the reported bug itself, end to end ------------------------------------
+--
+-- Tiny/Small/Medium under the reported font used to size the panel from
+-- sub-linear measurements while GuiText painted at ~1.0: in game that produced
+-- a 63.7-GUI panel whose labels ran off the right edge of the screen. Whatever
+-- size the user picks, the panel must end up sized for the text that is
+-- actually drawn.
+
+for _, requested in ipairs({ 0.5, 0.6, 0.75 }) do
+	font_nonlinear()
+	run_panel(requested)
+	local tag = "reported font @" .. requested
+
+	-- the clamp reached GuiText, so measure-size == draw-size
+	local off = nil
+	for _, t in ipairs(drawn.texts) do
+		if t.scale ~= 1 then off = t.scale; break end
+	end
+	passck(tag .. ": text drawn at the clamped 1.0", off == nil,
+		"a row drew at scale " .. tostring(off))
+
+	-- and the box genuinely contains that 1.0-sized text
+	local widest = 0
+	for _, t in ipairs(drawn.texts) do
+		local w = (GuiGetTextDimensions(nil, t.text, 1))
+		if w > widest then widest = w end
+	end
+	passck(tag .. ": panel wide enough for the text actually drawn",
+		drawn.ninepiece.w >= widest,
+		"panel_w=" .. tostring(drawn.ninepiece.w) .. " < widest row " .. tostring(widest))
+	passck(tag .. ": nothing runs off the right screen edge",
+		drawn.ninepiece.x + drawn.ninepiece.w <= 640,
+		"bg right edge " .. tostring(drawn.ninepiece.x + drawn.ninepiece.w))
+end
+
+-- Regression guard: the vanilla pixel font must keep honouring the user's
+-- choice -- the clamp must never fire for the overwhelming majority of users.
+for _, requested in ipairs({ 0.5, 0.6, 0.75 }) do
+	font_pixel_like()
+	run_panel(requested)
+	local off = nil
+	for _, t in ipairs(drawn.texts) do
+		if t.scale ~= requested then off = t.scale; break end
+	end
+	passck("pixel-like font @" .. requested .. ": user's size preserved (no clamp)",
+		off == nil, "drew at " .. tostring(off) .. " instead of " .. requested)
+end
 
 -- ---- verdict + the half a script can't do -----------------------------------
 
@@ -206,14 +293,15 @@ All layout-math checks pass. The other half needs the real engine:
 
   IN-GAME CHECKLIST (with the Better Font (English) mod, Workshop id
   2098567286, enabled -- or the language set to Japanese):
-   1. Hold a wand, open the inventory. The structure panel should sit at the
-      right edge (by design) but be a readable box, not a squished sliver.
+   1. Hold a wand, open the inventory. At Tiny/Small/Medium the panel must now
+      auto-clamp to Large: a readable box with every label inside it, nothing
+      running off the right edge of the screen.
    2. Rows must not overlap; labels must not be garbage glyphs.
-   3. Settings -> Wand Structure Panel: Text Size -> Large. Text should be
-      crisp at every font.
-   4. Settings -> Debug Info ON: screenshot the top-right box. The "font
-      probe" line shows the raw engine measurements -- with the vanilla pixel
-      font the @0.6 numbers are ~0.6x the @1.0 numbers and none are near 0.
-      Post that screenshot on the Workshop thread to confirm the diagnosis.]])
+   3. Settings -> Debug Info ON. The "scale fidelity" line should read
+      "BROKEN, panel forced to Large" under this font -- that is the clamp
+      reporting itself, not an error.
+   4. VANILLA REGRESSION (no font mods, English): the same line must read
+      "ok, fractional sizes honoured", and Tiny/Small/Medium must still render
+      at their real sizes -- the clamp must never fire here.]])
 end
 os.exit(failures > 0 and 1 or 0)

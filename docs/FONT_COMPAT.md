@@ -11,103 +11,176 @@
 - **shinylavawarrior, Jul 24**: "I'm also having an alignment issue (it's on
   the far right of the screen)".
 
-## The common factor: a non-pixel (TrueType) UI font
+## Root cause (measured in-game, 2026-08-05)
 
-Noita's English UI uses a bitmap **pixel font**. Two things replace it with a
-smooth TrueType font:
+Under a non-pixel UI font, **fractional `scale` is broken in both directions,
+and the two directions disagree**:
 
-1. Font mods — "Better Font (English)" swaps the pixel font for a TTF.
-2. Several default localizations (Japanese, and the other "not pixelated"
-   languages) ship TTF fonts out of the box.
+- `GuiText(gui, x, y, text, scale)` **ignores `scale`** and draws at ~1.0.
+- `GuiGetTextDimensions(gui, text, scale)` shrinks **sub-linearly**.
 
-Both reported triggers are the same underlying condition: **the active UI font
-is no longer the pixel font the mod was calibrated against.** A mod's own
-`GuiText` always draws with the game's current language font — we cannot keep
-the pixel font for ourselves.
+The mod's own font probe, in game with Better Font active:
 
-## Why that produces exactly the reported symptoms
+```
+font probe "MWli0 |[]"  @1.0: 31.5 x 12.5   @0.6: 11.1 x 5.0
+```
 
-Every dimension of the structure panel flows from `GuiGetTextDimensions`
-(`draw_panel` in `files/grouping_overlay.lua`):
+A requested 0.6 returned **0.352×** the width and **0.400×** the height of the
+same font's own 1.0 reading — not 0.6×. So the panel is measured for 0.6-size
+text and then painted with 1.0-size text: roughly **2.8× too big for the box it
+was fitted into**.
 
-- row spacing: `line_h = text height + 2`
-- nesting-spine advance: width of `"| "`
-- panel width: widest measured label + padding
-- label truncation: `fit_label` measures candidate strings
+The panel is right-anchored by design (since v1.2): its right edge is pinned at
+`sw - RIGHT_MARGIN` and it grows *leftward* by its computed width. So the
+overflow does not move the panel — it runs off the right edge of the screen.
+And `line_h = text height + 2`, taken from the shrunken measured height, stacks
+the rows nearly on top of each other. "Far right", "compressed", "can barely
+read the info": all three reports, one cause.
 
-and the panel is **right-anchored by design** (since v1.2): its right edge is
-pinned at `sw - RIGHT_MARGIN` and it grows *leftward* by its computed width.
+Everything the panel lays out flows from `GuiGetTextDimensions` — row spacing,
+the `"| "` nesting-spine advance, panel width, and `fit_label` truncation — so
+the error compounds across every dimension at once.
 
-The pixel font measures exactly like it renders — every calibration in this
-mod assumed that. A TTF does not: it reports smaller metrics than the pixel
-font, and fractional scales (the panel ships at 0.6 "Small"; all three
-original sizes were 0.5/0.6/0.75) render a TTF far smaller and blurrier than
-they render the chunky pixel font. So with a non-pixel font:
+## The measurements
 
-- under-reported **widths** shrink the panel — and because it is
-  right-anchored, a too-narrow panel doesn't drift off position, it collapses
-  into a sliver **at the right screen edge** ("floating all the way to the
-  right side of screen");
-- an under-reported **height** collapses `line_h`, stacking the rows onto each
-  other ("like compressed");
-- a fractional scale on a TTF renders tiny, unhinted text ("smaller then it
-  should so can barly read the info").
+From 2000×1125 screenshots (GUI 640×360, so 3.125 px per GUI unit), Better Font
+active, same wand:
 
-A separate, unconditional bug for TTF *languages*: `fit_label` truncated
-labels **byte by byte** (`s:sub(1, #s - 1)`) on the assumption that spell
-names are ASCII. Localized names from `GameTextGet` are UTF-8 — Japanese names
-got split mid-character, feeding `GuiText` invalid byte sequences.
+| drawn at | measured | rendered | effective scale |
+|---|---|---|---|
+| debug box, `scale = 1.0` | 214.4 GUI interior | 210.2 GUI widest line | **1.003** — fits |
+| structure panel, fractional | 63.7 GUI panel (Tiny) | labels clipped off-screen | **~1.06** — scale ignored |
+
+Panel width by text size, same wand:
+
+| Text Size | panel width | outcome |
+|---|---|---|
+| Tiny (0.5) | 63.7 GUI | labels run off the right edge of the screen |
+| Large (1.0) | 142.1 GUI | every label inside the box, nothing clipped |
+
+**At 1.0 measuring and drawing agree exactly.** The debug box is the proof: it
+is measured and drawn at 1.0 and fits its own text with 4 GUI to spare, in the
+very same frame where the panel below it is unreadable. Its row pitch (45 px =
+14.4 GUI) also matches its computed `line_h` (12.5 + 2), confirming the probe's
+reported height is what the layout actually used.
 
 ## What v1.3.1 does about it
 
-1. **Metric floors** (`text_dims`): all panel sizing goes through a wrapper
-   that clamps measurements to a lower bound shaped like the pixel font's
-   smallest plausible metrics (3 GUI/char advance, 6 GUI height, × scale).
-   The floors sit below everything the vanilla pixel font actually returns,
-   so the shipped pixel-font layout is byte-identical; they only engage when
-   a font measures degenerately, and then they keep the panel wide and the
-   rows apart instead of letting the layout collapse.
-2. **"Large" text size** (scale 1.0, new setting value): 1.0 is the one scale
-   every font renders crisply. This is the recommended setting for font-mod
-   users and TTF-font languages until scale handling can be verified in-game
-   against a TTF.
-3. **UTF-8-safe truncation**: `fit_label` now counts and trims *characters*,
-   never splitting a multi-byte glyph.
-4. **Font probe in the Debug Info box**: the debug readout now prints the RAW
-   `GuiGetTextDimensions` readings of a fixed probe string at scale 1.0 and
-   0.6. With the vanilla pixel font the 0.6 numbers are ~0.6× the 1.0 numbers
-   and none are near zero. One screenshot from an affected user now
-   confirms or refutes this whole analysis. (The debug box also derives its
-   own line height from the measured font instead of a hardcoded 11, so a
-   tall TTF can't overlap the very readout used to diagnose it.)
+1. **`faithful_scale()` — the fix.** Before laying anything out, `draw_panel`
+   asks the engine to measure one probe string at 1.0 and at the requested
+   scale. If the width does not shrink by roughly the requested factor (15%
+   relative tolerance), the active font cannot do fractional scale, and the
+   panel falls back to 1.0 — the one scale where measurement and rendering
+   agree. Two extra measurements per panel draw. It reads the **raw** engine
+   call, not `text_dims`, since the floors would mask the degeneracy it is
+   testing for.
+
+   No font sniffing, so it covers font mods and TTF-font languages alike, and
+   it is a no-op on the vanilla pixel font, which scales linearly.
+
+2. **"Large" text size** (scale 1.0, new setting value). Still offered as a
+   manual choice; it is also what the clamp selects.
+
+3. **UTF-8-safe truncation.** Independent of the above: `fit_label` truncated
+   **byte by byte** (`s:sub(1, #s - 1)`) assuming ASCII spell names. Localized
+   names from `GameTextGet` are UTF-8, so Japanese names were split
+   mid-character, feeding `GuiText` invalid byte sequences. It now counts and
+   trims *characters*.
+
+4. **Font probe in the Debug Info box.** Prints the raw `GuiGetTextDimensions`
+   readings at 1.0 and 0.6, plus the derived `scale fidelity` ratio and whether
+   the clamp engaged — so one screenshot shows both the font's behaviour and
+   the mod's response to it. The debug box also derives its own line height
+   from the measured font instead of a hardcoded 11.
+
+5. **`text_dims()` floors** — retained, but **not** the fix. They are a narrow
+   guard against a font measuring 0 or nil, which would collapse the layout
+   outright. They sit below everything the vanilla pixel font returns
+   (`data/fonts/font_pixel.xml`: mean letter advance 4.94 GUI at scale 1; only
+   `i l . : ; '` are as narrow as 2), so they stay inert in the shipped
+   configuration.
+
+   An earlier revision of this document claimed the floors *were* the fix, on
+   the theory that non-pixel fonts under-measure. That theory was wrong. The
+   measurements are not degenerate — they are on a different curve than the
+   renderer, and no floor can detect that.
 
 ## Validating the fix
 
 `lua tools/test_font_compat.lua` (any Lua 5.1+/LuaJIT) drives the **real**
-`draw_panel` and font-safety helpers with three stubbed fonts — pixel-like
-(regression guard: floors must stay inert), zero-measuring (the worst-case
-non-pixel reading; pre-fix this produced the reported 8-GUI sliver with 2-GUI
-row pitch), and nil-returning — and asserts the panel keeps a usable width,
-on-screen right-anchoring, non-overlapping rows, and valid UTF-8 in every
-drawn label. On success it prints the in-game checklist for the half a script
-can't cover (real TTF measurements, crispness of the Large size, and the
-debug-box font probe screenshot to collect from affected users).
+`draw_panel` and font helpers under four stubbed fonts:
 
-## Status / open questions
+- **pixel-like** — regression guard: the user's chosen size must survive at
+  0.5/0.6/0.75, and the floors must stay inert.
+- **nonlinear** — the reported font, reproduced from the in-game probe above
+  (0.352 / 0.400 shrink instead of 0.6). Asserts the clamp fires, that every
+  row is drawn at 1.0, that the panel is wide enough for the text actually
+  drawn, and that nothing crosses the right screen edge.
+- **zero-measuring** and **nil-returning** — degenerate fonts; the floors keep
+  the panel usable.
 
-The exact numbers a TTF returns from `GuiGetTextDimensions` (and whether
-`GuiText`'s scale is applied identically for pixel and TTF fonts) have **not
-been verified in-game** — we don't run the font mod or a TTF language locally.
-The mitigation is therefore defensive: floors that cannot regress the pixel
-font path, an escape-hatch scale that every font renders well, and
-instrumentation to get ground truth from affected users.
+On success it prints the in-game checklist for the half a script can't cover.
 
-Follow-ups once a probe screenshot arrives:
+## Reference: vanilla font metrics
 
-- If the TTF readings are sane (just smaller), consider auto-detecting a
-  non-pixel font (probe reading far from the pixel font's known values) and
-  bumping the effective panel scale to 1.0 automatically.
-- Newer Noita builds accept optional `font, is_pixel_font` tail arguments on
-  `GuiText` / `GuiGetTextDimensions`; forcing the vanilla pixel font would
-  make the panel immune to font mods — but would break localized (Japanese)
-  spell names, whose glyphs the pixel font lacks. Only worth it as an opt-in.
+Read from the game's own `data/fonts/*.xml`. Noita's own non-pixel fonts measure
+**larger** than the pixel font, not smaller — which is why "a TTF under-measures"
+was never a viable theory:
+
+| font | LineHeight | mean letter width |
+|---|---|---|
+| `font_pixel.xml` (vanilla UI) | 7 | 4.94 |
+| `ubuntu_condensed_10.xml` | 11 | 6.14 |
+| `ubuntu_condensed_18.xml` | 20 | 7.37 |
+
+`GuiGetTextDimensions` returns the glyph quad height (`rect_h` = 11 for
+`font_pixel.xml`), not `LineHeight` (7).
+
+## Rejected: pinning the font explicitly
+
+Both Gui calls accept optional tail arguments:
+
+```
+GuiGetTextDimensions( gui, text, scale = 1, line_spacing = 2, font = "", font_is_pixel_font = true )
+GuiText( gui, x, y, text, scale = 1, font = "", font_is_pixel_font = true )
+```
+
+Forcing `data/fonts/font_pixel.xml` on both sides would guarantee that measuring
+and drawing agree. Rejected for two reasons:
+
+- **It would break localized spell names.** The vanilla pixel font has no
+  Japanese glyphs, so pinning it would render exactly the names the UTF-8 fix
+  exists to protect as garbage.
+- **It wouldn't fix the reported case anyway.** Font mods override
+  `data/fonts/font_pixel.xml` *in place*, so pinning that path still yields the
+  modded font. The problem was never which font is selected.
+
+## Verified in-game (2026-08-05)
+
+| configuration | probe @1.0 | probe @0.6 | fidelity | result |
+|---|---|---|---|---|
+| vanilla pixel font | 43.0 × 11.0 | 25.8 × 6.6 | **x0.60 ok** | no clamp; Medium renders at 0.75 (row pitch 10.24 GUI vs 10.25 predicted) |
+| Better Font (English) | 31.5 × 12.5 | 11.1 × 5.0 | **x0.35 BROKEN** | clamped to 1.0; 142.1-GUI panel, nothing clipped |
+| Simplified Chinese (CJK) | 31.5 × 12.5 | 11.1 × 5.0 | **x0.35 BROKEN** | clamped to 1.0; 118.4-GUI panel, right edge 635.2 GUI of 640 |
+
+The vanilla readings match `font_pixel.xml` exactly (summed `QuadChar` widths =
+43.0; `rect_h` = 11), confirming how `GuiGetTextDimensions` computes both axes.
+
+Note that Better Font and the CJK language font return **identical** probe
+numbers. The engine appears to have one non-pixel measurement path, so the
+0.35 signature is not specific to any one font — which is why a runtime check
+generalises where font sniffing would not.
+
+## Still open
+
+- **The UTF-8 truncation fix has not been exercised in-game.** Under CJK the
+  labels all fit, so `fit_label` never trimmed. The logic is covered by
+  `tools/test_font_compat.lua`, which runs the real `fit_label` over multi-byte
+  strings and asserts whole-glyph trimming and valid UTF-8 output — but no
+  screenshot has yet shown a trimmed CJK label. To force one, a wand needs deep
+  enough nesting (each `|` spine eats label budget) or a long enough localized
+  name to exceed `max_panel_w`.
+- Whether any font gets fractional scale *partly* right (e.g. honours 0.75 but
+  not 0.5). The clamp falls all the way back to 1.0 rather than searching for
+  the largest faithful scale. If a user reports Large being unnecessarily big,
+  that search is the follow-up.

@@ -743,24 +743,47 @@ local DEBUG_TEXT_Z    = -23  -- debug text + measure overlay, frontmost
 -- than it should", pushed against the right screen edge, barely readable --
 -- with the "Better Font (English)" font mod (Workshop id 2098567286) and
 -- equally with the default fonts of the non-pixelated languages (Japanese and
--- so on). The common factor is a NON-PIXEL (TrueType) UI font. Everything the
--- panel draws is sized from GuiGetTextDimensions, which we have only ever
--- calibrated against the vanilla pixel font; a TTF measures smaller (in the
--- worst case degenerate) values. The panel is right-anchored and grows
--- LEFTWARD from sw - RIGHT_MARGIN, so under-reported widths don't move it off
--- position -- they shrink it into a sliver AT the right edge, and a collapsed
--- line height stacks the rows onto each other: exactly the reported symptom.
--- Full analysis: docs/FONT_COMPAT.md.
+-- so on). The common factor is a NON-PIXEL UI font.
 --
--- Mitigation: never trust a measurement below a floor shaped like the pixel
--- font's smallest plausible metrics. The floors sit BELOW everything the
--- vanilla pixel font actually returns (narrow glyphs like "|" and "i" advance
--- ~3-4 GUI at scale 1), so they are inert in the shipped configuration and
--- only engage when a font measures degenerately. Legibility itself is the
--- "Large" text-size option's job: 1.0 is the one scale every font renders
--- crisply.
+-- ROOT CAUSE, measured in-game against Better Font (docs/FONT_COMPAT.md has the
+-- screenshots and the arithmetic): under a non-pixel font, FRACTIONAL `scale`
+-- IS BROKEN IN BOTH DIRECTIONS, and the two directions disagree --
+--
+--   * GuiText(gui, x, y, t, scale) IGNORES scale and draws at ~1.0.
+--   * GuiGetTextDimensions(gui, t, scale) shrinks SUB-LINEARLY. The mod's own
+--     font probe reports "MWli0 |[]" as 31.5 x 12.5 at scale 1.0 but only
+--     11.1 x 5.0 at scale 0.6 -- ratios of 0.352 and 0.400, not 0.6.
+--
+-- So a panel measured at 0.6 gets text painted ~2.8x too big for it. The panel
+-- is right-anchored and grows LEFTWARD from sw - RIGHT_MARGIN, so the overflow
+-- runs off the right screen edge instead of moving the panel, and line_h taken
+-- from the shrunken measured height stacks the rows together. Measured at GUI
+-- 640x360: Tiny gave a 63.7-GUI panel with labels running off-screen; Large
+-- gave 142.1 GUI with every label inside the box.
+--
+-- At scale 1.0 measurement and rendering agree exactly (the debug box is drawn
+-- at 1.0 and fits its own text to within 4 GUI), so 1.0 is the ONLY safe scale
+-- under such a font. faithful_scale() below detects the breakage from the
+-- engine's own numbers -- no font sniffing -- and clamps to 1.0.
+--
+-- The floors below are NOT the fix for that bug; they are a much narrower guard
+-- against a font that measures degenerately (0/nil), which would otherwise
+-- divide the layout by zero. They sit BELOW everything the vanilla pixel font
+-- returns (mean letter advance 4.94 GUI at scale 1; only "i l . : ; '" are as
+-- narrow as 2), so they stay inert in the shipped configuration.
 local CHAR_W_FLOOR = 3 -- GUI advance per character at scale 1, lower bound
 local CHAR_H_FLOOR = 6 -- GUI text height at scale 1, lower bound
+
+-- Mixed-width probe (wide + narrow + digit + punctuation) used to ask the
+-- engine whether it honours fractional scale. Also printed raw in the debug box.
+local SCALE_PROBE = "MWli0 |[]"
+
+-- How far the measured shrink may drift from the requested scale before we
+-- stop trusting fractional scale at all. The vanilla pixel font is a pure
+-- multiply (ratio == scale to within float noise); Better Font came in at
+-- 0.352 against a requested 0.6, i.e. 41% low. 15% relative separates them
+-- with room to spare in both directions.
+local SCALE_TOLERANCE = 0.15
 
 -- Spell names come from GameTextGet and can be UTF-8 (Japanese etc.), so #s
 -- counts bytes, not characters. Count characters = non-continuation bytes.
@@ -795,6 +818,27 @@ local function text_dims(gui, text, scale)
 	return w, h
 end
 
+-- The scale we can actually lay out at. Asks the engine to measure one probe
+-- string at 1.0 and at `scale`: if the reported width does not shrink by
+-- roughly `scale`, the active font cannot do fractional scale (GuiText will
+-- draw it at ~1.0 regardless), and every panel dimension derived at `scale`
+-- would be too small for the text that lands on screen -- so fall back to 1.0,
+-- the one scale where measuring and drawing agree. Costs two measurements per
+-- panel draw and is a no-op on the vanilla pixel font, which scales linearly.
+--
+-- Deliberately reads the RAW engine call, not text_dims: the floors would mask
+-- the very degeneracy this is testing for.
+local function faithful_scale(gui, scale)
+	scale = tonumber(scale) or 1
+	if scale >= 1 then return 1 end -- nothing to verify; 1.0 is always honoured
+	local w1 = tonumber((GuiGetTextDimensions(gui, SCALE_PROBE, 1))) or 0
+	local ws = tonumber((GuiGetTextDimensions(gui, SCALE_PROBE, scale))) or 0
+	if w1 <= 0 then return 1 end -- font measures degenerately: don't gamble
+	local ratio = ws / w1
+	if math.abs(ratio - scale) > SCALE_TOLERANCE * scale then return 1 end
+	return scale
+end
+
 -- Trim a label with a trailing "..." until it measures within max_px at `scale`.
 local function fit_label(gui, text, scale, max_px)
 	if max_px <= 0 then return "..." end
@@ -815,6 +859,11 @@ end
 -- Wet/Tinker status text, by design). Long labels are truncated to MAX_PANEL_W.
 local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	if #rows == 0 then return end
+
+	-- Under a font that ignores fractional scale this snaps to 1.0; the whole
+	-- rest of the function then measures and draws at the same size. Must come
+	-- before ANY measurement below.
+	scale = faithful_scale(gui, scale)
 
 	local pad = 4
 	-- GuiText()/GuiGetTextDimensions() both take a scale arg (verified against
@@ -941,20 +990,26 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 	else
 		lines[#lines + 1] = "wand:  (none held -- select/hold a wand)"
 	end
-	-- Font probe: the panel sizes everything from GuiGetTextDimensions, and a
-	-- non-pixel font (font mods, Japanese, ...) mis-measuring is the prime
-	-- suspect when the panel collapses (docs/FONT_COMPAT.md) -- so surface the
-	-- RAW engine readings, no floors. With the vanilla pixel font the 0.6
-	-- numbers are ~0.6x the 1.0 numbers and none of them are near zero; a
-	-- wildly different or zero reading in a screenshot confirms the font.
-	local probe = "MWli0 |[]"
+	-- Font probe: RAW engine readings, no floors. The width ratio is the whole
+	-- diagnosis (docs/FONT_COMPAT.md) -- with the vanilla pixel font it equals
+	-- the requested 0.6, so "x0.60 ok" prints; under a font that ignores
+	-- fractional scale it comes in far lower (Better Font: 0.35) and the panel
+	-- auto-clamps to 1.0, which the line reports so a screenshot shows both the
+	-- symptom and the mod's response to it.
+	local probe = SCALE_PROBE
 	local okp, pw1, ph1 = pcall(GuiGetTextDimensions, gui, probe, 1)
 	local okq, pw6, ph6 = pcall(GuiGetTextDimensions, gui, probe, 0.6)
+	local w1, w6 = okp and tonumber(pw1) or -1, okq and tonumber(pw6) or -1
+	local ratio = (w1 > 0 and w6 >= 0) and (w6 / w1) or -1
 	lines[#lines + 1] = string.format(
 		"font probe \"%s\"  @1.0: %.1f x %.1f   @0.6: %.1f x %.1f",
-		probe,
-		okp and tonumber(pw1) or -1, okp and tonumber(ph1) or -1,
-		okq and tonumber(pw6) or -1, okq and tonumber(ph6) or -1)
+		probe, w1, okp and tonumber(ph1) or -1, w6, okq and tonumber(ph6) or -1)
+	lines[#lines + 1] = string.format(
+		"  scale fidelity x%.2f (want 0.60) -- %s",
+		ratio,
+		(ratio > 0 and math.abs(ratio - 0.6) <= SCALE_TOLERANCE * 0.6)
+			and "ok, fractional sizes honoured"
+			or "BROKEN, panel forced to Large")
 	lines[#lines + 1] = "Reporting a bug? Screenshot this with the wand open."
 	lines[#lines + 1] = "Measure: middle-click two points (e.g. slot corners)."
 
@@ -1140,6 +1195,7 @@ M._test = {
 	utf8_chars      = utf8_chars,
 	trim_last_char  = trim_last_char,
 	text_dims       = text_dims,
+	faithful_scale  = faithful_scale,
 	fit_label       = fit_label,
 	draw_panel      = draw_panel,
 	PANEL_SCALE_MAP = PANEL_SCALE_MAP,
