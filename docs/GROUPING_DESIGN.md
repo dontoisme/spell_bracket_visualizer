@@ -100,6 +100,16 @@ so one group read as two sibling groups at the wrong nesting depth.
 Glyph planning (columns, rows, colours and the per-`(row, column, side)`
 stacking that keeps co-located brackets from overprinting) is pure and lives in
 `plan_delims`; `tools/test_slot_delims.lua` drives it with no game APIs.
+
+**Stacking has to be drawn as well as planned.** A bracket's hooks grow with its
+stack level (`TICK_W + stack*STACK_X`) so an outer bracket reaches past
+everything nested inside it; with a fixed hook shorter than `STACK_X` the outer
+hooks landed on the inner bar and were overpainted by it, leaving the outer
+rendered as a bare vertical line. A cut end's tick points the other way —
+outward, across every level stacked outside it — and they all sat at mid
+height, fusing into one long line through the stack, so the tick steps up with
+the stack level instead. Both were invisible while only closing brackets ever
+shared a card edge; opens and cut ends made co-location the common case.
 Validated by `tools/test_wand_structure.lua` (runs the real simulator under Lua)
 with `tools/test_wand_structure.py` as a line-for-line Python cross-check mirror,
 over hand-traced wands: cast splitting,

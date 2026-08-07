@@ -336,10 +336,23 @@ local BOX = {
 	row_step = 13,    -- units: vertical step between slot rows (unverified)
 }
 local BAR_W   = 1   -- GUI width of a bracket's vertical bar
-local TICK_W  = 3   -- GUI length of the top/bottom hooks
-local STACK_X = 1.5 -- horizontal step between closing brackets stacked on one card
-local STACK_Y = 1   -- vertical growth per stack level: outer brackets are taller,
-                    -- so their hooks wrap around the inner bracket's
+local TICK_W  = 3   -- GUI length of the top/bottom hooks at stack level 0
+local STACK_X = 2   -- horizontal step between brackets stacked on one card edge
+local STACK_Y = 2   -- vertical growth per stack level: outer brackets are taller,
+                    -- so their hooks clear the inner bracket's
+-- Stacked brackets used to fuse into one unreadable blob (reported 2026-08-07,
+-- "the brackets aren't brackets"). Two causes, both fixed here:
+--   * STACK_X (1.5) was SHORTER than TICK_W (3), so an outer bracket's hooks
+--     were drawn straight across the bar of the bracket nested inside it --
+--     and since the inner is drawn last, it painted over them. The outer then
+--     rendered as a bare vertical line. Hooks now grow with the stack level
+--     (TICK_W + stack*STACK_X) so every level's hooks reach the card edge and
+--     stay visible as a nested staircase.
+--   * STACK_Y (1) left one pixel between neighbouring levels' hooks, which
+--     read as a single thick hook. 2 gives a clear gap.
+-- The old values were tuned when only CLOSING brackets stacked and co-location
+-- was rare; opens stack now too, and a wrapping group puts up to four glyphs on
+-- one card edge, so the pile-up became the common case.
 -- With the corrected 64px pitch the cell edges (center +- halfw) already sit
 -- ~2px outside the visible frame, so no extra nudges are needed.
 local CLOSE_NUDGE = 0 -- extra left shift of closing brackets
@@ -366,12 +379,16 @@ local function line(gui, id, x, y, w, h, c, a)
 end
 
 -- One [ or ] glyph: vertical bar from top..bot plus two hooks pointing into
--- the group (dir = 1 for an opening [, -1 for a closing ]).
-local function bracket(gui, idc, x, top, bot, dir, c)
+-- the group (dir = 1 for an opening [, -1 for a closing ]). `tw` is the hook
+-- length -- it grows with the stack level so an outer bracket's hooks reach
+-- past the brackets nested inside it instead of stopping short and being
+-- overpainted by them (see the STACK_X note).
+local function bracket(gui, idc, x, top, bot, dir, c, stack)
+	local tw = TICK_W + (stack or 0) * STACK_X
 	idc.n = idc.n + 1; line(gui, 70000 + idc.n, x, top, BAR_W, bot - top, c)
-	local tx = (dir > 0) and x or (x - TICK_W + BAR_W)
-	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx, top, TICK_W, 1, c)
-	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx, bot - 1, TICK_W, 1, c)
+	local tx = (dir > 0) and x or (x - tw + BAR_W)
+	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx, top, tw, 1, c)
+	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx, bot - 1, tw, 1, c)
 end
 
 -- A CUT END: where a group that straddles the wand wrap is sliced, on both
@@ -380,11 +397,17 @@ end
 -- pointing outward just read as a [ or ] facing the wrong way, which is the
 -- ambiguity this glyph exists to avoid. The orange carriage return leaves from
 -- the bar's bottom.
-local function cut_end(gui, idc, x, top, bot, dir, c)
+-- Unlike a bracket's, a cut end's tick points OUTWARD -- across the bars of
+-- every level stacked outside it -- and all of them sit at mid height, so
+-- co-located cut ends used to fuse into one long horizontal line through the
+-- whole stack (the H-shaped blob in the 2026-08-07 report). The tick therefore
+-- steps UP with the stack level, giving each its own row.
+local function cut_end(gui, idc, x, top, bot, dir, c, stack)
+	stack = stack or 0
 	idc.n = idc.n + 1; line(gui, 70000 + idc.n, x, top, BAR_W, bot - top, c)
 	local tx = (dir > 0) and x or (x - TICK_W + BAR_W)
-	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx, math.floor((top + bot) / 2),
-		TICK_W, 1, c)
+	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx,
+		math.floor((top + bot) / 2) - stack * STACK_Y, TICK_W, 1, c)
 end
 
 -- Collect one wand's group delimiters (all casts) for two-pass rendering.
@@ -581,7 +604,9 @@ local function plan_delims(groups)
 	return glyphs, links
 end
 
-local function draw_delims(gui, groups, refw, rows_geo, idc)
+-- box_right = the wand box's right edge (GUI), used only to keep the
+-- "wraps to front" label inside the box.
+local function draw_delims(gui, groups, refw, rows_geo, idc, box_right)
 	local glyphs, links = plan_delims(groups)
 
 	for _, gl in ipairs(glyphs) do
@@ -603,9 +628,9 @@ local function draw_delims(gui, groups, refw, rows_geo, idc)
 		-- the group carries on past this card
 		local into = (gl.side == "left") and 1 or -1
 		if gl.cut then
-			cut_end(gui, idc, gl.x, gl.top, gl.bot, -into, gl.c)
+			cut_end(gui, idc, gl.x, gl.top, gl.bot, -into, gl.c, gl.stack)
 		else
-			bracket(gui, idc, gl.x, gl.top, gl.bot, into, gl.c)
+			bracket(gui, idc, gl.x, gl.top, gl.bot, into, gl.c, gl.stack)
 		end
 	end
 
@@ -623,9 +648,25 @@ local function draw_delims(gui, groups, refw, rows_geo, idc)
 		-- (not "~wrap": Noita's font renders ~ as a double quote). It sits at
 		-- the return line's OUTER end, past the forward cut end -- it used to
 		-- sit above the opening bracket, where it printed straight over the
-		-- box's own "Spells/Cast" header (2026-08-07).
+		-- box's own "Spells/Cast" header (2026-08-07). Slid left when it would
+		-- otherwise run off the box's right edge onto the game world, which is
+		-- what happens whenever the wrap ends near the wand's last slot.
+		local label = "wraps to front"
+		local lx2 = a.x + TICK_W + 2
+		if box_right then
+			-- raw engine call, not text_dims: that lives further down the file
+			-- with the panel's font-safety helpers. A font that measures
+			-- degenerately (see docs/FONT_COMPAT.md) falls back to an estimate
+			-- rather than clamping the label to the box's left edge.
+			local ok, tw = pcall(GuiGetTextDimensions, gui, label, 1)
+			tw = (ok and tonumber(tw)) or 0
+			if tw <= 0 then tw = 5 * #label end
+			local limit = box_right - tw - 2
+			if lx2 > limit then lx2 = limit end
+			if lx2 < 2 then lx2 = 2 end
+		end
 		GuiColorSetForNextWidget(gui, WRAP_COLOR[1], WRAP_COLOR[2], WRAP_COLOR[3], 1)
-		GuiText(gui, a.x + TICK_W + 2, ry - 5, "wraps to front")
+		GuiText(gui, lx2, ry - 5, label)
 	end
 end
 
@@ -842,7 +883,7 @@ local function draw_box_brackets(gui, refw, wands, show_probe)
 				rows[k] = math.floor(x / wd.per_row)
 			end
 			draw_delims(gui, collect_wand_delims(wd.sim, cols, rows),
-				refw, wd.rows_geo, idc)
+				refw, wd.rows_geo, idc, wd.right)
 		end
 	end
 end
