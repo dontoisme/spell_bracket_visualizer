@@ -397,18 +397,15 @@ end
 -- pointing outward just read as a [ or ] facing the wrong way, which is the
 -- ambiguity this glyph exists to avoid. The orange carriage return leaves from
 -- the bar's bottom.
--- Unlike a bracket's, a cut end's tick points OUTWARD -- across the bars of
--- every level stacked outside it -- and all of them sit at mid height, so
--- co-located cut ends used to fuse into one long horizontal line through the
--- whole stack (the H-shaped blob in the 2026-08-07 report). The tick therefore
--- steps UP with the stack level, giving each its own row.
-local function cut_end(gui, idc, x, top, bot, dir, c, stack)
-	stack = stack or 0
-	idc.n = idc.n + 1; line(gui, 70000 + idc.n, x, top, BAR_W, bot - top, c)
-	local tx = (dir > 0) and x or (x - TICK_W + BAR_W)
-	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx,
-		math.floor((top + bot) / 2) - stack * STACK_Y, TICK_W, 1, c)
-end
+-- EVERY delimiter is a real bracket -- there is no special seam glyph
+-- (2026-08-07, third iteration). A straddling group's two halves each get a
+-- proper [ ] pair in the group's own colour, and the orange carriage return is
+-- what says they are one group. The seam was tried as a distinct glyph twice
+-- and rejected both times: hooks pointing outward just read as a [ or ] facing
+-- the wrong way, and a bar with a single outward tick "doesn't look like
+-- brackets" -- two of them side by side read as an H, not a delimiter. The
+-- brief was Lisp-style rainbow brackets; colour carries nesting, the return
+-- line carries the wrap, and every glyph on the row is a bracket.
 
 -- Collect one wand's group delimiters (all casts) for two-pass rendering.
 -- Two passes because co-located brackets need the per-column TOTAL before any
@@ -548,38 +545,39 @@ end
 --
 -- Turn the collected groups into a flat list of bracket GLYPHS plus the wrap
 -- connectors that join a straddling group's two halves. Each glyph is
---   { col, row, side = "left"|"right", cut = true?, c = color, stack = N }
+--   { col, row, side = "left"|"right", seam = true?, c = color, stack = N }
 -- and each connector is { from = <glyph i>, to = <glyph i> }.
+-- `seam` marks the two glyphs a wrap's carriage return attaches to. It no
+-- longer changes how the glyph is DRAWN (every delimiter is a plain bracket);
+-- it stays because it is what the connector and the tests identify.
 --
 -- ONE GROUP IS ONE BRACKET PAIR, always in that group's rainbow color. A group
--- that straddles the wand wrap gets FOUR glyphs rather than two pairs (the bug
--- fixed 2026-08-07: the wrapped half used to be its own closed orange [ ] pair,
--- so a single group read as two sibling groups and the Lisp nesting broke):
+-- that straddles the wand wrap gets FOUR glyphs -- a [ ] pair on each half, in
+-- the GROUP'S OWN colour, joined by the orange carriage return:
 --
 --     slot1        slot2  slot3  slot4
---    -|Luminous]   [Double Heavy Spark|-
+--     [Luminous]   [Double Heavy Spark]
 --     +-------------------------------+     <- orange carriage return
---      ^cut end                 cut end^
 --
---   * the real [ at the group's head card,
---   * a CUT END at the forward span's last card (see cut_end: a bar ticking
---     OUTWARD, reading "carries on that way" rather than "ends here"),
---   * the mirrored CUT END at the wrapped segment's first card, and
---   * the real ] at the wrapped segment's last card.
+--   * [ and ] around the wrapped segment at the wand's start, and
+--   * [ and ] around the forward span, from the group's head card on.
+-- The seam glyphs the first two attempts used are gone (see bracket): what was
+-- wrong in the original bug was that the wrapped half was drawn in ORANGE, so
+-- it read as an unrelated group. Same colour + the return line is enough.
 -- Orange is reserved for the connector and its label: orange marks the WRAP,
 -- the rainbow marks the GROUP.
 --
 -- Stacking runs per (row, column, side) so co-located glyphs never overprint:
 -- the outermost steps furthest from the card and grows tallest, its hooks
 -- wrapping around the inner ones. Both sides stack -- opens used not to, which
--- let a wrapped half's cut end land exactly on top of a group opening on the
+-- let a wrapped half's bracket land exactly on top of a group opening on the
 -- same column. collect_delims emits parents before children, so collection
 -- order is outer -> inner.
 local function plan_delims(groups)
 	local glyphs, links = {}, {}
-	local function add(col, row, side, cut, c)
+	local function add(col, row, side, seam, c)
 		glyphs[#glyphs + 1] = { col = col, row = row, side = side,
-			cut = cut or nil, c = c, stack = 0 }
+			seam = seam or nil, c = c, stack = 0 }
 		return #glyphs
 	end
 	for _, g in ipairs(groups) do
@@ -624,14 +622,9 @@ local function draw_delims(gui, groups, refw, rows_geo, idc, box_right)
 		end
 		gl.top = yr.top - grow - BRACKET_RAISE - BRACKET_EXTEND_TOP
 		gl.bot = yr.bot + grow - BRACKET_RAISE + BRACKET_EXTEND_BOT
-		-- a real bracket hooks INTO the group; a cut end ticks OUTWARD, the way
-		-- the group carries on past this card
+		-- hooks always point INTO the half they delimit, seam or not
 		local into = (gl.side == "left") and 1 or -1
-		if gl.cut then
-			cut_end(gui, idc, gl.x, gl.top, gl.bot, -into, gl.c, gl.stack)
-		else
-			bracket(gui, idc, gl.x, gl.top, gl.bot, into, gl.c, gl.stack)
-		end
+		bracket(gui, idc, gl.x, gl.top, gl.bot, into, gl.c, gl.stack)
 	end
 
 	-- The carriage return: drop from the forward cut end, run back to the

@@ -81,15 +81,19 @@ slot, so colours don't shift when a cast gains or loses a spell. The one
 exception is a lone spell that wraps with nothing bracketed inside it, where the
 cast bracket is the only thing left to carry the carriage return.
 
-**One group is one bracket pair, in one colour.** A group that straddles the
-wrap is drawn as four glyphs, not two pairs: the real `[` on its head card, a
-**cut end** at the forward span's last card, the mirrored cut end at the
-wrapped segment's first card, and the real `]` at the wrapped segment's last
-card — all in that group's rainbow colour. A cut end is a bar with a single
-mid-height tick pointing *outward* ("carries on that way"); it is deliberately
-not bracket-shaped, since two outward hooks just read as a `[`/`]` facing the
-wrong way. `WRAP_COLOR` orange is reserved for the carriage return and its
-`wraps to front` label: **orange marks the wrap, the rainbow marks the group.**
+**One group is one colour, and every delimiter is a real bracket.** A group that
+straddles the wrap is drawn as four glyphs — a `[ ]` pair around its forward
+span and another around its wrapped segment — all in that group's rainbow
+colour, joined by the carriage return. `WRAP_COLOR` orange is reserved for that
+return line and its `wraps to front` label: **orange marks the wrap, the rainbow
+marks the group.** What was actually wrong in the original bug was the
+*colour*, not the closed pair: an orange wrapped half read as an unrelated
+group. Two attempts at a distinct seam glyph were both rejected in play —
+hooks pointing outward read as a `[`/`]` facing the wrong way, and a bar with a
+single outward tick "doesn't look like brackets" (two side by side read as an
+H). Colour carries nesting, the return line carries the wrap, and every glyph
+on the row is a bracket. The two glyphs the return attaches to are flagged
+`seam` in the plan, purely so the connector and the tests can find them.
 Ancestors of a straddling group straddle too — including the containing cast —
 and are drawn split as well, nesting around it, but only the innermost draws
 the carriage return. A wrap inside a bare modifier chain builds no bracketed
@@ -105,11 +109,11 @@ stacking that keeps co-located brackets from overprinting) is pure and lives in
 stack level (`TICK_W + stack*STACK_X`) so an outer bracket reaches past
 everything nested inside it; with a fixed hook shorter than `STACK_X` the outer
 hooks landed on the inner bar and were overpainted by it, leaving the outer
-rendered as a bare vertical line. A cut end's tick points the other way —
-outward, across every level stacked outside it — and they all sat at mid
-height, fusing into one long line through the stack, so the tick steps up with
-the stack level instead. Both were invisible while only closing brackets ever
-shared a card edge; opens and cut ends made co-location the common case.
+rendered as a bare vertical line — the whole reason the brackets "aren't
+brackets". It was invisible while only closing brackets ever shared a card
+edge; opens and wrapped halves made co-location the common case. `STACK_Y` is 2
+for the same reason: at 1px apart, two neighbouring levels' hooks read as one
+thick hook.
 Validated by `tools/test_wand_structure.lua` (runs the real simulator under Lua)
 with `tools/test_wand_structure.py` as a line-for-line Python cross-check mirror,
 over hand-traced wands: cast splitting,

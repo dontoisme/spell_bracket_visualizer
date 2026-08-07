@@ -11,10 +11,13 @@
 -- still eyeball-verified from a screenshot; see docs/GROUPING_DESIGN.md.
 --
 -- The invariant these tests exist to protect (regression 2026-08-07): ONE
--- GROUP IS ONE BRACKET PAIR IN ONE COLOR. A group straddling a wand wrap is
--- drawn as four glyphs -- real [ , cut end, cut end, real ] -- not as two
--- self-closed pairs, and never in WRAP_COLOR (orange belongs to the carriage
--- return alone).
+-- GROUP IS ONE COLOR, and every delimiter is a real bracket. A group straddling
+-- a wand wrap is drawn as four glyphs -- a [ ] pair around each half, all in
+-- the group's own rainbow color, joined by the orange carriage return. It is
+-- never drawn in WRAP_COLOR: orange belongs to the carriage return alone, and
+-- painting the wrapped half orange is what made one group read as two.
+-- The two glyphs the return attaches to are flagged `seam`; they are drawn
+-- exactly like any other bracket.
 
 local here = arg[0]:match("^(.*)[/\\]") or "."
 local MOD = here .. "/.."
@@ -68,13 +71,15 @@ local function plan(tokens, spc, cols, rows)
 	return glyphs, links, groups, sim
 end
 
--- "L2 R3c L0c R0" -- compact glyph rendering: side + column, "c" = cut end,
--- "^N" = stack level (omitted at 0, the innermost/on-the-card position).
+-- "L2 R3c L0c R0" -- compact glyph rendering: side + column, "c" = a seam of a
+-- wrapped group (where the carriage return attaches; drawn as a plain bracket
+-- like every other glyph), "^N" = stack level (omitted at 0, the
+-- innermost/on-the-card position).
 local function show(glyphs)
 	local out = {}
 	for _, gl in ipairs(glyphs) do
 		out[#out + 1] = ((gl.side == "left") and "L" or "R") .. gl.col
-			.. (gl.cut and "c" or "")
+			.. (gl.seam and "c" or "")
 			.. ((gl.stack > 0) and ("^" .. gl.stack) or "")
 	end
 	return table.concat(out, " ")
@@ -97,7 +102,7 @@ end
 -- LUMINOUS_DRILL / BURST_2 / HEAVY_SPREAD / SPARK_BOLT at 1 spell/cast.
 -- cast 2 draws Double Spell (slot 2), gathers [Heavy spread] Spark bolt
 -- (slots 3-4), then runs out of deck and WRAPS back to Luminous drill (slot 1).
--- The Double Spell group straddles: [ on slot 2, cut end on slot 4, cut end on
+-- The Double Spell group straddles: [ on slot 2, seam bracket on slot 4, seam bracket on
 -- slot 1, ] on slot 1. Before the fix this was a gold [2..4] pair PLUS a
 -- self-closed orange [1] pair, which read as two sibling groups.
 -- Both casts fire a SINGLE spell expression, so neither is bracketed (nothing
@@ -111,8 +116,8 @@ do
 	eq("report/neither cast is bracketed", #groups, 1)
 	eq("report/glyphs", show(glyphs), "L1 R3c L0c R0")
 	eq("report/one carriage return", #links, 1)
-	eq("report/return leaves the forward cut end", links[1] and links[1].from, 2)
-	eq("report/return arrives at the wrapped cut end", links[1] and links[1].to, 3)
+	eq("report/return leaves the forward seam bracket", links[1] and links[1].from, 2)
+	eq("report/return arrives at the wrapped seam bracket", links[1] and links[1].to, 3)
 	passck("report/one group one color",
 		same_color(glyphs[1].c, glyphs[2].c) and same_color(glyphs[2].c, glyphs[3].c)
 			and same_color(glyphs[3].c, glyphs[4].c))
@@ -149,7 +154,7 @@ do
 	eq("wand12/cast 4 span", span(4), "10..12 w1..8") -- wraps into the wand's start
 	eq("wand12/four casts + one Pentagram group", #groups, 5)
 	-- cast 1's [ on column 0 stacks OUTSIDE cast 4's and the Pentagram's wrapped
-	-- cut ends, which land on the same column; the wrapped halves close for real
+	-- seam brackets, which land on the same column; the wrapped halves close for real
 	-- on column 7 (slot 8), the last card the wrap pulled in.
 	eq("wand12/glyphs", show(glyphs),
 		"L0^2 R1 L2 R5 L6 R8 L9 R11c^1 L0c^1 R7^1 L11 R11c L0c R7")
@@ -162,7 +167,7 @@ do
 		same_color(groups[5].c, T.nest_color(4)))
 end
 
--- ---- 2. single cast, no wrap: plain nested pairs, no cut ends ---------------
+-- ---- 2. single cast, no wrap: plain nested pairs, no seam brackets ---------------
 --
 -- BURST_3 gathers a trigger that carries one payload spell: two nested groups,
 -- both ending on the last card, so their closes stack (outer steps right).
@@ -177,7 +182,7 @@ do
 	eq("plain/no cast bracket", #groups, 2)
 	eq("plain/no carriage returns", #links, 0)
 	eq("plain/glyphs", show(glyphs), "L0 R3^1 L2 R3")
-	passck("plain/no cut ends", not (glyphs[2].cut or glyphs[4].cut))
+	passck("plain/no seam brackets", not (glyphs[2].seam or glyphs[4].seam))
 	passck("plain/outer and inner differ in color",
 		not same_color(glyphs[1].c, glyphs[3].c))
 	passck("plain/outer stays at depth 0", same_color(glyphs[1].c, T.nest_color(0)))
@@ -203,7 +208,7 @@ do
 		links[1] and links[1].from == 6 and links[1].to == 7,
 		links[1] and (links[1].from .. "->" .. links[1].to) or "none")
 	passck("nested/the OUTER group straddles too, and is drawn split",
-		glyphs[2].cut and glyphs[3].cut)
+		glyphs[2].seam and glyphs[3].seam)
 	passck("nested/brackets are rainbow, not orange", no_orange(glyphs))
 end
 
@@ -214,7 +219,7 @@ end
 -- card was drawn AFTER the wrap (hwrap). That inner group sits wholly in the
 -- wrapped segment, so it straddles nothing and closes normally on slot 3.
 -- Its opening [ lands on column 0 -- the same left-side position as the outer
--- group's wrapped cut end AND as cast 1's own Double Spell (all casts are
+-- group's wrapped seam bracket AND as cast 1's own Double Spell (all casts are
 -- delimited on the one slot row). That is a THREE-way overprint on column 0,
 -- exactly what the per-side stacking prevents; opens never stacked at all
 -- before the fix, so all three drew on the same pixel column.
@@ -231,7 +236,7 @@ do
 	passck("fully/the outer group owns it (its child straddles nothing)",
 		links[1] and links[1].from == 4 and links[1].to == 5,
 		links[1] and (links[1].from .. "->" .. links[1].to) or "none")
-	passck("fully/inner has no cut ends", not (glyphs[7].cut or glyphs[8].cut))
+	passck("fully/inner has no seam brackets", not (glyphs[7].seam or glyphs[8].seam))
 	local st = {}
 	for _, gl in ipairs(glyphs) do
 		if gl.side == "left" and gl.col == 0 then st[#st + 1] = gl.stack end
@@ -270,7 +275,7 @@ do
 	eq("bare/only the wrapping cast survives", #groups, 1)
 	eq("bare/glyphs", show(glyphs), "L1 R1c L0c R0")
 	eq("bare/the cast draws the carriage return", #links, 1)
-	passck("bare/from the cast's own cut ends",
+	passck("bare/from the cast's own seam brackets",
 		links[1] and links[1].from == 2 and links[1].to == 3,
 		links[1] and (links[1].from .. "->" .. links[1].to) or "none")
 end
