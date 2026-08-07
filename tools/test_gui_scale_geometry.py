@@ -125,8 +125,10 @@ def main():
 
     ev = Evaluator(collect_locals(src))
 
+    # draw_delims computes both the left- and right-side glyph x from the same
+    # scale factor; the first match (the left/opening side) is the one asserted.
     h_scale = extract_scale(
-        src, r"\blx\s*=\s*(\([^()]*\)|[A-Za-z_]\w*)\s*\*\s*\(BOX\.slot0_x", "horizontal")
+        src, r"\bgl\.x\s*=\s*(\([^()]*\)|[A-Za-z_]\w*)\s*\*\s*\(BOX\.slot0_x", "horizontal")
     v_scale = extract_scale(
         src, r"box_top\s*\*\s*U\s*\*\s*(\([^()]*\)|[A-Za-z_]\w*)", "vertical")
     print("live horizontal scale factor: %s" % h_scale)

@@ -23,7 +23,11 @@
 --         meta   = the table from files/structure_meta.lua
 --         opts   = { spells_per_cast = N } (nil -> whole deck as one cast)
 -- Output of M.simulate:
---   { casts = { { nodes = {...}, wrapped = bool }, ... }, wrapped = bool }
+--   { casts = { { nodes = {...}, wrapped = bool,
+--                 first, last, wfirst, wlast }, ... }, wrapped = bool }
+-- A cast's first/last/wfirst/wlast are its own slot span, split the same way a
+-- node's is (forward run, then the wrapped-in run at the wand's start), so a
+-- renderer can delimit the cast itself -- the cards that fire SIMULTANEOUSLY.
 -- Node shapes (first/last = min/max 1-based slot index the expression touched,
 -- including wrapped-in cards, so a wrapping node's span reaches back to the
 -- wand's start; head = the node's OWN card's index, i.e. the span excluding
@@ -40,6 +44,10 @@
 -- (the wrapped-in segment at the wand's start), so renderers can show the
 -- group as forward-span + return + wrapped-span. node.last stays the max
 -- FORWARD index in practice, since wrapped indices precede the head.
+-- hwrap=true marks a node whose OWN card was drawn after the wrap: the group
+-- lies ENTIRELY in the wrapped-in segment and does not straddle the wand's
+-- end, so it must not be drawn as a split forward+wrapped pair (wrap without
+-- hwrap = straddling; wrap with hwrap = fully wrapped).
 
 local M = {}
 
@@ -153,6 +161,12 @@ function M.simulate(tokens, meta, opts)
 
 		note(card)
 		local node = { id = card.id, atype = m.type, modifiers = mods, head = card.i }
+		-- The node's OWN card came from after the wrap, i.e. the whole group
+		-- lives in the wrapped-in segment rather than straddling the wand's
+		-- end. Renderers need the distinction: a straddling group must be drawn
+		-- as one split pair (forward half + wrapped half), a fully-wrapped one
+		-- is an ordinary group that merely happens to sit past a wrap.
+		if card.w then node.hwrap = true end
 
 		if is_multicast(m) then
 			node.kind = "multicast"
@@ -201,7 +215,23 @@ function M.simulate(tokens, meta, opts)
 		wrapped_now = false
 		local nodes = parse_seq(spc, false)
 		local wrapped = wrap_count > wraps_before
-		casts[#casts + 1] = { nodes = nodes, wrapped = wrapped }
+		-- The CAST's own slot span, straight off the hand (every card this cast
+		-- drew, tagged .w at draw time if it came after a wrap). Taken here
+		-- rather than folded out of the node spans because a node's first/last
+		-- reach back into the wrapped-in segment, which would smear a wrapping
+		-- cast's forward span across the whole wand. Same forward/wrapped split
+		-- as a node: first/last forward, wfirst/wlast for the wrapped-in run.
+		local cast = { nodes = nodes, wrapped = wrapped }
+		for _, cd in ipairs(hand) do
+			if cd.w then
+				if cast.wfirst == nil or cd.i < cast.wfirst then cast.wfirst = cd.i end
+				if cast.wlast == nil or cd.i > cast.wlast then cast.wlast = cd.i end
+			else
+				if cast.first == nil or cd.i < cast.first then cast.first = cd.i end
+				if cast.last == nil or cd.i > cast.last then cast.last = cd.i end
+			end
+		end
+		casts[#casts + 1] = cast
 		for _, cd in ipairs(hand) do discard[#discard + 1] = cd end
 		hand = {}
 		if wrapped then

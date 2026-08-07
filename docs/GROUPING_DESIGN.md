@@ -57,7 +57,49 @@ node parsed across a wrap (the wrapping group *and* the wrapped-in cards),
 `head` = the node's own card (the span excluding its leading-modifier prefix —
 Lisp-wise modifiers sit outside the parens), and `wfirst`/`wlast` = the span
 of cards drawn *after* the wrap (tagged at draw time), which renderers use to
-show forward-segment + carriage-return + wrapped-segment.
+show forward-segment + carriage-return + wrapped-segment. `hwrap` marks a node
+whose *own* card was drawn after the wrap — the group lies **entirely** in the
+wrapped-in segment and straddles nothing, so it must not be drawn split.
+
+**Casts are delimited too**, one level outside the spell groups they contain,
+whenever the wand has more than one cast or wraps (the same rule the panel uses
+for its cast headers). `simulate` gives each cast its own `first`/`last` —
+and `wfirst`/`wlast` if it wrapped — taken straight off the hand rather than
+folded out of the node spans, since a node's `first` reaches back into the
+wrapped-in segment and would smear a wrapping cast across the whole wand.
+The rainbow is **one continuous progression across both axes**: each cast
+advances it by one and so does each nesting level inside a group, so cast `ci`
+sits at depth `ci-1` and its groups start at depth `ci`. A single-cast wand
+gets no cast bracket and keeps its groups at depth 0, so it renders exactly as
+it did before casts were delimited.
+
+**A cast that fires one spell expression is not bracketed** (user call
+2026-08-07): there is no simultaneity to show, so the pair is pure ink — and on
+a cast whose single spell *is* a group, the two spans were identical, drawing
+one boundary twice in two colours. A suppressed cast still consumes its rainbow
+slot, so colours don't shift when a cast gains or loses a spell. The one
+exception is a lone spell that wraps with nothing bracketed inside it, where the
+cast bracket is the only thing left to carry the carriage return.
+
+**One group is one bracket pair, in one colour.** A group that straddles the
+wrap is drawn as four glyphs, not two pairs: the real `[` on its head card, a
+**cut end** at the forward span's last card, the mirrored cut end at the
+wrapped segment's first card, and the real `]` at the wrapped segment's last
+card — all in that group's rainbow colour. A cut end is a bar with a single
+mid-height tick pointing *outward* ("carries on that way"); it is deliberately
+not bracket-shaped, since two outward hooks just read as a `[`/`]` facing the
+wrong way. `WRAP_COLOR` orange is reserved for the carriage return and its
+`wraps to front` label: **orange marks the wrap, the rainbow marks the group.**
+Ancestors of a straddling group straddle too — including the containing cast —
+and are drawn split as well, nesting around it, but only the innermost draws
+the carriage return. A wrap inside a bare modifier chain builds no bracketed
+group at all, so there the cast bracket takes it (before, such a wrap drew no
+slot-row apparatus whatsoever).
+Until 2026-08-07 the wrapped half was its own self-closed *orange* `[ ]` pair,
+so one group read as two sibling groups at the wrong nesting depth.
+Glyph planning (columns, rows, colours and the per-`(row, column, side)`
+stacking that keeps co-located brackets from overprinting) is pure and lives in
+`plan_delims`; `tools/test_slot_delims.lua` drives it with no game APIs.
 Validated by `tools/test_wand_structure.lua` (runs the real simulator under Lua)
 with `tools/test_wand_structure.py` as a line-for-line Python cross-check mirror,
 over hand-traced wands: cast splitting,

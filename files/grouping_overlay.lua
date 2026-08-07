@@ -21,7 +21,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.3.1"
+local VERSION = "v1.3.2"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 -- "large" (1.0) exists for non-pixel fonts: fractional scales only render
@@ -374,17 +374,35 @@ local function bracket(gui, idc, x, top, bot, dir, c)
 	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx, bot - 1, TICK_W, 1, c)
 end
 
+-- A CUT END: where a group that straddles the wand wrap is sliced, on both
+-- halves. The bar plus ONE tick at mid height pointing outward (dir = the way
+-- the group carries on). Deliberately not bracket-shaped: two end hooks
+-- pointing outward just read as a [ or ] facing the wrong way, which is the
+-- ambiguity this glyph exists to avoid. The orange carriage return leaves from
+-- the bar's bottom.
+local function cut_end(gui, idc, x, top, bot, dir, c)
+	idc.n = idc.n + 1; line(gui, 70000 + idc.n, x, top, BAR_W, bot - top, c)
+	local tx = (dir > 0) and x or (x - TICK_W + BAR_W)
+	idc.n = idc.n + 1; line(gui, 70000 + idc.n, tx, math.floor((top + bot) / 2),
+		TICK_W, 1, c)
+end
+
 -- Collect one wand's group delimiters (all casts) for two-pass rendering.
--- Two passes because closing brackets need the per-column TOTAL before any
--- can be placed: the INNERMOST sits on the card's right edge and outer ones
--- step right into the slot gap (inner -> outer still reads left -> right,
--- like nested parens on paper). Parents are collected before their children,
--- so per column the collection order is outer -> inner.
+-- Two passes because co-located brackets need the per-column TOTAL before any
+-- can be placed: the INNERMOST sits on the card's edge and outer ones step
+-- outward into the slot gap (inner -> outer still reads left -> right, like
+-- nested parens on paper). Parents are collected before their children, so per
+-- column the collection order is outer -> inner.
 -- The span starts at the group's OWN card (node.head): leading modifiers sit
 -- outside the parens, Lisp-style, matching the panel's "[mods] name" layout.
 -- `xs` maps deck index -> real slot column (handles empty slots in the wand).
 -- cols/rows map deck index -> displayed column / slot-row (multi-row wands
 -- wrap their slot row every BOX.per_row slots).
+--
+-- A group that STRADDLES a wand wrap is one group drawn in two halves: its
+-- forward span runs to the deck's end and it continues at the wand's start.
+-- Both halves are recorded here (ca/cb forward, w1/w2 wrapped) and both are
+-- drawn in the group's own rainbow color -- see plan_delims for the split.
 local function collect_delims(nodes, depth, cols, rows, out)
 	for _, node in ipairs(nodes) do
 		if node.children and #node.children > 0 and node.last then
@@ -392,15 +410,20 @@ local function collect_delims(nodes, depth, cols, rows, out)
 			-- Brackets carry NO text labels (user calls, 2026-06-11): the
 			-- card art already says x2/x3, a trigger's payload shows as the
 			-- nested bracket, and the labels collided ("trig 1x3"). Only
-			-- the orange ~wrap tag remains.
-			-- The wrap apparatus (orange ~wrap tag, wrapped-segment brackets,
-			-- return line) belongs to the INNERMOST group the wrap happened
-			-- in. Ancestors inherit wfirst but must not redraw it -- and they
-			-- keep their rainbow color: orange marks the wrap, not the group.
-			local wrap_here = node.wfirst ~= nil
+			-- the orange "wraps to front" tag remains.
+			-- STRADDLING = the group started before the wrap (hwrap is unset:
+			-- its own card was drawn pre-wrap) and pulled cards in after it.
+			-- A group whose own card came from AFTER the wrap sits wholly in
+			-- the wrapped-in segment -- an ordinary group, not a split one.
+			local straddles = node.wfirst ~= nil and not node.hwrap
+			-- The orange CONNECTOR (return line + "wraps to front") belongs to
+			-- the INNERMOST straddling group: ancestors of a straddling group
+			-- straddle too (they inherit wfirst) and so are drawn split as
+			-- well, nesting around it -- but only one carriage return is drawn.
+			local connect = straddles
 			for _, ch in ipairs(node.children) do
-				if ch.wfirst and ch.children and #ch.children > 0 then
-					wrap_here = false
+				if ch.wfirst and not ch.hwrap and ch.children and #ch.children > 0 then
+					connect = false
 					break
 				end
 			end
@@ -411,13 +434,82 @@ local function collect_delims(nodes, depth, cols, rows, out)
 				rb = rows[node.last] or 0,
 				c = nest_color(depth),
 				-- wrapped-in segment (cards pulled from the wand's start)
-				w1 = wrap_here and (cols[node.wfirst] or (node.wfirst - 1)) or nil,
-				w2 = wrap_here and (cols[node.wlast] or (node.wlast - 1)) or nil,
-				w1r = wrap_here and (rows[node.wfirst] or 0) or nil,
+				w1  = straddles and (cols[node.wfirst] or (node.wfirst - 1)) or nil,
+				w2  = straddles and (cols[node.wlast] or (node.wlast - 1)) or nil,
+				w1r = straddles and (rows[node.wfirst] or 0) or nil,
+				w2r = straddles and (rows[node.wlast] or 0) or nil,
+				connect = connect or nil,
 			}
 			collect_delims(node.children, depth + 1, cols, rows, out)
 		end
 	end
+end
+
+-- The CAST's own delimiter: the cards that fire simultaneously, delimited one
+-- level OUTSIDE the spell groups they contain. The rainbow is one continuous
+-- progression across both axes (user call 2026-08-07) -- each cast advances it
+-- by one and so does each nesting level inside a group -- so cast `ci` (1-based)
+-- sits at depth ci-1 and its groups start at depth ci. A cast that wraps
+-- straddles exactly like a group does and gets the same cut ends.
+-- Returns the record so the caller can hand it the carriage return when no
+-- group inside the cast claimed one (a wrap in a bare modifier chain produces
+-- no bracketed group at all, so the cast is the only thing left to own it).
+local function collect_cast_delims(cast, ci, cols, rows, out)
+	if not (cast.first and cast.last) then return nil end
+	local rec = {
+		ca = cols[cast.first] or (cast.first - 1),
+		cb = cols[cast.last] or (cast.last - 1),
+		ra = rows[cast.first] or 0,
+		rb = rows[cast.last] or 0,
+		c = nest_color(ci - 1),
+		w1  = cast.wfirst and (cols[cast.wfirst] or (cast.wfirst - 1)) or nil,
+		w2  = cast.wlast and (cols[cast.wlast] or (cast.wlast - 1)) or nil,
+		w1r = cast.wfirst and (rows[cast.wfirst] or 0) or nil,
+		w2r = cast.wlast and (rows[cast.wlast] or 0) or nil,
+	}
+	out[#out + 1] = rec
+	return rec
+end
+
+-- Every delimiter for one wand, all casts together (their glyphs stack per
+-- row+column+side, so they must be planned as one list). cols/rows map deck
+-- index -> displayed slot column / slot row.
+local function collect_wand_delims(sim, cols, rows)
+	-- Delimit the casts themselves only when there is more than one, or when
+	-- the wand wraps -- the same rule the panel uses for its cast headers
+	-- (sim_rows). A wand that empties in a single cast would learn nothing from
+	-- a bracket around its whole slot row, and this keeps those wands rendering
+	-- exactly as they did before casts were delimited: groups stay at depth 0.
+	local show_casts = (#sim.casts > 1) or sim.wrapped
+	local out = {}
+	for ci, cast in ipairs(sim.casts) do
+		local first_group = #out + 1
+		local rec = show_casts
+			and collect_cast_delims(cast, ci, cols, rows, out) or nil
+		-- the cast sits at depth ci-1, so its groups continue the rainbow at ci
+		collect_delims(cast.nodes, show_casts and ci or 0, cols, rows, out)
+		-- A wrap inside a bare modifier chain builds no bracketed group, so
+		-- nothing below the cast can draw the carriage return. Let the cast own
+		-- it in that case -- but never draw two.
+		if rec and rec.w1 then
+			local claimed = false
+			for i = first_group + 1, #out do
+				if out[i].connect then claimed = true; break end
+			end
+			rec.connect = (not claimed) or nil
+		end
+		-- A cast that fires ONE spell expression has no simultaneity to show,
+		-- so its bracket is pure ink -- drop it (user call 2026-08-07). This is
+		-- also what kills the redundant pair on a cast whose single spell IS a
+		-- group: the two spans were identical, drawn twice in two colors.
+		-- The exception is a lone spell that WRAPS with nothing bracketed
+		-- inside it: there the cast bracket is the only thing carrying the
+		-- carriage return, which rec.connect above has just established.
+		if rec and #cast.nodes <= 1 and not rec.connect then
+			table.remove(out, first_group)
+		end
+	end
+	return out
 end
 
 -- rows_geo[r+1] = { top, bot } for displayed slot-row r (0-based): brackets
@@ -428,65 +520,112 @@ end
 -- always 16:9) but those positions don't scale with it, so scaling by live sw
 -- drifts the brackets off the cards whenever GUI res != 640x360. refw == sw at
 -- GUI 640x360. See update(); tools/test_gui_scale_geometry.py.
-local function draw_delims(gui, groups, refw, rows_geo, idc)
-	local counts, seen = {}, {}
-	local function key(g) return g.rb * 100 + g.cb end
-	for _, g in ipairs(groups) do counts[key(g)] = (counts[key(g)] or 0) + 1 end
+--
+-- ---- glyph planning (pure: no Gui, no pixels) -------------------------------
+--
+-- Turn the collected groups into a flat list of bracket GLYPHS plus the wrap
+-- connectors that join a straddling group's two halves. Each glyph is
+--   { col, row, side = "left"|"right", cut = true?, c = color, stack = N }
+-- and each connector is { from = <glyph i>, to = <glyph i> }.
+--
+-- ONE GROUP IS ONE BRACKET PAIR, always in that group's rainbow color. A group
+-- that straddles the wand wrap gets FOUR glyphs rather than two pairs (the bug
+-- fixed 2026-08-07: the wrapped half used to be its own closed orange [ ] pair,
+-- so a single group read as two sibling groups and the Lisp nesting broke):
+--
+--     slot1        slot2  slot3  slot4
+--    -|Luminous]   [Double Heavy Spark|-
+--     +-------------------------------+     <- orange carriage return
+--      ^cut end                 cut end^
+--
+--   * the real [ at the group's head card,
+--   * a CUT END at the forward span's last card (see cut_end: a bar ticking
+--     OUTWARD, reading "carries on that way" rather than "ends here"),
+--   * the mirrored CUT END at the wrapped segment's first card, and
+--   * the real ] at the wrapped segment's last card.
+-- Orange is reserved for the connector and its label: orange marks the WRAP,
+-- the rainbow marks the GROUP.
+--
+-- Stacking runs per (row, column, side) so co-located glyphs never overprint:
+-- the outermost steps furthest from the card and grows tallest, its hooks
+-- wrapping around the inner ones. Both sides stack -- opens used not to, which
+-- let a wrapped half's cut end land exactly on top of a group opening on the
+-- same column. collect_delims emits parents before children, so collection
+-- order is outer -> inner.
+local function plan_delims(groups)
+	local glyphs, links = {}, {}
+	local function add(col, row, side, cut, c)
+		glyphs[#glyphs + 1] = { col = col, row = row, side = side,
+			cut = cut or nil, c = c, stack = 0 }
+		return #glyphs
+	end
 	for _, g in ipairs(groups) do
-		local ya = rows_geo[g.ra + 1] or rows_geo[1]
-		local yb = rows_geo[g.rb + 1] or rows_geo[1]
-
-		-- open: [ just left of the card, raised so its top hook overlaps the
-		-- slot's top edge (the ~wrap tag, when present, sits above in orange)
-		local lx = refw * (BOX.slot0_x + g.ca * BOX.pitch - BOX.halfw) - OPEN_NUDGE
-		bracket(gui, idc, lx, ya.top - BRACKET_RAISE - BRACKET_EXTEND_TOP,
-			ya.bot - BRACKET_RAISE + BRACKET_EXTEND_BOT, 1, g.c)
-		if g.w1 then
-			-- "wraps to front": reads toward the orange segment at the wand's
-			-- start (was "~wrap", but Noita's font renders ~ as a double
-			-- quote). Sits clear above the raised bracket's hook level
-			-- (screenshot-tuned: -9 and -10 still touched the hooks).
-			GuiColorSetForNextWidget(gui, WRAP_COLOR[1], WRAP_COLOR[2], WRAP_COLOR[3], 1)
-			GuiText(gui, lx, ya.top - 11, "wraps to front")
+		local split = g.w1 ~= nil
+		add(g.ca, g.ra, "left", false, g.c)
+		local fwd = add(g.cb, g.rb, "right", split, g.c)
+		if split then
+			local back = add(g.w1, g.w1r or 0, "left", true, g.c)
+			add(g.w2, g.w2r or g.w1r or 0, "right", false, g.c)
+			if g.connect then links[#links + 1] = { from = fwd, to = back } end
 		end
+	end
+	local counts, seen = {}, {}
+	local function key(gl) return gl.row .. ":" .. gl.col .. ":" .. gl.side end
+	for _, gl in ipairs(glyphs) do counts[key(gl)] = (counts[key(gl)] or 0) + 1 end
+	for _, gl in ipairs(glyphs) do
+		local k = key(gl)
+		local s = seen[k] or 0
+		seen[k] = s + 1
+		gl.stack = counts[k] - 1 - s -- 0 = innermost (collected last)
+	end
+	return glyphs, links
+end
 
-		-- close: innermost ] sits ON the card's right edge and outer
-		-- brackets step RIGHT into the slot gap (outermost furthest out
-		-- and tallest, its hooks wrapping the inner ones) -- closes start
-		-- at the end of the slot and never push into the card art (user
-		-- call 2026-06-11; they used to step left over the card)
-		local s = seen[key(g)] or 0
-		seen[key(g)] = s + 1
-		local o = counts[key(g)] - 1 - s -- 0 = innermost (collected last)
-		local grow = o * STACK_Y
-		local rx = refw * (BOX.slot0_x + g.cb * BOX.pitch + BOX.halfw)
-			- BAR_W - CLOSE_NUDGE + o * STACK_X
-		local close_bot = yb.bot + grow - BRACKET_RAISE + BRACKET_EXTEND_BOT
-		bracket(gui, idc, rx, yb.top - grow - BRACKET_RAISE - BRACKET_EXTEND_TOP,
-			close_bot, -1, g.c)
+local function draw_delims(gui, groups, refw, rows_geo, idc)
+	local glyphs, links = plan_delims(groups)
 
-		-- wrap: the group continues at the wand's START. Bracket the
-		-- wrapped-in segment and draw a carriage-return line, from below the
-		-- forward close back (and up, if the wrapped cards sit on an earlier
-		-- slot row) to the wrapped segment's [.
-		-- Always WRAP orange: orange marks the wrap, rainbow marks groups.
-		if g.w1 then
-			local yw = rows_geo[(g.w1r or 0) + 1] or rows_geo[1]
-			local wlx = refw * (BOX.slot0_x + g.w1 * BOX.pitch - BOX.halfw) - OPEN_NUDGE
-			local wrx = refw * (BOX.slot0_x + g.w2 * BOX.pitch + BOX.halfw)
-				- BAR_W - CLOSE_NUDGE
-			local wrap_bot = yw.bot - BRACKET_RAISE + BRACKET_EXTEND_BOT
-			bracket(gui, idc, wlx, yw.top - BRACKET_RAISE - BRACKET_EXTEND_TOP, wrap_bot, 1, WRAP_COLOR)
-			bracket(gui, idc, wrx, yw.top - BRACKET_RAISE - BRACKET_EXTEND_TOP, wrap_bot, -1, WRAP_COLOR)
-			local ry = close_bot + 2 -- return line sits just below the close's bottom
-			-- drop from the forward close's (extended) bottom down to the return line
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, rx, close_bot, 1,
-				ry - close_bot + 1, WRAP_COLOR)
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, ry, rx - wlx, 1, WRAP_COLOR)
-			-- riser meets the wrapped-segment open bracket's (extended) bottom
-			idc.n = idc.n + 1; line(gui, 70000 + idc.n, wlx, wrap_bot, 1,
-				ry - wrap_bot + 1, WRAP_COLOR)
+	for _, gl in ipairs(glyphs) do
+		local yr = rows_geo[gl.row + 1] or rows_geo[1]
+		local grow = gl.stack * STACK_Y
+		if gl.side == "left" then
+			-- opens sit just left of the card and step LEFT into the slot gap
+			gl.x = refw * (BOX.slot0_x + gl.col * BOX.pitch - BOX.halfw)
+				- OPEN_NUDGE - gl.stack * STACK_X
+		else
+			-- closes sit ON the card's right edge and step RIGHT into the slot
+			-- gap -- they never push into the card art (user call 2026-06-11)
+			gl.x = refw * (BOX.slot0_x + gl.col * BOX.pitch + BOX.halfw)
+				- BAR_W - CLOSE_NUDGE + gl.stack * STACK_X
 		end
+		gl.top = yr.top - grow - BRACKET_RAISE - BRACKET_EXTEND_TOP
+		gl.bot = yr.bot + grow - BRACKET_RAISE + BRACKET_EXTEND_BOT
+		-- a real bracket hooks INTO the group; a cut end ticks OUTWARD, the way
+		-- the group carries on past this card
+		local into = (gl.side == "left") and 1 or -1
+		if gl.cut then
+			cut_end(gui, idc, gl.x, gl.top, gl.bot, -into, gl.c)
+		else
+			bracket(gui, idc, gl.x, gl.top, gl.bot, into, gl.c)
+		end
+	end
+
+	-- The carriage return: drop from the forward cut end, run back to the
+	-- wand's start and rise into the wrapped half's cut end. Always
+	-- WRAP_COLOR -- this line IS the wrap signal, so it must not be mistaken
+	-- for one of the rainbow group brackets it connects.
+	for _, ln in ipairs(links) do
+		local a, b = glyphs[ln.from], glyphs[ln.to]
+		local ry = math.max(a.bot, b.bot) + 2 -- just below the lower cut end
+		idc.n = idc.n + 1; line(gui, 70000 + idc.n, a.x, a.bot, 1, ry - a.bot + 1, WRAP_COLOR)
+		idc.n = idc.n + 1; line(gui, 70000 + idc.n, b.x, ry, a.x - b.x, 1, WRAP_COLOR)
+		idc.n = idc.n + 1; line(gui, 70000 + idc.n, b.x, b.bot, 1, ry - b.bot + 1, WRAP_COLOR)
+		-- "wraps to front" reads toward the wrapped segment at the wand's start
+		-- (not "~wrap": Noita's font renders ~ as a double quote). It sits at
+		-- the return line's OUTER end, past the forward cut end -- it used to
+		-- sit above the opening bracket, where it printed straight over the
+		-- box's own "Spells/Cast" header (2026-08-07).
+		GuiColorSetForNextWidget(gui, WRAP_COLOR[1], WRAP_COLOR[2], WRAP_COLOR[3], 1)
+		GuiText(gui, a.x + TICK_W + 2, ry - 5, "wraps to front")
 	end
 end
 
@@ -702,11 +841,8 @@ local function draw_box_brackets(gui, refw, wands, show_probe)
 				cols[k] = x % wd.per_row
 				rows[k] = math.floor(x / wd.per_row)
 			end
-			local groups = {} -- all casts together: closes stack per row+column
-			for _, cast in ipairs(wd.sim.casts) do
-				collect_delims(cast.nodes, 0, cols, rows, groups)
-			end
-			draw_delims(gui, groups, refw, wd.rows_geo, idc)
+			draw_delims(gui, collect_wand_delims(wd.sim, cols, rows),
+				refw, wd.rows_geo, idc)
 		end
 	end
 end
@@ -1190,7 +1326,9 @@ end
 -- Test-only exports for tools/test_font_compat.lua, which drives the REAL
 -- font-safety helpers and the REAL draw_panel with a stubbed Gui (the
 -- non-pixel-font collapse can't be reproduced in-game on a dev machine
--- without the font mod). Nothing in the mod reads _test at runtime.
+-- without the font mod), and tools/test_slot_delims.lua, which drives the REAL
+-- collect_delims/plan_delims (pure -- no Gui needed at all).
+-- Nothing in the mod reads _test at runtime.
 M._test = {
 	utf8_chars      = utf8_chars,
 	trim_last_char  = trim_last_char,
@@ -1199,6 +1337,14 @@ M._test = {
 	fit_label       = fit_label,
 	draw_panel      = draw_panel,
 	PANEL_SCALE_MAP = PANEL_SCALE_MAP,
+	collect_delims  = collect_delims,
+	collect_cast_delims  = collect_cast_delims,
+	collect_wand_delims  = collect_wand_delims,
+	plan_delims     = plan_delims,
+	draw_delims     = draw_delims, -- pixel-level check with a recording Gui stub
+
+	nest_color      = nest_color,
+	WRAP_COLOR      = WRAP_COLOR,
 }
 
 return M
