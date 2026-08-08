@@ -96,14 +96,14 @@ end
 
 -- ---- 1. the reported wand (screenshot 2026-08-07) --------------------------
 --
--- LUMINOUS_DRILL / BURST_2 / HEAVY_SPREAD / SPARK_BOLT at 1 spell/cast.
--- cast 2 draws Double Spell (slot 2), gathers [Heavy spread] Spark bolt
+-- LUMINOUS_DRILL / BURST_2 / HEAVY_SPREAD / LIGHT_BULLET at 1 spell/cast.
+-- cast 2 draws Double Spell (slot 2), gathers [Heavy spread] Light bullet
 -- (slots 3-4), then runs out of deck and WRAPS back to Luminous drill (slot 1).
 -- The WRAP encloses the whole looping structure -- slot 1 (the card it pulled
 -- back in) through slot 4 (where the cast ran out of deck) -- and the Double
 -- Spell group sits inside it over its forward run, slots 2..4:
 --
---     [ Luminous [Double, Heavy spread, Spark bolt] ]
+--     [ Luminous [Double, Heavy spread, Light bullet] ]
 --
 -- Both casts fire a SINGLE spell expression, so neither is bracketed (nothing
 -- fires simultaneously in a one-spell cast, and cast 2's span would have been
@@ -111,7 +111,7 @@ end
 -- rainbow still advances per cast, so the group lands at depth 2.
 do
 	local glyphs, groups, sim = plan(
-		{ "LUMINOUS_DRILL", "BURST_2", "HEAVY_SPREAD", "SPARK_BOLT" }, 1)
+		{ "LUMINOUS_DRILL", "BURST_2", "HEAVY_SPREAD", "LIGHT_BULLET" }, 1)
 	eq("report/two single-spell casts", #sim.casts[1].nodes .. "," .. #sim.casts[2].nodes, "1,1")
 	eq("report/the wrap enclosure plus one group", #groups, 2)
 	eq("report/glyphs", show(glyphs), "L0 R3^1 L1 R3")
@@ -179,7 +179,7 @@ end
 -- this wand renders exactly as it did before casts were delimited.
 do
 	local glyphs, groups, sim = plan(
-		{ "BURST_3", "SPARK_BOLT", "BULLET_TIMER", "SPARK_BOLT" }, 4)
+		{ "BURST_3", "LIGHT_BULLET", "BULLET_TIMER", "LIGHT_BULLET" }, 4)
 	eq("plain/one cast", #sim.casts, 1)
 	passck("plain/does not wrap", not sim.wrapped)
 	eq("plain/no cast bracket, no enclosure", #groups, 2)
@@ -194,13 +194,13 @@ end
 
 -- ---- 3. nested groups inside one enclosure ---------------------------------
 --
--- SPARK / BURST_2 / BURST_2 / SPARK at 1/cast. Cast 2's outer Double Spell
+-- LIGHT_BULLET / BURST_2 / BURST_2 / LIGHT_BULLET at 1/cast. Cast 2's outer Double Spell
 -- gathers an inner Double Spell, which takes slot 4 and then wraps to slot 1.
 -- ONE enclosure covers the loop (slots 1..4) and the two groups nest inside it
--- over their forward runs:  [ Spark [Double [Double, Spark]] ]
+-- over their forward runs:  [ Light bullet [Double [Double, Light bullet]] ]
 do
 	local glyphs, groups = plan(
-		{ "SPARK_BOLT", "BURST_2", "BURST_2", "SPARK_BOLT" }, 1)
+		{ "LIGHT_BULLET", "BURST_2", "BURST_2", "LIGHT_BULLET" }, 1)
 	-- both casts fire a single spell, so neither is bracketed (case 1's rule)
 	eq("nested/one enclosure + two groups, no cast brackets", #groups, 3)
 	eq("nested/glyphs", show(glyphs), "L0 R3^2 L1 R3^1 L2 R3")
@@ -213,7 +213,7 @@ end
 
 -- ---- 4. a group living wholly in the wrapped-in segment --------------------
 --
--- BURST_2 / SPARK / SPARK / BURST_2 at 1/cast. Cast 2's Double Spell (slot 4)
+-- BURST_2 / LIGHT_BULLET / LIGHT_BULLET / BURST_2 at 1/cast. Cast 2's Double Spell (slot 4)
 -- wraps immediately and pulls in the wand's leading Double Spell, whose own
 -- card was drawn AFTER the wrap -- so it has no forward run at all and falls
 -- back to first..last, slots 1..3. Cast 2's own Double Spell has a forward run
@@ -222,7 +222,7 @@ end
 -- the overprint per-side stacking prevents; opens never stacked before the fix.
 do
 	local glyphs, groups, sim = plan(
-		{ "BURST_2", "SPARK_BOLT", "SPARK_BOLT", "BURST_2" }, 1)
+		{ "BURST_2", "LIGHT_BULLET", "LIGHT_BULLET", "BURST_2" }, 1)
 	local outer = sim.casts[2].nodes[1]
 	local inner = outer.children[1]
 	passck("fully/outer wrapped", outer.wfirst ~= nil)
@@ -245,19 +245,19 @@ end
 -- 4). Every glyph must move with its card -- the brackets hug slots, not deck
 -- indices.
 do
-	local glyphs = plan({ "LUMINOUS_DRILL", "BURST_2", "HEAVY_SPREAD", "SPARK_BOLT" }, 1,
+	local glyphs = plan({ "LUMINOUS_DRILL", "BURST_2", "HEAVY_SPREAD", "LIGHT_BULLET" }, 1,
 		{ 0, 2, 3, 5 })
 	eq("gaps/glyphs", show(glyphs), "L0 R5^1 L2 R5")
 end
 
 -- ---- 6. a wrap with no group at all: just the enclosure ---------------------
 --
--- SPARK_BOLT / DAMAGE at 1 spell/cast. Cast 2 draws the bare Damage modifier,
--- which force-draws its replacement, finds the deck empty and WRAPS onto Spark
--- bolt. Nothing on the wand has children, so no group is bracketed -- before
+-- LIGHT_BULLET / DAMAGE at 1 spell/cast. Cast 2 draws the bare Damage modifier,
+-- which force-draws its replacement, finds the deck empty and WRAPS onto Light
+-- bullet. Nothing on the wand has children, so no group is bracketed -- before
 -- the wrap got its own enclosure this wand drew no slot-row apparatus at all.
 do
-	local glyphs, groups, sim = plan({ "SPARK_BOLT", "DAMAGE" }, 1)
+	local glyphs, groups, sim = plan({ "LIGHT_BULLET", "DAMAGE" }, 1)
 	passck("bare/cast 2 wrapped", sim.casts[2].wfirst ~= nil)
 	passck("bare/no node has children",
 		#(sim.casts[2].nodes[1].children or {}) == 0)
