@@ -41,13 +41,11 @@
 -- A modifier chain that exhausts the deck with nothing left to wrap in
 -- becomes a leaf with dangling=true. Nodes built across a wrap get wrap=true,
 -- plus wfirst/wlast = min/max slot index of the cards drawn AFTER the wrap
--- (the wrapped-in segment at the wand's start), so renderers can show the
--- group as forward-span + return + wrapped-span. node.last stays the max
--- FORWARD index in practice, since wrapped indices precede the head.
--- hwrap=true marks a node whose OWN card was drawn after the wrap: the group
--- lies ENTIRELY in the wrapped-in segment and does not straddle the wand's
--- end, so it must not be drawn as a split forward+wrapped pair (wrap without
--- hwrap = straddling; wrap with hwrap = fully wrapped).
+-- (the wrapped-in segment at the wand's start) and ffirst/flast = the same for
+-- the cards drawn BEFORE it. first/last span BOTH, so on a wrapping node they
+-- reach back to the wand's start; a renderer that wants only the run this
+-- expression occupies going forward must use flast, not last (a wrap can pull
+-- in MORE cards than precede the head, and then last is a wrapped index).
 
 local M = {}
 
@@ -134,12 +132,16 @@ function M.simulate(tokens, meta, opts)
 		local wraps_before = wrap_count
 		local mods, first, last = {}, nil, nil
 		local wfirst, wlast = nil, nil -- span of wrapped-in cards (post-wrap)
+		local ffirst, flast = nil, nil -- span of the cards drawn BEFORE the wrap
 		local function note(c)
 			if first == nil or c.i < first then first = c.i end
 			if last == nil or c.i > last then last = c.i end
 			if c.w then
 				if wfirst == nil or c.i < wfirst then wfirst = c.i end
 				if wlast == nil or c.i > wlast then wlast = c.i end
+			else
+				if ffirst == nil or c.i < ffirst then ffirst = c.i end
+				if flast == nil or c.i > flast then flast = c.i end
 			end
 		end
 		local card = draw(forced)
@@ -153,7 +155,7 @@ function M.simulate(tokens, meta, opts)
 			if card == nil then
 				return { kind = "leaf", id = mods[#mods], atype = "MODIFIER",
 					modifiers = mods, dangling = true, first = first, last = last,
-					wfirst = wfirst, wlast = wlast,
+					wfirst = wfirst, wlast = wlast, ffirst = ffirst, flast = flast,
 					wrap = (wrap_count > wraps_before) or nil }
 			end
 			m = meta_for(meta, card.id)
@@ -161,12 +163,6 @@ function M.simulate(tokens, meta, opts)
 
 		note(card)
 		local node = { id = card.id, atype = m.type, modifiers = mods, head = card.i }
-		-- The node's OWN card came from after the wrap, i.e. the whole group
-		-- lives in the wrapped-in segment rather than straddling the wand's
-		-- end. Renderers need the distinction: a straddling group must be drawn
-		-- as one split pair (forward half + wrapped half), a fully-wrapped one
-		-- is an ordinary group that merely happens to sit past a wrap.
-		if card.w then node.hwrap = true end
 
 		if is_multicast(m) then
 			node.kind = "multicast"
@@ -189,10 +185,13 @@ function M.simulate(tokens, meta, opts)
 				if ch.last and ch.last > last then last = ch.last end
 				if ch.wfirst and (wfirst == nil or ch.wfirst < wfirst) then wfirst = ch.wfirst end
 				if ch.wlast and (wlast == nil or ch.wlast > wlast) then wlast = ch.wlast end
+				if ch.ffirst and (ffirst == nil or ch.ffirst < ffirst) then ffirst = ch.ffirst end
+				if ch.flast and (flast == nil or ch.flast > flast) then flast = ch.flast end
 			end
 		end
 		node.first, node.last = first, last
 		node.wfirst, node.wlast = wfirst, wlast
+		node.ffirst, node.flast = ffirst, flast
 		if wrap_count > wraps_before then node.wrap = true end
 		return node
 	end

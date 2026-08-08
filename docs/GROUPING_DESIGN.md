@@ -56,10 +56,11 @@ node parsed across a wrap (the wrapping group *and* the wrapped-in cards),
 `first`/`last` spans that reach back to the wand's start when wrapped,
 `head` = the node's own card (the span excluding its leading-modifier prefix —
 Lisp-wise modifiers sit outside the parens), and `wfirst`/`wlast` = the span
-of cards drawn *after* the wrap (tagged at draw time), which renderers use to
-show forward-segment + carriage-return + wrapped-segment. `hwrap` marks a node
-whose *own* card was drawn after the wrap — the group lies **entirely** in the
-wrapped-in segment and straddles nothing, so it must not be drawn split.
+of cards drawn *after* the wrap (tagged at draw time), with `ffirst`/`flast` the
+same for the cards drawn *before* it. A renderer wanting only the run an
+expression occupies going forward must use `flast`, not `last`: a wrap can pull
+in **more** cards than precede the head, so `last` is not even an upper bound on
+the forward run.
 
 **Casts are delimited too**, one level outside the spell groups they contain,
 whenever the wand has more than one cast or wraps (the same rule the panel uses
@@ -77,30 +78,35 @@ it did before casts were delimited.
 2026-08-07): there is no simultaneity to show, so the pair is pure ink — and on
 a cast whose single spell *is* a group, the two spans were identical, drawing
 one boundary twice in two colours. A suppressed cast still consumes its rainbow
-slot, so colours don't shift when a cast gains or loses a spell. The one
-exception is a lone spell that wraps with nothing bracketed inside it, where the
-cast bracket is the only thing left to carry the carriage return.
+slot, so colours don't shift when a cast gains or loses a spell.
 
-**One group is one colour, and every delimiter is a real bracket.** A group that
-straddles the wrap is drawn as four glyphs — a `[ ]` pair around its forward
-span and another around its wrapped segment — all in that group's rainbow
-colour, joined by the carriage return. `WRAP_COLOR` orange is reserved for that
-return line and its `wraps to front` label: **orange marks the wrap, the rainbow
-marks the group.** What was actually wrong in the original bug was the
-*colour*, not the closed pair: an orange wrapped half read as an unrelated
-group. Two attempts at a distinct seam glyph were both rejected in play —
-hooks pointing outward read as a `[`/`]` facing the wrong way, and a bar with a
-single outward tick "doesn't look like brackets" (two side by side read as an
-H). Colour carries nesting, the return line carries the wrap, and every glyph
-on the row is a bracket. The two glyphs the return attaches to are flagged
-`seam` in the plan, purely so the connector and the tests can find them.
-Ancestors of a straddling group straddle too — including the containing cast —
-and are drawn split as well, nesting around it, but only the innermost draws
-the carriage return. A wrap inside a bare modifier chain builds no bracketed
-group at all, so there the cast bracket takes it (before, such a wrap drew no
-slot-row apparatus whatsoever).
-Until 2026-08-07 the wrapped half was its own self-closed *orange* `[ ]` pair,
-so one group read as two sibling groups at the wrong nesting depth.
+**The wrap is one enclosing bracket** (user call 2026-08-07), not a group split
+across a seam:
+
+```
+[ chainsaw, chainsaw, [Double, Spitter [Double, Spitter]] ]
+^ the wrap                                    closing wrap ^
+```
+
+A wrap always pulls from the wand's **start** and the wrapping cast always runs
+to the deck's **end**, so everything involved lies in one contiguous run — from
+the first wrapped-in card to that cast's last forward card. One bracket around
+the lot, in `WRAP_COLOR`, outside every group and cast it contains (so its
+record is collected before all of them, since collection order *is* nesting
+order for the stacking pass — including casts that ran before the one that
+wrapped). Everything inside is an ordinary rainbow bracket over its forward run.
+It is the one non-rainbow delimiter: **orange marks the wrap, the rainbow marks
+nesting.**
+
+Three earlier attempts split the group across the seam instead, and all three
+were rejected in play: a self-closed *orange* wrapped half read as an unrelated
+group (the original report), seam glyphs with hooks pointing outward read as a
+`[`/`]` facing the wrong way, and a bar with one outward tick "doesn't look like
+brackets" — two side by side read as an H. The enclosure needs no seam glyph, no
+carriage return, and no second pair: the loop reads as an enclosure. A wrap
+inside a bare modifier chain builds no bracketed group at all, and the enclosure
+covers that case for free (before, such a wrap drew nothing on the slot row).
+
 Glyph planning (columns, rows, colours and the per-`(row, column, side)`
 stacking that keeps co-located brackets from overprinting) is pure and lives in
 `plan_delims`; `tools/test_slot_delims.lua` drives it with no game APIs.
@@ -111,7 +117,7 @@ everything nested inside it; with a fixed hook shorter than `STACK_X` the outer
 hooks landed on the inner bar and were overpainted by it, leaving the outer
 rendered as a bare vertical line — the whole reason the brackets "aren't
 brackets". It was invisible while only closing brackets ever shared a card
-edge; opens and wrapped halves made co-location the common case. `STACK_Y` is 2
+edge; opens and the wrap enclosure made co-location the common case. `STACK_Y` is 2
 for the same reason: at 1px apart, two neighbouring levels' hooks read as one
 thick hook.
 Validated by `tools/test_wand_structure.lua` (runs the real simulator under Lua)
