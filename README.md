@@ -99,8 +99,10 @@ files/structure_meta.lua     # generated per-spell structural metadata (draws/gr
 files/wand_structure.lua     # pure deck simulator: casts, chaining, multicasts, wrap
 files/grouping_overlay.lua   # reads the live wand + draws the panel / slot brackets
 tools/gen_structure_meta.py  # regenerates structure_meta.lua from data.wak
+tools/preview_wand.lua       # prints any wand's brackets as a Lisp line, no game needed
 tools/test_wand_structure.lua # runs the real wand_structure.lua + tests (primary)
 tools/test_wand_structure.py # Python cross-check mirror of wand_structure.lua
+tools/test_slot_delims.lua   # runs the real slot-bracket planner (nesting, casts, wrap)
 tools/gen_icons.py           # (retired icon-recolor feature; see below)
 tools/make_release.sh        # builds dist/<mod>-<version>.zip for manual installs
 INSTALL.txt                  # manual-install guide (shipped in the release zip)
@@ -125,10 +127,28 @@ python3 tools/gen_structure_meta.py
    the real `wand_structure.lua`; `python3 tools/test_wand_structure.py` runs the
    Python cross-check mirror (kept in sync; slated for retirement once the Lua
    harness is fully trusted).
-4. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
+4. `lua tools/test_slot_delims.lua` runs the real slot-bracket planner —
+   nesting depth, cast brackets, the wrap enclosure, stacking on a shared card
+   edge, wands with empty slots.
+5. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
    (`docs/FONT_COMPAT.md`) by driving the real panel layout with stubbed
    pixel-like / zero-measuring / nil-returning fonts, then prints the in-game
    checklist for verifying against the Better Font mod or a TTF language.
+
+To eyeball a specific wand without starting a run, `tools/preview_wand.lua`
+prints its delimiters as a Lisp line, coloured with the rainbow the mod would
+actually draw:
+
+```
+$ lua tools/preview_wand.lua CHAINSAW,CHAINSAW,BURST_2,SPITTER,BURST_2,SPITTER
+
+  [Chainsaw, Chainsaw, [Burst 2, Spitter, [Burst 2, Spitter]]]
+```
+
+It drives the same `collect_wand_delims`/`plan_delims` the overlay does, so the
+structure is exactly what would land on the slot row. It says nothing about the
+*geometry* — where the wand box sits, how the glyphs meet the card art — which
+is calibrated from screenshots and still needs the game.
 
 Unsafe Lua APIs are not requested (`request_no_api_restrictions="0"` in `mod.xml`).
 
