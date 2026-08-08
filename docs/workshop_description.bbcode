@@ -2,7 +2,7 @@ Ever stared at a rapid-fire wand and wondered what actually fires together each 
 
 [h2]Two views[/h2]
 [list]
-[*][b]Slot brackets[/b] — rainbow nesting brackets on the spell cards themselves, hugging each group's first and last card. Colors cycle by nesting depth, like nested code brackets: you can see what a multicast gathers, which modifiers feed which projectile, and what payload a trigger opens.
+[*][b]Slot brackets[/b] — rainbow nesting brackets on the spell cards themselves, hugging each group's first and last card. Colors cycle by nesting depth, like nested code brackets: you can see what a multicast gathers, which modifiers feed which projectile, what payload a trigger opens, and — one bracket further out — exactly which spells fire together in each cast.
 [*][b]Wand structure panel[/b] — an indented text tree of the selected wand, one section per cast, spell names colored by type. Always-cast spells are listed separately.
 [/list]
 Both update live as you drag spells around, so you can see a wand reshape itself while you build it.
@@ -10,9 +10,18 @@ Both update live as you drag spells around, so you can see a wand reshape itself
 [h2]It shows you the WRAP[/h2]
 The one that actually costs you damage: when a cast runs past the last spell in the wand, the draw wraps back to the front and forces the recharge. That cast fires a mix you probably didn't intend, and nothing in the vanilla UI tells you it's happening.
 
-The wrap gets marked in orange — an orange [i]wraps to front[/i] tag on the group it happened in, orange brackets around the wrapped-in cards at the wand's start, and a carriage-return line connecting the two. The panel gets a loud [b]WRAPS! -> recharge[/b] banner on that cast.
+The wrap gets marked in orange — one bracket enclosing the whole looping structure, from the first card the wrap pulled back in to where the cast ran out of deck, tagged [i]wraps to front[/i] at its closing end. The panel gets a loud [b]WRAPS! -> recharge[/b] banner on that cast.
 
-[h2]New in v1.3.1 — font compatibility[/h2]
+[h2]New in v1.3.2 — casts, and a rebuilt wrap[/h2]
+[b]Casts are bracketed now.[/b] Which spells fire [i]together[/i] is the thing the mod exists to show, and until now you had to read it off the panel. Each cast gets its own bracket, one level outside the spell groups it contains, and the rainbow runs as a single progression across both axes — advancing per cast and per nesting level — so the colors keep telling you where you are. A cast that fires a single spell isn't bracketed: there's no simultaneity to show, and the pair would just be ink.
+
+[b]The wrap reads as a loop.[/b] It used to be drawn as two separate orange bracket pairs joined by a line under the row, which looked like two unrelated groups rather than one structure continuing around. It's now a single enclosing bracket around everything the wrap touches:
+
+[code][ chainsaw, chainsaw, [Double spell, Spitter [Double spell, Spitter]] ][/code]
+
+Also fixed: brackets sharing a card edge used to blur into plain vertical bars, because an outer bracket's hooks were drawn underneath the one nested inside it. And a bare modifier chain that wrapped off the end of the deck drew no wrap marking at all — that case is covered now.
+
+[h2]v1.3.1 — font compatibility[/h2]
 If you use a font mod (such as [i]Better Font (English)[/i]) or play in a language with a smooth, non-pixelated font (Chinese, Japanese, …), the wand structure panel used to render squished against the right edge of the screen with its text running off it. That's fixed.
 
 The cause: with those fonts Noita ignores the smaller text sizes when [i]drawing[/i], while still applying them when [i]measuring[/i] — so the panel was built around three times too small for the text that landed in it. The panel now detects this and sizes itself to the one setting those fonts render faithfully.
@@ -27,7 +36,7 @@ Also in this update:
 [/list]
 Thanks to [b]BourbonCrow[/b] and [b]shinylavawarrior[/b] for reporting this — and to BourbonCrow for spotting that a font mod was the trigger, which is what made it findable at all.
 
-[h2]New in v1.3.0 — depleted spells[/h2]
+[h2]v1.3.0 — depleted spells[/h2]
 A spell with 0 charges left can't fire: the engine discards it and draws the next card instead. So the mod now leaves depleted spells out of the structure entirely, and your wand groups — and [b]wraps[/b] — as if that slot were empty. A single spent spell can move the wrap point, which is exactly the kind of thing that's invisible mid-run.
 
 One exception, on by default: the Greek spells (Alpha, Gamma, Tau, Omega, Mu, Phi, Sigma, Zeta) re-cast spells by their [i]position[/i] in the wand, so a depleted spell still changes what they pick up. On a wand holding a Greek spell, everything is kept. Both behaviors are toggleable.

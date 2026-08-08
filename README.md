@@ -21,11 +21,20 @@ Two views, both live while the inventory is open:
    each group's first and last card — SLIME rainbow parens, color cycling by
    nesting depth, no text labels (the card art already says what the group
    is). Leading modifiers sit *outside* the brackets, matching Lisp
-   notation; closes that share a card stack outward from its right edge,
-   the outermost's hooks wrapping the inner ones. **Orange marks the wrap**: the
-   group the wrap happened in gets an orange `wraps to front` tag, orange brackets
-   around the wrapped-in cards at the wand's start, and a carriage-return
-   line under the row connecting the two — "the draw continues here".
+   notation. **Casts are bracketed too**, one level outside the groups they
+   contain, so what fires together is visible at a glance; the rainbow is one
+   continuous progression across both axes, advancing per cast *and* per
+   nesting level. A cast firing a single spell isn't bracketed — there is no
+   simultaneity to show. Brackets that share a card edge stack outward from it,
+   the outermost's hooks reaching past the inner ones.
+   **Orange marks the wrap**: one enclosing bracket around the whole looping
+   structure, from the first card the wrap pulled back in to where the cast ran
+   out of deck, tagged `wraps to front` at its closing end:
+
+   ```
+   [ chainsaw, chainsaw, [Double spell, Spitter [Double spell, Spitter]] ]
+   ^ the wrap                                              closing wrap ^
+   ```
 
 ## Install
 
