@@ -60,7 +60,9 @@ The panel simulates the engine's exact draw rules (verified from `gun.lua` in
 (and every other card that force-draws one replacement, like Alpha)
 prefix-attach; multicasts gather N cards; triggers open nested payloads; and
 forced draws on an empty deck wrap the discard back in, in slot order, ending
-the recharge cycle. Always-cast spells are listed separately (they join every
+the recharge cycle. The Divide By spells prefix-attach too — their bodies
+invoke the next card directly rather than drawing it — but on an empty deck
+they do nothing, so unlike a modifier they never wrap. Always-cast spells are listed separately (they join every
 cast). Shuffle wands show nothing at all — their draw order randomizes each
 cycle, so there is no fixed structure to display.
 
@@ -168,6 +170,14 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
 - The panel can't know your mana, so a cast that fizzles mid-way on mana may
   differ from the simulation. (Depleted 0-charge spells *are* handled — see
   the settings above.)
+- Spells whose effect depends on the game state at cast time are marked `?`
+  in the panel: the Requirement (If) spells skip part of the wand when their
+  condition is false, and the random-draw spells (Random Spell, Draw
+  Random, …) cast extra cards chosen at cast time. The structure shown is the
+  condition-true / no-extras path.
+- A Divide By followed by a multicast or trigger is approximated: the game
+  re-invokes the divided card, drawing *fresh* cards on each invocation; the
+  panel shows the first invocation's grouping.
 - Shuffle wands get **no panel and no brackets** — the real draw order
   randomizes each cycle, so any displayed structure would be just one
   arrangement of many.

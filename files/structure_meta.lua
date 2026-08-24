@@ -4,6 +4,10 @@
 -- draws: how many cards the action force-draws (1 = chains like a
 --        modifier; >=2 = multicast; -1 = the whole remaining deck).
 -- group: multicast draw count (DRAW_MANY). trigger/payload: nested sub-shot.
+-- chain: attaches to the next card with NO forced draw (DIVIDE_*: an
+--        empty deck means it does nothing -- never wraps).
+-- dynamic: "conditional" (IF_*: skips deck cards when false at cast time)
+--        or "random" (casts extra cards chosen at random at cast time).
 return {
 	["ACCELERATING_SHOT"] = { type="MODIFIER", name="$action_accelerating_shot", draws=1 },
 	["ACIDSHOT"] = { type="PROJECTILE", name="$action_acidshot" },
@@ -119,13 +123,13 @@ return {
 	["DISC_BULLET"] = { type="PROJECTILE", name="$action_disc_bullet" },
 	["DISC_BULLET_BIG"] = { type="PROJECTILE", name="$action_disc_bullet_big" },
 	["DISC_BULLET_BIGGER"] = { type="PROJECTILE", name="$action_omega_disc_bullet" },
-	["DIVIDE_10"] = { type="OTHER", name="$action_divide_10" },
-	["DIVIDE_2"] = { type="OTHER", name="$action_divide_2" },
-	["DIVIDE_3"] = { type="OTHER", name="$action_divide_3" },
-	["DIVIDE_4"] = { type="OTHER", name="$action_divide_4" },
-	["DRAW_3_RANDOM"] = { type="OTHER", name="$action_draw_3_random" },
-	["DRAW_RANDOM"] = { type="OTHER", name="$action_draw_random" },
-	["DRAW_RANDOM_X3"] = { type="OTHER", name="$action_draw_random_x3" },
+	["DIVIDE_10"] = { type="OTHER", name="$action_divide_10", chain=true },
+	["DIVIDE_2"] = { type="OTHER", name="$action_divide_2", chain=true },
+	["DIVIDE_3"] = { type="OTHER", name="$action_divide_3", chain=true },
+	["DIVIDE_4"] = { type="OTHER", name="$action_divide_4", chain=true },
+	["DRAW_3_RANDOM"] = { type="OTHER", name="$action_draw_3_random", dynamic="random" },
+	["DRAW_RANDOM"] = { type="OTHER", name="$action_draw_random", dynamic="random" },
+	["DRAW_RANDOM_X3"] = { type="OTHER", name="$action_draw_random_x3", dynamic="random" },
 	["DUPLICATE"] = { type="OTHER", name="$action_duplicate", draws=1 },
 	["DYNAMITE"] = { type="PROJECTILE", name="$action_dynamite" },
 	["ELECTRIC_CHARGE"] = { type="MODIFIER", name="$action_electric_charge", draws=1 },
@@ -203,12 +207,12 @@ return {
 	["HOOK"] = { type="PROJECTILE", name="$action_hook" },
 	["HORIZONTAL_ARC"] = { type="MODIFIER", name="$action_horizontal_arc", draws=1 },
 	["ICEBALL"] = { type="PROJECTILE", name="$action_iceball" },
-	["IF_ELSE"] = { type="OTHER", name="$action_if_else", draws=1 },
-	["IF_END"] = { type="OTHER", name="$action_if_end", draws=1 },
-	["IF_ENEMY"] = { type="OTHER", name="$action_if_enemy", draws=1 },
-	["IF_HALF"] = { type="OTHER", name="$action_if_half", draws=1 },
-	["IF_HP"] = { type="OTHER", name="$action_if_hp", draws=1 },
-	["IF_PROJECTILE"] = { type="OTHER", name="$action_if_projectile", draws=1 },
+	["IF_ELSE"] = { type="OTHER", name="$action_if_else", draws=1, dynamic="conditional" },
+	["IF_END"] = { type="OTHER", name="$action_if_end", draws=1, dynamic="conditional" },
+	["IF_ENEMY"] = { type="OTHER", name="$action_if_enemy", draws=1, dynamic="conditional" },
+	["IF_HALF"] = { type="OTHER", name="$action_if_half", draws=1, dynamic="conditional" },
+	["IF_HP"] = { type="OTHER", name="$action_if_hp", draws=1, dynamic="conditional" },
+	["IF_PROJECTILE"] = { type="OTHER", name="$action_if_projectile", draws=1, dynamic="conditional" },
 	["INFESTATION"] = { type="PROJECTILE", name="$action_infestation" },
 	["I_SHAPE"] = { type="DRAW_MANY", name="$action_i_shape", draws=2, group=2 },
 	["I_SHOT"] = { type="UTILITY", name="$action_i_shot", draws=1 },
@@ -313,9 +317,9 @@ return {
 	["QUANTUM_SPLIT"] = { type="MODIFIER", name="$action_quantum_split", draws=1 },
 	["RAINBOW_TRAIL"] = { type="MODIFIER", name="$action_rainbow_trail", draws=1 },
 	["RANDOM_EXPLOSION"] = { type="MODIFIER", name="$action_random_explosion", draws=1 },
-	["RANDOM_MODIFIER"] = { type="MODIFIER", name="$action_random_modifier" },
+	["RANDOM_MODIFIER"] = { type="MODIFIER", name="$action_random_modifier", dynamic="random" },
 	["RANDOM_PROJECTILE"] = { type="PROJECTILE", name="$action_random_projectile" },
-	["RANDOM_SPELL"] = { type="OTHER", name="$action_random_spell" },
+	["RANDOM_SPELL"] = { type="OTHER", name="$action_random_spell", dynamic="random" },
 	["RANDOM_STATIC_PROJECTILE"] = { type="STATIC_PROJECTILE", name="$action_random_static_projectile" },
 	["RECHARGE"] = { type="MODIFIER", name="$action_recharge", draws=1 },
 	["RECOIL"] = { type="MODIFIER", name="$action_recoil", draws=1 },

@@ -18,6 +18,10 @@
 --     prefix-attach), but so do some OTHER/UTILITY cards (ALPHA, I_SHOT, ...).
 --     RANDOM_MODIFIER draws 0 and terminates a chain. draws=-1 (BURST_X)
 --     gathers the whole remaining deck.
+--   * The DIVIDE_* spells chain WITHOUT a forced draw (meta chain=true):
+--     their bodies read deck[1] and invoke its action directly, never calling
+--     draw_actions() -- so "Divide By N" prefixes the next card like a
+--     modifier, but an empty deck means it does nothing: no wrap, ever.
 --
 -- Input : tokens = ordered array of action_id strings (a wand's cards)
 --         meta   = the table from files/structure_meta.lua
@@ -87,9 +91,13 @@ local function meta_for(meta, id)
 end
 
 -- A card chains (prefix-attaches, like a modifier) iff it force-draws exactly
--- one replacement card and isn't a trigger.
+-- one replacement card and isn't a trigger -- OR carries chain=true (the
+-- DIVIDE_* spells: their bodies invoke deck[1] directly instead of calling
+-- draw_actions(), so the effect is a modifier-style prefix, but with NO
+-- forced draw -- on an empty deck a divide does nothing and never wraps).
 local function chains(m)
-	return m.draws == 1 and m.payload == nil and m.type ~= "DRAW_MANY"
+	return (m.draws == 1 and m.payload == nil and m.type ~= "DRAW_MANY")
+		or m.chain == true
 end
 
 local function is_multicast(m)
@@ -151,7 +159,9 @@ function M.simulate(tokens, meta, opts)
 		while chains(m) do
 			mods[#mods + 1] = card.id
 			note(card)
-			card = draw(true)
+			-- chain=true (divide) reads the deck directly: empty deck = no-op,
+			-- so its follow-up draw is NOT forced and cannot wrap.
+			card = draw(m.chain ~= true)
 			if card == nil then
 				return { kind = "leaf", id = mods[#mods], atype = "MODIFIER",
 					modifiers = mods, dangling = true, first = first, last = last,

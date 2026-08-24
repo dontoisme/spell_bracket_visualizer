@@ -12,7 +12,14 @@ The one that actually costs you damage: when a cast runs past the last spell in 
 
 The wrap gets marked in orange — one bracket enclosing the whole looping structure, from the first card the wrap pulled back in to where the cast ran out of deck, tagged [i]wraps to front[/i] at its closing end. The panel gets a loud [b]WRAPS! -> recharge[/b] banner on that cast.
 
-[h2]New in v1.3.2 — casts, and a rebuilt wrap[/h2]
+[h2]New in v1.3.3 — Divide By fixed, and honest question marks[/h2]
+[b]Divide By spells now group correctly.[/b] Divide By 2/3/4/10 skip the engine's normal draw call and invoke the next card directly, which the mod's spell data missed — so it drew a cast boundary between a divide and its target. In the game they fire [i]together[/i]: [code]Divide By 2, Light Bullet[/code] is one cast, and a multicast that gathers a divide spans the divide [i]and[/i] what it divides. The mod now attaches a Divide By to the next spell exactly like a modifier prefix — with the one real difference kept: a Divide By at the end of the wand does nothing at all, so it never causes a wrap (a trailing modifier does).
+
+[b]Spells the mod can't predict now say so.[/b] The Requirement ("If") spells skip part of the wand when their condition is false at cast time, and the random-draw spells (Random Spell, Draw Random, …) add cards chosen at cast time. No fixed display can show those truthfully, so instead of silently drawing one possibility as if it were certain, the panel marks them with a [b]?[/b] and a footnote. What's drawn is the condition-true / no-extras path.
+
+If you hit a wand whose brackets don't match what it actually does, please post the spell list (or a screenshot) — every confirmed mismatch so far has been fixable, and this update exists because people reported them.
+
+[h2]v1.3.2 — casts, and a rebuilt wrap[/h2]
 [b]Casts are bracketed now.[/b] Which spells fire [i]together[/i] is the thing the mod exists to show, and until now you had to read it off the panel. Each cast gets its own bracket, one level outside the spell groups it contains, and the rainbow runs as a single progression across both axes — advancing per cast and per nesting level — so the colors keep telling you where you are. A cast that fires a single spell isn't bracketed: there's no simultaneity to show, and the pair would just be ink.
 
 [b]The wrap reads as a loop.[/b] It used to be drawn as two separate orange bracket pairs joined by a line under the row, which looked like two unrelated groups rather than one structure continuing around. It's now a single enclosing bracket around everything the wrap touches:
@@ -57,6 +64,7 @@ All settings are in the mod settings menu and apply immediately, no restart:
 [*]Purely visual. It reads your wands and draws on top of the UI — it changes no spells, wands, or world generation, and requests no unsafe Lua APIs. Safe to add to a run in progress, and safe to remove again.
 [*][b]Shuffle wands show nothing at all[/b], on purpose. Their draw order re-randomizes every cycle, so any structure drawn would be one arrangement out of many — a confident-looking lie.
 [*]The panel simulates the engine's real draw rules, read out of the game's own gun.lua. It can't know your mana, though, so a cast that fizzles part-way through may differ from what's shown.
+[*]Spells whose effect depends on the game state at cast time — the Requirement ("If") spells and the random-draw spells — are marked [b]?[/b]; the structure shown is the condition-true / no-extras path.
 [*]Mod-added spells aren't modeled structurally; they appear in the panel as plain leaves.
 [/list]
 

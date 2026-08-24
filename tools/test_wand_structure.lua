@@ -111,6 +111,24 @@ check("BURST_X takes rest of deck",
 	{ "BURST_X", "LIGHT_BULLET", "MAGIC_SHOT", "SPITTER" }, 1,
 	"{(BURST_X:xall LIGHT_BULLET MAGIC_SHOT SPITTER)}")
 
+-- DIVIDE_* invoke deck[1] directly (no draw_actions call) -> they chain like
+-- a modifier prefix, firing WITH the next card in the same cast.
+check("DIVIDE chains to the next card",
+	{ "DIVIDE_2", "LIGHT_BULLET" }, 1,
+	"{[DIVIDE_2]LIGHT_BULLET}")
+
+-- ...so a multicast gathering a divide expression spans divide + its target.
+check("DIVIDE inside a multicast",
+	{ "BURST_2", "DIVIDE_2", "LIGHT_BULLET", "SPITTER" }, 1,
+	"{(BURST_2:x2 [DIVIDE_2]LIGHT_BULLET SPITTER)}")
+
+-- ...but unlike a modifier, a divide on an empty deck does NOTHING: it reads
+-- the deck directly instead of force-drawing, so it never pulls the discard
+-- back in. Trailing DAMAGE wraps (see above); trailing DIVIDE must not.
+check("trailing DIVIDE does not wrap",
+	{ "LIGHT_BULLET", "DIVIDE_2" }, 1,
+	"{LIGHT_BULLET} | {[DIVIDE_2]DIVIDE_2:dangling}")
+
 check("wrap restores slot order",
 	{ "MAGIC_SHOT", "LIGHT_BULLET", "BURST_2" }, 1,
 	"{MAGIC_SHOT} | {LIGHT_BULLET} | " ..

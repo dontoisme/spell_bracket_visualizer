@@ -21,7 +21,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.3.2"
+local VERSION = "v1.3.3"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 -- "large" (1.0) exists for non-pixel fonts: fractional scales only render
@@ -198,15 +198,30 @@ end
 -- enclosing group -- SLIME rainbow by nesting depth (wrap groups in
 -- WRAP_COLOR) -- plus its own label + type color.
 -- Nodes parsed across a wand wrap get a "~" prefix (the card came around).
+-- Spells whose real effect depends on the game state at cast time get a "?"
+-- after their name (meta dynamic=): the IF_* requirement spells skip part of
+-- the deck when their condition is false, and the random-draw spells cast
+-- extra cards no static view can show. The structure drawn is the
+-- condition-true / no-extras path; the "?" says so instead of pretending.
+local function dyn_name(id, rows)
+	local name = display_name(id)
+	local m = meta[id]
+	if m and m.dynamic then
+		rows.any_dynamic = true
+		return name .. "?"
+	end
+	return name
+end
+
 local function walk(rows, node, ancestor_colors, depth)
 	local mods = ""
 	if node.modifiers and #node.modifiers > 0 then
 		local names = {}
-		for _, m in ipairs(node.modifiers) do names[#names + 1] = display_name(m) end
+		for _, m in ipairs(node.modifiers) do names[#names + 1] = dyn_name(m, rows) end
 		mods = "[" .. table.concat(names, ", ") .. "] "
 	end
 
-	local name = display_name(node.id)
+	local name = dyn_name(node.id, rows)
 	-- no "xN" / "(trig N)" suffixes (user calls, 2026-06-11): the spell name
 	-- already says it and the indented children below show what was gathered
 	-- or carried as payload
@@ -243,6 +258,10 @@ local function sim_rows(sim, cfg, always)
 		end
 		local spine = show_headers and { HEADER_COLOR } or {}
 		for _, node in ipairs(cast.nodes) do walk(rows, node, spine, 0) end
+	end
+	if rows.any_dynamic then
+		rows[#rows + 1] = { bars = {}, label = "? = depends on game state when cast",
+			color = COLOR.OTHER }
 	end
 	return rows
 end

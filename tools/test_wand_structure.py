@@ -27,8 +27,13 @@ def load_meta():
     for m in re.finditer(r'\["([^"]+)"\] = \{ ([^}]*) \},', src):
         rec = {}
         body = m.group(2)
-        for k, v in re.findall(r'(\w+)=("[^"]*"|-?\d+)', body):
-            rec[k] = v.strip('"') if v.startswith('"') else int(v)
+        for k, v in re.findall(r'(\w+)=("[^"]*"|-?\d+|true|false)', body):
+            if v.startswith('"'):
+                rec[k] = v.strip('"')
+            elif v in ("true", "false"):
+                rec[k] = v == "true"
+            else:
+                rec[k] = int(v)
         meta[m.group(1)] = rec
     assert len(meta) > 400, "structure_meta.lua parse failed"
     return meta
@@ -55,7 +60,10 @@ def has_greek(ids):
 
 
 def chains(m):
-    return m.get("draws") == 1 and "payload" not in m and m["type"] != "DRAW_MANY"
+    # Mirror: draws==1 non-trigger cards chain; so do chain=true cards
+    # (DIVIDE_*: prefix-attach with NO forced draw -- they never wrap).
+    return ((m.get("draws") == 1 and "payload" not in m and m["type"] != "DRAW_MANY")
+            or m.get("chain") is True)
 
 
 def is_multicast(m):
@@ -108,7 +116,8 @@ def simulate(tokens, meta, spells_per_cast=None):
         while chains(m):
             mods.append(card["id"])
             note(card)
-            card = draw(True)
+            # chain=true (divide) reads the deck directly: not a forced draw.
+            card = draw(m.get("chain") is not True)
             if card is None:
                 node = {"kind": "leaf", "id": mods[-1], "atype": "MODIFIER",
                         "modifiers": mods, "dangling": True,
@@ -274,6 +283,23 @@ def main():
     check("BURST_X takes rest of deck",
           ["BURST_X", "LIGHT_BULLET", "MAGIC_SHOT", "SPITTER"], 1,
           "{(BURST_X:xall LIGHT_BULLET MAGIC_SHOT SPITTER)}")
+
+    # DIVIDE_* invoke deck[1] directly (no draw_actions call) -> they chain
+    # like a modifier prefix, firing WITH the next card in the same cast.
+    check("DIVIDE chains to the next card",
+          ["DIVIDE_2", "LIGHT_BULLET"], 1,
+          "{[DIVIDE_2]LIGHT_BULLET}")
+
+    # ...so a multicast gathering a divide expression spans divide + target.
+    check("DIVIDE inside a multicast",
+          ["BURST_2", "DIVIDE_2", "LIGHT_BULLET", "SPITTER"], 1,
+          "{(BURST_2:x2 [DIVIDE_2]LIGHT_BULLET SPITTER)}")
+
+    # ...but a divide on an empty deck does NOTHING: it reads the deck
+    # directly instead of force-drawing, so it never wraps the discard in.
+    check("trailing DIVIDE does not wrap",
+          ["LIGHT_BULLET", "DIVIDE_2"], 1,
+          "{LIGHT_BULLET} | {[DIVIDE_2]DIVIDE_2:dangling}")
 
     # Wrap pulls discard in SLOT order (slot 1 first), not cast order.
     check("wrap restores slot order",
