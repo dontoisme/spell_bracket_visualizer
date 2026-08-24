@@ -394,6 +394,13 @@ local BRACKET_RAISE = 0 -- GUI: extra lift of all bracket glyphs above the
 -- are the two tuning knobs; adjust from a screenshot.
 local BRACKET_EXTEND_TOP = -1 -- GUI: bracket top relative to the row top (- = lower)
 local BRACKET_EXTEND_BOT = 2  -- GUI: bracket bottom relative to the row bottom (+ = lower)
+-- GUI drop of the "wraps to front" tag below the wand box's TOP border. The tag
+-- lives INSIDE the box, right-aligned in the empty band beside the wand's
+-- "Shuffle / Spells per cast" header -- never below the box, where it collided
+-- with the border and crowded the next wand down. It is anchored to the box,
+-- never to the bracket it tags -- see the note in draw_delims. Nudge this one
+-- number to move it within the header band.
+local WRAP_TAG_INSET = 4
 
 local function line(gui, id, x, y, w, h, c, a)
 	a = a or 1
@@ -612,9 +619,10 @@ local function plan_delims(groups)
 	return glyphs
 end
 
--- box_right = the wand box's right edge (GUI), used only to keep the
--- "wraps to front" label inside the box.
-local function draw_delims(gui, groups, refw, rows_geo, idc, box_right)
+-- box_right / box_top = the wand box's right and top edges (GUI). They place
+-- the "wraps to front" tag, which is anchored to the BOX rather than to the
+-- bracket it tags -- see the note at the tag below.
+local function draw_delims(gui, groups, refw, rows_geo, idc, box_right, box_top)
 	local glyphs = plan_delims(groups)
 
 	for _, gl in ipairs(glyphs) do
@@ -636,28 +644,48 @@ local function draw_delims(gui, groups, refw, rows_geo, idc, box_right)
 		local into = (gl.side == "left") and 1 or -1
 		bracket(gui, idc, gl.x, gl.top, gl.bot, into, gl.c, gl.stack)
 
-		-- "wraps to front" tags the wrap enclosure's closing bracket -- the
-		-- point the structure loops back from. (Not "~wrap": Noita's font
-		-- renders ~ as a double quote.) It sits just past that bracket, below
-		-- the slot row so it clears the box's own "Spells/Cast" header, and
-		-- slides left rather than running off the box onto the game world --
-		-- which is what happens whenever the wrap ends near the last slot.
+		-- "wraps to front" tags the wrap enclosure -- the point the structure
+		-- loops back from. (Not "~wrap": Noita's font renders ~ as a double
+		-- quote.) It is anchored to the BOX, NOT to the bracket it tags, and so
+		-- holds still no matter what the brackets do.
+		--
+		-- Hanging it off the glyph (gl.x / gl.bot) is what it used to do, and
+		-- that drifts: a wrap enclosure is the OUTERMOST delimiter on its
+		-- column, so it always carries the deepest stack on the wand, and stack
+		-- pushes a glyph both right (STACK_X) and down (STACK_Y). The more
+		-- nesting a wand had, the further the tag slid -- down onto the box's
+		-- bottom border where it was unreadable, and right until the box_right
+		-- clamp caught it. Two variables the reader cannot see moved the one
+		-- piece of text on the row that has to be legible.
+		--
+		-- It now sits INSIDE the box, right-aligned in the empty band beside
+		-- the wand's "Shuffle / Spells per cast" header. Nothing about the
+		-- bracket enters the placement. Below the box -- where it used to end
+		-- up -- is not the wand's space at all: it is the gap before the next
+		-- wand box, so the tag read as belonging to the wrong wand and landed
+		-- on a border. There is no room under the slot row either (the box
+		-- bottom is only ~3 units below it, less than the text is tall), so
+		-- the header band is the one place inside the box that fits it.
+		-- This costs nothing in meaning: the wrapping cast always runs to the
+		-- deck's END (see wrap_delims), so the closing bracket is at the row's
+		-- right end and the tag sits directly above it.
 		if gl.label then
-			local lx2 = gl.x + TICK_W + 2
-			if box_right then
-				-- raw engine call, not text_dims: that lives further down the
-				-- file with the panel's font-safety helpers. A font that
-				-- measures degenerately (docs/FONT_COMPAT.md) falls back to an
-				-- estimate rather than clamping the label off to the left.
-				local ok, tw = pcall(GuiGetTextDimensions, gui, gl.label, 1)
-				tw = (ok and tonumber(tw)) or 0
-				if tw <= 0 then tw = 5 * #gl.label end
-				local limit = box_right - tw - 2
-				if lx2 > limit then lx2 = limit end
-				if lx2 < 2 then lx2 = 2 end
-			end
+			-- raw engine call, not text_dims: that lives further down the file
+			-- with the panel's font-safety helpers. A font that measures
+			-- degenerately (docs/FONT_COMPAT.md) falls back to an estimate
+			-- rather than collapsing the tag onto the left edge.
+			local ok, tw = pcall(GuiGetTextDimensions, gui, gl.label, 1)
+			tw = (ok and tonumber(tw)) or 0
+			if tw <= 0 then tw = 5 * #gl.label end
+			local lx2 = box_right and (box_right - tw - 2) or (gl.x + TICK_W + 2)
+			if lx2 < 2 then lx2 = 2 end
+			-- inside the box's header band when we know where the box starts;
+			-- otherwise the old row-relative drop, but pinned at stack 0 so it
+			-- still cannot drift.
+			local ly = box_top and (box_top + WRAP_TAG_INSET)
+				or (yr.bot + BRACKET_EXTEND_BOT - BRACKET_RAISE - 3)
 			GuiColorSetForNextWidget(gui, gl.c[1], gl.c[2], gl.c[3], 1)
-			GuiText(gui, lx2, gl.bot - 3, gl.label)
+			GuiText(gui, lx2, ly, gl.label)
 		end
 	end
 end
@@ -875,7 +903,7 @@ local function draw_box_brackets(gui, refw, wands, show_probe)
 				rows[k] = math.floor(x / wd.per_row)
 			end
 			draw_delims(gui, collect_wand_delims(wd.sim, cols, rows),
-				refw, wd.rows_geo, idc, wd.right)
+				refw, wd.rows_geo, idc, wd.right, wd.top * U * refw)
 		end
 	end
 end

@@ -267,5 +267,52 @@ do
 	passck("bare/tagged", glyphs[2].label == "wraps to front")
 end
 
+-- ---- 7. the "wraps to front" tag holds still --------------------------------
+--
+-- The tag is anchored to the wand BOX, not to the bracket it labels. A wrap
+-- enclosure is the outermost delimiter on its column, so it carries the
+-- deepest stack on the wand -- and stack moves a glyph right (STACK_X) AND
+-- down (STACK_Y). While the tag hung off the glyph, every extra nesting level
+-- in the wand slid the tag further down and right, until it sat on the box's
+-- bottom border, unreadable. This drives the REAL draw_delims through Gui
+-- stubs and asserts the drawn position does not depend on stack depth at all.
+do
+	local drawn
+	function GuiColorSetForNextWidget() end
+	function GuiImage() end
+	function GuiText(gui, x, y, text) drawn = { x = x, y = y, text = text } end
+	function GuiGetTextDimensions(gui, text) return 6 * #text, 9 end
+
+	local ORANGE, GREY = T.WRAP_COLOR, { 0.6, 0.6, 0.6 }
+	local REFW, BOX_RIGHT, BOX_TOP = 640, 500, 80
+	local rows_geo = { { top = 100, bot = 112 } }
+
+	-- The wrap enclosure closing on column 9, with `depth` other groups closing
+	-- on that same column so the enclosure stacks outward past them. Groups are
+	-- collected outer-first, so the wrap (added first) takes the top stack --
+	-- exactly as collect_wand_delims orders them.
+	local function tag_at(depth)
+		local groups = { { ca = 0, ra = 0, cb = 9, rb = 0, c = ORANGE, wrap = true } }
+		for i = 1, depth do
+			groups[#groups + 1] = { ca = i, ra = 0, cb = 9, rb = 0, c = GREY }
+		end
+		drawn = nil
+		T.draw_delims(nil, groups, REFW, rows_geo, { n = 0 }, BOX_RIGHT, BOX_TOP)
+		return drawn
+	end
+
+	local flat, deep = tag_at(0), tag_at(6)
+	passck("tag/drawn at all", flat ~= nil and flat.text == "wraps to front")
+	eq("tag/x does not move with stack depth", deep and deep.x, flat and flat.x)
+	eq("tag/y does not move with stack depth", deep and deep.y, flat and flat.y)
+	eq("tag/right-aligned inside the box",
+		flat and flat.x, BOX_RIGHT - 6 * #"wraps to front" - 2)
+	eq("tag/sits in the box's header band", flat and flat.y, BOX_TOP + 4)
+	-- INSIDE the box: never under the slot row (no room -- the box bottom is
+	-- barely below it) and never past it into the gap before the next wand.
+	passck("tag/above the slot row, inside the box",
+		(flat and flat.y or 0) > BOX_TOP and (flat and flat.y or 0) < rows_geo[1].top)
+end
+
 print(failures == 0 and "\nALL PASS" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)
