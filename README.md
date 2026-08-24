@@ -105,6 +105,7 @@ tools/preview_wand.lua       # prints any wand's brackets as a Lisp line, no gam
 tools/test_wand_structure.lua # runs the real wand_structure.lua + tests (primary)
 tools/test_wand_structure.py # Python cross-check mirror of wand_structure.lua
 tools/test_slot_delims.lua   # runs the real slot-bracket planner (nesting, casts, wrap)
+tools/test_panel_rows.lua    # runs the real panel row clamp (+N more fold, sticky legend)
 tools/gen_icons.py           # (retired icon-recolor feature; see below)
 tools/make_release.sh        # builds dist/<mod>-<version>.zip for manual installs
 INSTALL.txt                  # manual-install guide (shipped in the release zip)
@@ -132,7 +133,9 @@ python3 tools/gen_structure_meta.py
 4. `lua tools/test_slot_delims.lua` runs the real slot-bracket planner —
    nesting depth, cast brackets, the wrap enclosure, stacking on a shared card
    edge, wands with empty slots.
-5. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
+5. `lua tools/test_panel_rows.lua` runs the real panel row clamp — the
+   `... +N more` fold and the sticky `?` legend that has to survive it.
+6. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
    (`docs/FONT_COMPAT.md`) by driving the real panel layout with stubbed
    pixel-like / zero-measuring / nil-returning fonts, then prints the in-game
    checklist for verifying against the Better Font mod or a TTF language.

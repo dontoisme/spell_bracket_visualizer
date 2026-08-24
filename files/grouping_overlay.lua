@@ -244,7 +244,9 @@ local function sim_rows(sim, cfg, always)
 	local rows = {}
 	if #always > 0 then
 		local names = {}
-		for _, id in ipairs(always) do names[#names + 1] = display_name(id) end
+		-- through dyn_name: an always-cast Random Spell / If is just as
+		-- unpredictable as one in the deck, and must carry the same "?".
+		for _, id in ipairs(always) do names[#names + 1] = dyn_name(id, rows) end
 		rows[#rows + 1] = { bars = {}, label = "always: " .. table.concat(names, ", "),
 			color = COLOR.PASSIVE }
 	end
@@ -259,9 +261,11 @@ local function sim_rows(sim, cfg, always)
 		local spine = show_headers and { HEADER_COLOR } or {}
 		for _, node in ipairs(cast.nodes) do walk(rows, node, spine, 0) end
 	end
+	-- sticky: it explains "?" marks that survive the row clamp, so it must
+	-- outlive the "... +N more" cut rather than being the first line dropped.
 	if rows.any_dynamic then
 		rows[#rows + 1] = { bars = {}, label = "? = depends on game state when cast",
-			color = COLOR.OTHER }
+			color = COLOR.OTHER, sticky = true }
 	end
 	return rows
 end
@@ -1088,11 +1092,19 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	local max_rows = math.floor((bot_limit - y0 - pad - 2 - line_h) / line_h)
 	if max_rows < 2 then max_rows = 2 end
 	if #rows > max_rows then
+		-- A sticky trailing row (the "?" footnote) is held back from the cut and
+		-- re-appended after it: dropping the legend while its "?" marks stay
+		-- visible above would leave them unexplained. It costs one line of the
+		-- budget, so the "+N more" count is over the CONTENT rows only.
+		local sticky = rows[#rows].sticky and rows[#rows] or nil
+		local budget = max_rows - (sticky and 1 or 0)
+		local content = #rows - (sticky and 1 or 0)
 		local kept = {}
-		for i = 1, max_rows - 1 do kept[i] = rows[i] end
-		kept[max_rows] = { bars = {},
-			label = "... +" .. (#rows - max_rows + 1) .. " more",
+		for i = 1, budget - 1 do kept[i] = rows[i] end
+		kept[budget] = { bars = {},
+			label = "... +" .. (content - budget + 1) .. " more",
 			color = HEADER_COLOR }
+		if sticky then kept[#kept + 1] = sticky end
 		rows = kept
 	end
 
