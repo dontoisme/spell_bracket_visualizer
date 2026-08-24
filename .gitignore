@@ -20,3 +20,7 @@ __pycache__/
 # Internal-only docs: kept local for development, not published to the repo
 /CLAUDE.md
 /docs/STATUS.md
+
+# Game files extracted from data.wak for the differential harness.
+# Noita content -- never commit these (see tools/extract_gun.py).
+/.gun_ref/
