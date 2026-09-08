@@ -173,6 +173,10 @@ structure is exactly what would land on the slot row. It says nothing about the
 *geometry* — where the wand box sits, how the glyphs meet the card art — which
 is calibrated from screenshots and still needs the game.
 
+Pass `--tier` to check the wand's structure confidence (exact/approximate/unknown) and name any cards that block a fully determined simulation, e.g. `lua tools/preview_wand.lua ADD_TRIGGER,DAMAGE,LIGHT_BULLET,BOMB --tier --mana`.
+Pass `--mana` to print the mana cost of each cast alongside the spells it contains.
+Pass `--uses=SLOT:N,SLOT:N` to mark depleted spells (0 charges) for the simulator to track through wraps, e.g. `lua tools/preview_wand.lua LIGHT_BULLET,LIGHT_BULLET,DAMAGE --per-cast=1 --uses=3:0 --mana`.
+
 Unsafe Lua APIs are not requested (`request_no_api_restrictions="0"` in `mod.xml`).
 
 ## Retired: icon recolor
