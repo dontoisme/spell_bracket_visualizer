@@ -568,13 +568,26 @@ end
 -- enclosing the whole looping structure -- see wrap_delims.
 local function collect_delims(nodes, depth, cols, rows, out)
 	for _, node in ipairs(nodes) do
-		if node.children and #node.children > 0 and node.last then
+		-- A RESET node has no children -- nothing about the cards it cleared
+		-- ran -- but under the mod's bracket definition its bracket must still
+		-- enclose exactly what it removed (node.cleared), so it is
+		-- bracket-worthy on that alone, same as a node with children.
+		local worthy = (node.children and #node.children > 0)
+			or (node.kind == "reset" and node.cleared and #node.cleared > 0)
+		if worthy and node.last then
 			local head = node.head or node.first
 			-- flast, not last: on a group that wrapped, last reaches back into
 			-- the wrapped-in segment at the wand's start, and a wrap can pull in
 			-- MORE cards than precede the head -- so last is not even an upper
 			-- bound on the forward run. flast is the last card drawn before the
-			-- wrap; it equals last on every group that didn't wrap.
+			-- wrap; it equals last on every group that didn't wrap. Same rule
+			-- for a RESET node: its own wrap (the one-shot restore) always
+			-- happens AFTER it finishes clearing, so a RESET that causes the
+			-- wrap still has flast == last (nothing it cleared was wrapped-in);
+			-- a RESET that clears cards already in a wrapped-in segment (a
+			-- second RESET in an already-wrapped cast) instead gets flast <
+			-- last, and those wrapped-in cleared cards are left to the wrap's
+			-- own enclosure (wrap_delims) rather than double-bracketed here.
 			local tail = node.flast or node.last
 			-- Brackets carry NO text labels (user calls, 2026-06-11): the
 			-- card art already says x2/x3, a trigger's payload shows as the
@@ -587,7 +600,9 @@ local function collect_delims(nodes, depth, cols, rows, out)
 				rb = rows[tail] or 0,
 				c = nest_color(depth),
 			}
-			collect_delims(node.children, depth + 1, cols, rows, out)
+			if node.children and #node.children > 0 then
+				collect_delims(node.children, depth + 1, cols, rows, out)
+			end
 		end
 	end
 end

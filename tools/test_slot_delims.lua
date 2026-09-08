@@ -455,5 +455,66 @@ do
 		show(glyphs), "L0 R3")
 end
 
+-- ---- 11. T1.10d -- RESET's cleared cards get their own bracket -------------
+--
+-- LIGHT_BULLET, RESET, SPITTER, BOMB at 1 spell/cast. Cast 1 fires the single
+-- Light bullet -- no bracket (one spell, nothing simultaneous). Cast 2 draws
+-- RESET (slot 2), which clears the rest of the deck (Spitter/Bomb, slots 3-4)
+-- and then restores it, wrapping the wand. RESET's own bracket must enclose
+-- exactly what it cleared -- head (its own slot) through the last cleared
+-- card -- even though the node has no children: nothing about the cleared
+-- cards ran, so collect_delims can't recurse into them, but the bracket
+-- definition (README "What a bracket means") still owes them a pair.
+do
+	local glyphs, groups, sim = plan(
+		{ "LIGHT_BULLET", "RESET", "SPITTER", "BOMB" }, 1)
+	passck("reset/cast 2 wraps", sim.casts[2].wrapped == true)
+	local node = sim.casts[2].nodes[1]
+	eq("reset/RESET node kind", node.kind, "reset")
+	eq("reset/RESET clears slots 3-4", table.concat(node.cleared, ","), "3,4")
+	eq("reset/cast 1 draws no bracket, RESET gets exactly one", #groups, 1)
+	-- slots 2..4 -> columns 1..3
+	eq("reset/bracket spans RESET's slot through the last cleared card",
+		show(glyphs), "L1 R3")
+	passck("reset/nothing is orange (no group actually wrapped)",
+		orange_is_wrap_only(glyphs))
+end
+
+-- ---- 12. T1.10d -- a bare RESET clears nothing, so it draws no bracket -----
+--
+-- RESET alone: the deck is empty by the time it fires, so node.cleared is
+-- empty and there is nothing to enclose. Still wraps (the one-shot restore
+-- always fires), but a wrap with nothing inside it draws no enclosure either
+-- (case 6's rule) since no node has a nonempty span to wrap around.
+do
+	local glyphs, groups, sim = plan({ "RESET" }, 1)
+	passck("bare-reset/wraps", sim.casts[1].wrapped == true)
+	local node = sim.casts[1].nodes[1]
+	eq("bare-reset/kind", node.kind, "reset")
+	eq("bare-reset/clears nothing", #node.cleared, 0)
+	eq("bare-reset/no delimiters at all", #groups, 0)
+	eq("bare-reset/no glyphs", show(glyphs), "")
+end
+
+-- ---- 13. T1.10d -- a chained modifier sits outside RESET's bracket ---------
+--
+-- DAMAGE, RESET, SPITTER at 1 spell/cast. DAMAGE chains onto RESET as its
+-- modifier prefix (meta: draws=1, no payload -> chains()), so RESET's node
+-- spans first=1 (DAMAGE's slot) .. last=3, but its BRACKET uses head (its
+-- own slot, 2), not first -- same as every other bracket-worthy node -- so
+-- the modifier prints outside the bracket, matching the "[mods] name" panel
+-- convention.
+do
+	local glyphs, groups, sim = plan({ "DAMAGE", "RESET", "SPITTER" }, 1)
+	local node = sim.casts[1].nodes[1]
+	eq("reset-mod/RESET's span includes the modifier's slot", node.first, 1)
+	eq("reset-mod/RESET's own slot is 2", node.head, 2)
+	eq("reset-mod/RESET clears slot 3", table.concat(node.cleared, ","), "3")
+	eq("reset-mod/one bracket, from RESET's slot (not the modifier's)", #groups, 1)
+	-- slots 2..3 -> columns 1..2; DAMAGE (slot 1 / column 0) sits outside
+	eq("reset-mod/bracket runs head..last, modifier excluded",
+		show(glyphs), "L1 R2")
+end
+
 print(failures == 0 and "\nALL PASS" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)
