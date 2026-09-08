@@ -191,6 +191,26 @@ eq("two-sticky: hidden count accounts for every content row", shown + hidden, 20
 
 -- ---- 5. T1.4 -- the named tier footnote + the always-on bracket legend -----
 
+-- Regression (found in-game, v1.4.0 first run): a wand whose ONLY offender is a
+-- tier-approximate card with no `dynamic` flag (Alpha) hid its brackets and drew
+-- the ? glyph, but the panel never said why -- the footnote was gated on
+-- any_dynamic, which only IF_*/random cards set. The row must appear, and the
+-- Alpha row itself must carry the "?".
+do
+	local node = { kind = "leaf", id = "ALPHA", atype = "OTHER", modifiers = {} }
+	local sim = { casts = { { nodes = { node }, wrapped = false, mana = 40 } }, wrapped = false }
+	local rows = T.sim_rows(sim, { spells_per_cast = 1 }, {}, { "ALPHA" })
+	local footnote, alpha_row
+	for _, r in ipairs(rows) do
+		if r.label:match("^%?%s*=") then footnote = r end
+		if r.label:find("Alpha", 1, true) and not r.label:match("^%?") then alpha_row = r end
+	end
+	eq("alpha-only: footnote present without any dynamic card", footnote ~= nil, true)
+	eq("alpha-only: footnote names Alpha", footnote and footnote.label:find("Alpha", 1, true) ~= nil, true)
+	eq("alpha-only: the Alpha row is marked ?", alpha_row and alpha_row.label:find("Alpha?", 1, true) ~= nil, true)
+end
+
+
 do
 	local node = { kind = "leaf", id = "IF_ENEMY", atype = "OTHER", modifiers = {} }
 	local sim = { casts = { { nodes = { node }, wrapped = false, mana = 0 } }, wrapped = false }

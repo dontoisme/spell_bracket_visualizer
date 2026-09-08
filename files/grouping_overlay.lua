@@ -227,10 +227,13 @@ end
 -- the deck when their condition is false, and the random-draw spells cast
 -- extra cards no static view can show. The structure drawn is the
 -- condition-true / no-extras path; the "?" says so instead of pretending.
+-- A card whose tier is not "exact" (Greeks, IF_*, random draws, unknown
+-- modded spells) gets the same "?": it is why the wand's slot brackets are
+-- hidden, and the footnote below names it.
 local function dyn_name(id, rows)
 	local name = display_name(id)
 	local m = emeta[id]
-	if m and m.dynamic then
+	if (m and m.dynamic) or wand_structure.tier(m) ~= "exact" then
 		rows.any_dynamic = true
 		return name .. "?"
 	end
@@ -357,7 +360,7 @@ local function sim_rows(sim, cfg, always, tier_ids)
 	-- sticky: these explain marks/warnings that survive the row clamp, so they
 	-- must outlive the "... +N more" cut rather than being the first lines
 	-- dropped. draw_panel holds back every trailing sticky row, in order.
-	if rows.any_dynamic then
+	if rows.any_dynamic or (tier_ids and #tier_ids > 0) then
 		if tier_ids and #tier_ids > 0 then
 			local names = {}
 			for _, id in ipairs(tier_ids) do names[#names + 1] = display_name(id) end
