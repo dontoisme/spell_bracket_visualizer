@@ -21,6 +21,12 @@ for exactly this reason: when the page gets clobbered, it should at least be
 clobbered with the current message rather than a stale one. Keep the two in
 sync when the lead changes.
 
+## Release notes — v1.4.0 — 2026-09-08
+
+Confidence tiers for spells (exact/approximate/uncertain), live spell table for mods, depleted spell modeling, fixed Add Trigger/Timer/Death Trigger grouping, corrected Greek chaining, mana cost tracking, and verification against Noita's own gun.lua.
+
+Updated settings: Uncertain Wands: Slot Brackets (new), Ignore Depleted Spells (redefined), Greek Wands: Keep Depleted Spells (deprecated no-op). Updated Settings section, known limitations, and changelog in all docs.
+
 ## Description rewrite — 2026-08-24
 
 Reordered around reader intent rather than feature list. What changed and why:

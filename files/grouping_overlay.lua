@@ -40,7 +40,7 @@ local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.3.3"
+local VERSION = "v1.4.0"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 -- "large" (1.0) exists for non-pixel fonts: fractional scales only render

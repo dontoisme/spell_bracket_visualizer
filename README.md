@@ -98,11 +98,18 @@ All settings are runtime-scoped and apply immediately.
   (Japanese, …) the game ignores the smaller sizes; the panel detects that and
   switches itself to **Large** automatically (see `docs/FONT_COMPAT.md`).
 - **Slot Brackets** — the in-UI rainbow brackets (on by default).
-- **Ignore Depleted Spells** — leave 0-charge spells out of the structure,
-  since they can't fire (on by default).
-- **Greek Wands: Keep Depleted Spells** — Greek spells (Alpha, Tau, Omega…)
-  re-cast by slot *position*, so a depleted spell still shifts what they read;
-  on those wands keep everything (on by default).
+- **Ignore Depleted Spells** — model spells with 0 charges the way the game
+  does it (they're skipped and the next card drawn instead), giving the right
+  wand structure and wrap points. Turn off to pretend every card fires,
+  depleted or not (on by default).
+- **Greek Wands: Keep Depleted Spells** — no longer does anything; the mod now
+  models depleted spells correctly for all wands. This option will be removed
+  in the next release.
+- **Uncertain Wands: Slot Brackets** — a wand holding a spell whose deck effect
+  the mod can't follow exactly (Greek spells, IF spells, random draws, unknown
+  modded spells) draws no slot brackets by default and shows a small `?` at the
+  end of the row; Hide keeps that rule, Show draws the brackets anyway for
+  players who want the approximation (Hide by default).
 - **Debug Info (for bug reports)** — resolution/GUI readout plus per-box guide
   lines; screenshot this if the brackets ever misalign.
 
@@ -190,8 +197,13 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
 
 ## Known limitations
 
-- Only the standard spell set (`gun_actions.lua`) is modeled; mod-added spells
-  appear in the panel as plain leaves.
+- Mod-added spells get their *type* from the game's live spell table, so modded
+  modifiers and multicasts group the way vanilla ones do -- but how many cards a
+  modded spell really draws isn't known yet, so a wand holding one is marked
+  uncertain and hides its slot brackets by default (see the setting above).
+- A Divide By followed by a multicast or trigger is approximated: the game
+  re-invokes the divided card, drawing *fresh* cards on each invocation; the
+  panel shows the first invocation's grouping.
 - The panel can't know your mana, so a cast that fizzles mid-way on mana may
   differ from the simulation. (Depleted 0-charge spells *are* handled — see
   the settings above.)
@@ -200,9 +212,6 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
   condition is false, and the random-draw spells (Random Spell, Draw
   Random, …) cast extra cards chosen at cast time. The structure shown is the
   condition-true / no-extras path.
-- A Divide By followed by a multicast or trigger is approximated: the game
-  re-invokes the divided card, drawing *fresh* cards on each invocation; the
-  panel shows the first invocation's grouping.
 - Shuffle wands get **no panel and no brackets** — the real draw order
   randomizes each cycle, so any displayed structure would be just one
   arrangement of many.
