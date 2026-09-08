@@ -290,5 +290,85 @@ check("greek wand keeps depleted card",
 	greek_kept, 1,
 	"{TAU} | {LIGHT_BULLET} | {[DAMAGE]LIGHT_BULLET}")
 
+-- ---- tiers (T1.3) ------------
+
+local function eq(name, got, expect)
+	local ok = got == expect
+	if not ok then failures = failures + 1 end
+	print(string.format("%s %s\n    expect %s\n    got    %s",
+		ok and "PASS" or "FAIL", name, tostring(expect), tostring(got)))
+end
+
+local function check_tier(name, ids, m, expect_tier, expect_offenders)
+	local t, off = S.wand_tier(ids, m or meta)
+	local got = t .. " {" .. table.concat(off, ",") .. "}"
+	local expect = expect_tier .. " {" .. table.concat(expect_offenders, ",") .. "}"
+	eq(name, got, expect)
+end
+
+eq("tier: nil record is unknown", S.tier(nil), "unknown")
+eq("tier: no tier field is exact", S.tier(meta["LIGHT_BULLET"]), "exact")
+eq("tier: ALPHA is approximate", S.tier(meta["ALPHA"]), "approximate")
+eq("tier: ZETA is unknown", S.tier(meta["ZETA"]), "unknown")
+-- Defensive: a record that says it is dynamic but forgot its tier is still at
+-- least approximate (the generator sets both; a runtime record might not).
+eq("tier: dynamic without tier is approximate",
+	S.tier({ type = "OTHER", dynamic = "random" }), "approximate")
+
+check_tier("wand tier: all-exact wand",
+	{ "DAMAGE", "LIGHT_BULLET", "BOMB" }, nil, "exact", {})
+check_tier("wand tier: empty wand", {}, nil, "exact", {})
+check_tier("wand tier: ALPHA makes it approximate",
+	{ "LIGHT_BULLET", "ALPHA", "BOMB" }, nil, "approximate", { "ALPHA" })
+check_tier("wand tier: ZETA wins, offenders in appearance order",
+	{ "ZETA", "LIGHT_BULLET", "ALPHA" }, nil, "unknown", { "ZETA", "ALPHA" })
+check_tier("wand tier: id absent from meta is unknown",
+	{ "LIGHT_BULLET", "MODDED_MYSTERY" }, nil, "unknown", { "MODDED_MYSTERY" })
+check_tier("wand tier: duplicate offenders collapse",
+	{ "ALPHA", "ALPHA", "LIGHT_BULLET", "ALPHA" }, nil,
+	"approximate", { "ALPHA" })
+-- A synthetic (runtime-shaped) record with dynamic but no tier still counts.
+local synth = setmetatable({ ODDBALL = { type = "OTHER", dynamic = "random" } },
+	{ __index = meta })
+check_tier("wand tier: synthetic dynamic record via __index fallback",
+	{ "LIGHT_BULLET", "ODDBALL" }, synth, "approximate", { "ODDBALL" })
+
+-- ---- per-cast mana (T1.8) ------------
+
+-- Costs are read out of the generated table, never hardcoded here.
+local function cost(id) return meta[id].mana end
+
+local function check_mana(name, tokens, spc, expect)
+	local sim = S.simulate(tokens, meta, { spells_per_cast = spc })
+	local got = {}
+	for _, c in ipairs(sim.casts) do got[#got + 1] = "mana=" .. tostring(c.mana) end
+	local want = {}
+	for _, v in ipairs(expect) do want[#want + 1] = "mana=" .. tostring(v) end
+	eq(name, table.concat(got, " | "), table.concat(want, " | "))
+end
+
+check_mana("mana: single card is its own cost",
+	{ "LIGHT_BULLET" }, nil, { cost("LIGHT_BULLET") })
+
+check_mana("mana: add trigger cast sums all three drawn cards",
+	{ "ADD_TRIGGER", "LIGHT_BULLET", "BOMB" }, nil,
+	{ cost("ADD_TRIGGER") + cost("LIGHT_BULLET") + cost("BOMB") })
+
+-- An id with no record at all costs ACTION_MANA_DRAIN_DEFAULT (10).
+check_mana("mana: unknown id contributes the default 10",
+	{ "LIGHT_BULLET", "MODDED_MYSTERY" }, nil,
+	{ cost("LIGHT_BULLET") + 10 })
+
+-- Add Mana (MANA_REDUCE) has a NEGATIVE cost: it credits the pool, so the
+-- cast total goes down and can even go negative.
+assert(cost("MANA_REDUCE") < 0, "MANA_REDUCE should have negative mana")
+check_mana("mana: Add Mana subtracts",
+	{ "MANA_REDUCE", "LIGHT_BULLET" }, nil,
+	{ cost("MANA_REDUCE") + cost("LIGHT_BULLET") })
+
+check_mana("mana: per-cast, not per-wand",
+	{ "LIGHT_BULLET", "BOMB" }, 1,
+	{ cost("LIGHT_BULLET"), cost("BOMB") })
+
 print(string.format("\n%d failure(s)", failures))
 os.exit(failures > 0 and 1 or 0)

@@ -42,6 +42,8 @@
 -- Output of M.simulate:
 --   { casts = { { nodes = {...}, wrapped = bool,
 --                 first, last, wfirst, wlast,
+--                 mana = N -- total mana this cast's drawn cards cost (a
+--                          -- negative-mana card, e.g. Add Mana, subtracts),
 --                 slots = { i, ... } -- opts.trace only: every slot the cast
 --                                    -- drew or directly consumed (wrapped-in
 --                                    -- cards included), sorted
@@ -102,6 +104,52 @@ function M.has_greek(ids)
 	end
 	return false
 end
+
+-- ---- confidence tiers (docs/ADVANCED_SCENARIOS_PLAN.md 2) ----------------
+-- How much of a card's deck behaviour this simulator can actually claim to
+-- know. "exact" = the record captures the body's deck effects and they are
+-- deterministic; "approximate" = modeled but position- or state-dependent
+-- (the Greeks that copy live, the IF_* branches, the random family);
+-- "unknown" = no usable record at all (ZETA, or a modded id we never saw).
+-- Ordered so a wand's tier is simply the worst of its cards'.
+M.TIER_RANK = { exact = 0, approximate = 1, unknown = 2 }
+
+-- Tier of one metadata record. A missing record is "unknown" (the id is not in
+-- structure_meta and the runtime layer could not classify it either). An
+-- absent `tier` field means exact -- except on a record that declares itself
+-- `dynamic`, which is at least approximate by definition: the generator always
+-- sets both, but a hand-written or runtime-built record might set only one.
+function M.tier(rec)
+	if rec == nil then return "unknown" end
+	local t = rec.tier
+	if t == nil then
+		return rec.dynamic ~= nil and "approximate" or "exact"
+	end
+	if t == "exact" and rec.dynamic ~= nil then return "approximate" end
+	return t
+end
+
+-- The tier of a whole wand: the worst tier among its ids, plus the ids that
+-- are responsible (worse than exact), de-duplicated in order of first
+-- appearance so the panel footnote can name them. `meta` is indexed directly,
+-- so the runtime_meta merged table's __index fallback participates.
+function M.wand_tier(ids, meta)
+	local worst, offenders, seen = "exact", {}, {}
+	for _, id in ipairs(ids) do
+		local t = M.tier(meta[id])
+		if t ~= "exact" then
+			if not seen[id] then
+				seen[id] = true
+				offenders[#offenders + 1] = id
+			end
+			if M.TIER_RANK[t] > M.TIER_RANK[worst] then worst = t end
+		end
+	end
+	return worst, offenders
+end
+
+-- gun.lua's ACTION_MANA_DRAIN_DEFAULT: a card with no `mana` costs 10, not 0.
+local MANA_DEFAULT = 10
 
 local function meta_for(meta, id)
 	return meta[id] or { type = "OTHER" }
@@ -329,6 +377,19 @@ function M.simulate(tokens, meta, opts)
 				if cast.last == nil or cd.i > cast.last then cast.last = cd.i end
 			end
 		end
+		-- Per-cast mana (5): every card the cast DREW is charged as it is
+		-- drawn, so the hand is exactly the set that costs mana. A nil cost is
+		-- 10 (ACTION_MANA_DRAIN_DEFAULT) and a NEGATIVE cost (Add Mana, Blood
+		-- Magic) counts as negative -- those cards credit the pool. Always-cast
+		-- cards never enter `tokens` (gun.lua plays them directly, without
+		-- draw_action), so they are excluded here for free, which is right:
+		-- they are never charged. This is the cast's COST only -- the pool and
+		-- the not-enough-mana discards are E2 and deliberately not modeled.
+		local mana = 0
+		for _, cd in ipairs(hand) do
+			mana = mana + (meta_for(meta, cd.id).mana or MANA_DEFAULT)
+		end
+		cast.mana = mana
 		casts[#casts + 1] = cast
 		for _, cd in ipairs(hand) do discard[#discard + 1] = cd end
 		hand = {}
