@@ -27,6 +27,40 @@
 --   abstraction the mod renders, and it means add_projectile never has to do
 --   anything -- which is what collapses gun_actions.lua's 260 projectile call
 --   sites into one no-op.
+--
+--   ...and per cast, the SLOTS the cast took out of the deck. That, not the
+--   play trace, is what a bracket means (docs/ADVANCED_SCENARIOS_PLAN.md 0.1):
+--   an Add Trigger's target is removed from the deck and never played -- the
+--   engine spawns its projectile from related_projectiles and never calls its
+--   action body -- so a play-trace diff would report a phantom divergence on
+--   every trigger wand.
+--
+--   DRAWN vs CONSUMED (why there are two fields, and which one to diff)
+--     cast.consumed = (deck at cast start) minus (deck at end of the draw
+--       phase). Simple, but WRONG across a wrap: the wrap pulls the discard
+--       back into the deck, so cards drawn after it were never in the start
+--       set, and cards returned by the wrap but not re-drawn are in the start
+--       set yet still sit in the deck. On "LIGHT_BULLET, LIGHT_BULLET,
+--       LIGHT_BULLET_TRIGGER" @1/cast the wrapping third cast consumes slots
+--       1 and 3, but before-minus-after says only {3}.
+--     cast.drawn = (deck at cast start, UNION deck contents immediately after
+--       each wrap) minus (deck at end of the draw phase). That is every slot
+--       the cast removed from the deck by ANY route -- an ordinary draw, a
+--       depleted/no-mana skip (draw_action discards without playing), or an
+--       action body's own table.remove(deck, ...) (the Add Trigger scan, the
+--       DIVIDE_* bodies). It is measured from the deck itself, so it needs no
+--       hook on the removal sites.
+--   >>> The differential test diffs `drawn`; `consumed` is kept as a
+--       cross-check and is expected to differ from it on wrapping casts only.
+--
+--   The end of the DRAW PHASE, not the end of the cast, is where the "after"
+--   snapshot is taken: _draw_actions_for_shot ends with _handle_reload, which
+--   on the last cast of a cycle moves the whole discard pile back into the
+--   deck. Snapshotting after that would show a full deck and report nothing
+--   consumed. The root draw_shot wrapper below takes it at exactly the right
+--   moment. For the same reason a wrap is only counted while cards are being
+--   drawn (depth > 0): _handle_reload's move_discarded_to_deck is a RELOAD,
+--   not a wrap.
 
 local M = {}
 
@@ -139,6 +173,27 @@ dofile_once("data/scripts/gun/gun_actions.lua")
 
 local trace, depth, wrapped_now = nil, 0, false
 
+-- Per-cast deck bookkeeping (see DRAWN vs CONSUMED in the header).
+local seen_slots = nil   -- start-of-cast deck, plus everything a wrap put back
+local start_slots = nil  -- start-of-cast deck only
+local after_slots = nil  -- deck at the end of the draw phase
+
+-- The set of 1-based slots currently in the deck. deck_index is 0-based and is
+-- the inventory position the card was added at, so it survives wraps and
+-- reorders -- unlike the card's position in the deck array.
+local function deck_slots()
+	local set = {}
+	for _, a in ipairs(deck) do set[(a.deck_index or 0) + 1] = true end
+	return set
+end
+
+local function sorted_keys(set)
+	local out = {}
+	for k in pairs(set) do out[#out + 1] = k end
+	table.sort(out)
+	return out
+end
+
 -- Set by play_action so the action-body wrapper below can tell an ordinary
 -- play from a DIRECT invocation (see the wrapper's note).
 local announced = false
@@ -194,20 +249,36 @@ draw_shot = function(shot, instant)
 	depth = depth + 1
 	local ok, err = pcall(real_draw_shot, shot, instant)
 	depth = depth - 1
+	-- Back at depth 0 = the root draw_shot has returned = the cast has finished
+	-- drawing. Snapshot HERE: _handle_reload runs next and can refill the deck.
+	if depth == 0 and trace then after_slots = deck_slots() end
 	if not ok then error(err, 0) end
 end
 
 local real_move_discarded = move_discarded_to_deck
 local wrap_count = 0
 move_discarded_to_deck = function()
+	local moved = #discarded > 0
+	local r = real_move_discarded()
 	-- The WRAP: a forced draw found the deck empty and pulled the discard back
-	-- in. _handle_reload calls this too at the end of a cycle, which is NOT a
-	-- wrap -- the flag below is only armed while a cast is drawing.
-	if trace then
+	-- in. Two calls that are NOT wraps and must not be counted:
+	--   * _handle_reload's, at the end of a recharge cycle -- hence depth > 0,
+	--     i.e. only while cards are actually being drawn;
+	--   * a forced draw with an EMPTY discard -- draw_action calls this
+	--     unconditionally, so a lone trailing modifier "wraps" nothing into
+	--     nothing. No card moves and none can be drawn, so there is nothing for
+	--     the mod to mark wrapped; hence `moved`. (The engine does set
+	--     start_reload there, but that is recharge timing, not deck structure.)
+	if trace and depth > 0 and moved then
 		wrap_count = wrap_count + 1
 		wrapped_now = true
+		-- Everything the wrap put back is now drawable by this cast, so it
+		-- joins the set `drawn` is measured against.
+		if seen_slots then
+			for slot in pairs(deck_slots()) do seen_slots[slot] = true end
+		end
 	end
-	return real_move_discarded()
+	return r
 end
 
 -- ---- driving a wand --------------------------------------------------------
@@ -215,8 +286,13 @@ end
 local BIG_MANA = 1e9
 
 -- Run `tokens` (ordered action ids) as a wand at `spells_per_cast`, for
--- `casts` casts. Returns { casts = { { {id, slot, depth, wrapped}, ... }, ... },
--- wraps = n, unsupported = { name, ... } or nil }.
+-- `casts` casts. Returns { casts = { cast, ... }, wraps = n,
+-- unsupported = { name, ... } or nil }, where each `cast` is the array part of
+-- the play trace -- { {id, slot, depth, wrapped}, ... } -- carrying three
+-- named fields alongside it:
+--   cast.drawn    sorted 1-based slots the cast removed from the deck  <- diff this
+--   cast.consumed sorted slots in the deck at cast start and gone after (see header)
+--   cast.wrapped  true if the deck wrapped mid-draw during this cast
 function M.run(tokens, spells_per_cast, casts, opts)
 	opts = opts or {}
 	casts = casts or 2
@@ -241,6 +317,9 @@ function M.run(tokens, spells_per_cast, casts, opts)
 	wrap_count = 0
 	for _ = 1, casts do
 		trace, depth, wrapped_now = {}, 0, false
+		start_slots = deck_slots()
+		seen_slots = deck_slots()
+		after_slots = nil
 		local ok, err = pcall(function()
 			_start_shot(BIG_MANA)
 			_draw_actions_for_shot(true)
@@ -249,9 +328,21 @@ function M.run(tokens, spells_per_cast, casts, opts)
 			trace = nil
 			return { error = tostring(err), casts = out.casts }
 		end
+		local after = after_slots or deck_slots()
+		local drawn, consumed = {}, {}
+		for slot in pairs(seen_slots) do
+			if not after[slot] then drawn[slot] = true end
+		end
+		for slot in pairs(start_slots) do
+			if not after[slot] then consumed[slot] = true end
+		end
+		trace.drawn = sorted_keys(drawn)
+		trace.consumed = sorted_keys(consumed)
+		trace.wrapped = wrapped_now
 		out.casts[#out.casts + 1] = trace
 		trace = nil
 	end
+	seen_slots, start_slots, after_slots = nil, nil, nil
 	out.wraps = wrap_count
 
 	local un = {}
@@ -274,6 +365,20 @@ function M.show(run)
 				.. string.rep(">", e.depth) .. e.id .. (e.direct and "*" or "")
 		end
 		casts[#casts + 1] = "{" .. table.concat(parts, " ") .. "}"
+	end
+	return table.concat(casts, " | ")
+end
+
+-- Per-cast slot sets, for the differential diff and for eyeballing:
+--   {1,2,3}W | {4}      -- "W" marks the cast that wrapped
+-- Uses `drawn` (see the header); pass "consumed" as `field` for the cross-check.
+function M.show_consumed(run, field)
+	if run.error then return "ERROR: " .. run.error end
+	field = field or "drawn"
+	local casts = {}
+	for _, cast in ipairs(run.casts) do
+		casts[#casts + 1] = "{" .. table.concat(cast[field] or {}, ",") .. "}"
+			.. (cast.wrapped and "W" or "")
 	end
 	return table.concat(casts, " | ")
 end

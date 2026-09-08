@@ -35,10 +35,17 @@
 --
 -- Input : tokens = ordered array of action_id strings (a wand's cards)
 --         meta   = the table from files/structure_meta.lua
---         opts   = { spells_per_cast = N } (nil -> whole deck as one cast)
+--         opts   = { spells_per_cast = N } (nil -> whole deck as one cast),
+--                  plus { trace = true } to add each cast's raw slot list --
+--                  used only by tools/test_gun_differential.lua, which diffs
+--                  it against what Noita's own gun.lua takes out of the deck.
 -- Output of M.simulate:
 --   { casts = { { nodes = {...}, wrapped = bool,
---                 first, last, wfirst, wlast }, ... }, wrapped = bool }
+--                 first, last, wfirst, wlast,
+--                 slots = { i, ... } -- opts.trace only: every slot the cast
+--                                    -- drew or directly consumed (wrapped-in
+--                                    -- cards included), sorted
+--               }, ... }, wrapped = bool }
 -- A cast's first/last/wfirst/wlast are its own slot span, split the same way a
 -- node's is (forward run, then the wrapped-in run at the wand's start), so a
 -- renderer can delimit the cast itself -- the cards that fire SIMULTANEOUSLY.
@@ -304,6 +311,15 @@ function M.simulate(tokens, meta, opts)
 		-- cast's forward span across the whole wand. Same forward/wrapped split
 		-- as a node: first/last forward, wfirst/wlast for the wrapped-in run.
 		local cast = { nodes = nodes, wrapped = wrapped }
+		if opts.trace then
+			-- Every card this cast took out of the deck, by slot: the hand holds
+			-- normal draws AND the Add Trigger scan's direct removals, which is
+			-- exactly the engine's notion of what a cast consumes.
+			local slots = {}
+			for _, cd in ipairs(hand) do slots[#slots + 1] = cd.i end
+			table.sort(slots)
+			cast.slots = slots
+		end
 		for _, cd in ipairs(hand) do
 			if cd.w then
 				if cast.wfirst == nil or cd.i < cast.wfirst then cast.wfirst = cd.i end
