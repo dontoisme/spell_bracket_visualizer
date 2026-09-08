@@ -183,8 +183,8 @@ Consequences, all of which are *features* of picking one definition:
   OMEGA and PHI a visibly empty bracket, all eight hide their brackets by
   default and the panel names the copy in text instead.
 - RESET's bracket encloses the entire remaining wand — it moves all of `hand`
-  and `deck` to `discarded` (§4 D6). That is the definition working, not an
-  edge case.
+  and `deck` to `discarded`, and then hands the whole discard pile back, so the
+  cast wraps (§4 D6). That is the definition working, not an edge case.
 - The definition goes three places: `README.md` "How it works", the
   Workshop description ("What a bracket means"), and a one-line legend the
   panel can show (`[ ] = spells this card pulls from the wand`), reusing the
@@ -634,15 +634,59 @@ KoObEy:
 The same `draw_action` path handles insufficient mana, so §5 inherits both
 answers.
 
-### D6 — RESET (new; found while tiering)
+### D6 — RESET (**FIXED**)
+
+> **Status: implemented.** `wand_structure.lua` gives RESET `consumes = "rest"`
+> in the metadata and a node kind `reset` carrying the emptied slots as
+> `cleared` (printed `RESET:clears[3,4]`); the restore is modeled as a WRAP.
+> Seven cases in `tools/test_gun_differential.lua` run it against Noita's own
+> `gun.lua` and agree on every one (commit fd92a41, merged at 83bbccc). The
+> rest of this section is the reasoning that produced the fix.
 
 `RESET` (`gun_actions.lua:10439`) was listed as "unchecked" in the tier table.
-It is checked now, and it is not a leaf: it moves **every** card from `hand` and
-from `deck` into `discarded` and empties both, plus
+It is checked now, and it is not a leaf: it moves **every** card from `hand`
+and from `deck` into `discarded` and empties both, plus
 `current_reload_time -= 25`. Under the Track B definition its bracket encloses
-the entire remaining wand, and the cast ends there because the deck is empty.
-That is deterministic and cheap to model — `consumes = "rest"`, tier **exact** —
-and it is a striking bracket to draw, which is an argument for shipping it
+the entire remaining wand — but the cast does **not** end there for want of
+cards, which is what an earlier draft of this section guessed. The tail of the
+body is the part that surprises:
+
+```lua
+if ( force_stop_draws == false ) then
+    force_stop_draws = true
+    move_discarded_to_deck()
+    order_deck()
+end
+```
+
+So the deck does not stay empty: it comes straight back **full**, holding
+everything discarded so far this recharge cycle (including RESET itself and
+everything it just cleared), restored in slot order. The cast then continues
+drawing from the wand's own start — a wrap — and `force_stop_draws` latches
+true for the rest of the cast, so a *second* RESET in the same cast restores
+nothing (the deck really does stay empty that time) and also blocks
+`draw_action`'s own reload path, so a later draw that empties the deck is
+**lost**, not wrapped.
+
+The harness confirms this on `BURST_2, RESET, SPITTER, BOMB` @ 1 spell/cast:
+BURST_2's first child is RESET, whose restore refills the deck, so the
+multicast's **second** child is drawn from slot 1 and finds BURST_2 again —
+whose own draw hits RESET again. That second RESET restores nothing
+(`force_stop_draws` is already set), and the inner multicast's second child is
+lost for good, uncounted and unwrapped. The engine's own trace reads
+`BURST_2 >RESET ~>BURST_2 ~>>RESET`.
+
+One more consequence: a RESET cast's consumed slot set **nets out**. A card
+the cast drew and RESET then handed straight back to the deck was not, on
+balance, removed from it — the engine's own deck diff agrees, and
+`cast.slots` is computed the same way (touched-this-cast minus still-in-the-
+deck). And because the restore is a wrap in every sense the mod means (later
+draws really are wrapped-in cards from the wand's start), a RESET cast is
+rendered exactly like any other wrapping cast — same `W` marker, same
+recharge-cycle-ends-here rule.
+
+That is deterministic and cheap to model — `consumes = "rest"`, tier **exact**
+— and it is a striking bracket to draw, which is an argument for shipping it
 rather than hiding it.
 
 `ALL_SPELLS`, also previously unchecked, loads an entity and touches
@@ -693,6 +737,18 @@ arithmetic:
    so the copied spells' costs vanish. ALPHA / GAMMA / TAU / ZETA do not.
    Since all eight hide their brackets by default (D3), this only matters for
    the mana row — which should show the Greek's own cost and not the copies'.
+5. **RESET's cleared cards and the Add Trigger scan's swept-up cards are free**
+   (§4 D1, §4 D6). Neither ever passes through `draw_action` — RESET's clear
+   and the scan's forward walk both remove cards from the deck by a direct
+   `table.remove`, not a draw — and `draw_action` is the only place `mana` is
+   ever decremented, so none of those cards cost anything. A depleted card is
+   free for the same structural reason from a different angle: `draw_action`
+   discards it and returns before reaching the `mana = mana - cost` line, so it
+   too is billed nothing (§4 D5). `wand_structure.lua`'s cast-loop mana sum
+   excludes all three card classes (`spent`, `cleared`, `scanned`) from the
+   total; `tools/gun_harness.lua` exposes `cast.mana_spent` from the engine's
+   own `mana` global so the exclusion is checked against `gun.lua` itself, not
+   just reasoned about.
 
 ### E1 — per-cast mana total vs. max mana (ship with 1.4)
 

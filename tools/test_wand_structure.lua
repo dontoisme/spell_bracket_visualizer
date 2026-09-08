@@ -459,9 +459,20 @@ end
 check_mana("mana: single card is its own cost",
 	{ "LIGHT_BULLET" }, nil, { cost("LIGHT_BULLET") })
 
-check_mana("mana: add trigger cast sums all three drawn cards",
+-- The scan (ADD_TRIGGER + the target it lands on, LIGHT_BULLET) is removed by
+-- direct table.remove into `hand`, never draw_action, so neither card is
+-- charged. BOMB is the trigger's payload, drawn for real via parse_seq/draw(),
+-- so it is charged like any other card.
+check_mana("mana: add trigger's scanned cards are free, its payload is not",
 	{ "ADD_TRIGGER", "LIGHT_BULLET", "BOMB" }, nil,
-	{ cost("ADD_TRIGGER") + cost("LIGHT_BULLET") + cost("BOMB") })
+	{ cost("ADD_TRIGGER") + cost("BOMB") })
+
+-- Same shape with a modifier stepped over in the scan (DAMAGE): it too is
+-- swept up by the scan's direct removal, never drawn, so it is free as well --
+-- only the payload (BOMB) costs anything.
+check_mana("mana: a modifier stepped over by the scan is also free",
+	{ "ADD_TRIGGER", "DAMAGE", "LIGHT_BULLET", "BOMB" }, nil,
+	{ cost("ADD_TRIGGER") + cost("BOMB") })
 
 -- An id with no record at all costs ACTION_MANA_DRAIN_DEFAULT (10).
 check_mana("mana: unknown id contributes the default 10",

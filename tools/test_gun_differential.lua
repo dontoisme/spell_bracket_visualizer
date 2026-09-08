@@ -213,6 +213,24 @@ local CASES = {
 	  uses = { [2] = 0 } },
 }
 
+-- ---- mana: files/wand_structure.lua's cast.mana vs gun.lua's own spend ----
+--
+-- The Add Trigger scan and RESET's clear both remove cards from the deck by a
+-- direct table.remove, never draw_action, so the simulator excludes them from
+-- cast.mana (`scanned` / `cleared`, see files/wand_structure.lua). That is a
+-- claim about the ENGINE, not just the simulator, so it is checked here
+-- against tools/gun_harness.lua's cast.mana_spent (BIG_MANA minus gun.lua's
+-- own `mana` global right after the draw phase) -- one Add Trigger wand where
+-- a modifier is swept up too, one where it isn't, and one RESET wand.
+local MANA_CASES = {
+	{ name = "mana: add trigger's scanned cards cost the engine nothing",
+	  tokens = { "ADD_TRIGGER", "LIGHT_BULLET", "BOMB" }, spc = nil, casts = 1 },
+	{ name = "mana: add trigger's scanned modifier also costs nothing",
+	  tokens = { "ADD_TRIGGER", "DAMAGE", "LIGHT_BULLET", "BOMB" }, spc = nil, casts = 1 },
+	{ name = "mana: RESET's cleared cards cost the engine nothing",
+	  tokens = { "LIGHT_BULLET", "RESET", "SPITTER", "BOMB" }, spc = 1, casts = 1 },
+}
+
 -- Divergences already understood and traced to the ENGINE, not to a simulator
 -- bug -- keyed by case name, value = why. Reported as KNOWN, still counted in
 -- the summary line but not as failures.
@@ -319,6 +337,27 @@ for _, case in ipairs(CASES) do
 		else
 			print("PASS " .. case.name)
 		end
+	end
+end
+
+for _, case in ipairs(MANA_CASES) do
+	local run = H.run(case.tokens, case.spc or #case.tokens, case.casts or 1,
+		{ uses = case.uses })
+	local sim = S.simulate(case.tokens, meta,
+		{ spells_per_cast = case.spc, uses = case.uses })
+	if run.unsupported then
+		unsupported_n = unsupported_n + 1
+		print(string.format("SKIP %s\n    unsupported engine calls: %s",
+			case.name, table.concat(run.unsupported, ", ")))
+	elseif run.error then
+		failures = failures + 1
+		print(string.format("FAIL %s\n    harness error: %s", case.name, run.error))
+	elseif sim.casts[1].mana ~= run.casts[1].mana_spent then
+		failures = failures + 1
+		print(string.format("FAIL %s\n    sim mana=%s\n    gun mana_spent=%s",
+			case.name, tostring(sim.casts[1].mana), tostring(run.casts[1].mana_spent)))
+	else
+		print(string.format("PASS %s (mana=%d)", case.name, sim.casts[1].mana))
 	end
 end
 

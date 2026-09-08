@@ -290,9 +290,13 @@ local BIG_MANA = 1e9
 -- unsupported = { name, ... } or nil }, where each `cast` is the array part of
 -- the play trace -- { {id, slot, depth, wrapped}, ... } -- carrying three
 -- named fields alongside it:
---   cast.drawn    sorted 1-based slots the cast removed from the deck  <- diff this
---   cast.consumed sorted slots in the deck at cast start and gone after (see header)
---   cast.wrapped  true if the deck wrapped mid-draw during this cast
+--   cast.drawn      sorted 1-based slots the cast removed from the deck  <- diff this
+--   cast.consumed   sorted slots in the deck at cast start and gone after (see header)
+--   cast.wrapped    true if the deck wrapped mid-draw during this cast
+--   cast.mana_spent BIG_MANA minus gun.lua's `mana` global right after the
+--                   draw phase -- _start_shot(BIG_MANA) reset it to BIG_MANA
+--                   at the top of this same cast, so the difference is this
+--                   cast's actual spend, straight from the engine.
 function M.run(tokens, spells_per_cast, casts, opts)
 	opts = opts or {}
 	casts = casts or 2
@@ -328,6 +332,12 @@ function M.run(tokens, spells_per_cast, casts, opts)
 			trace = nil
 			return { error = tostring(err), casts = out.casts }
 		end
+		-- gun.lua's `mana` is a plain global (no setfenv here, so it's the
+		-- same `mana` draw_action decrements) and _start_shot just reset it
+		-- to BIG_MANA above, so BIG_MANA - mana is exactly this cast's
+		-- spend -- cheap and safe: it reads state gun.lua already maintains,
+		-- no new hook.
+		trace.mana_spent = BIG_MANA - mana
 		local after = after_slots or deck_slots()
 		local drawn, consumed = {}, {}
 		for slot in pairs(seen_slots) do

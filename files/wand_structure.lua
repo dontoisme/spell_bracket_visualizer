@@ -83,6 +83,11 @@
 --     A cleared card is NOT a "spent" card: RESET moves it whether or not it
 --     had charges left, it is never played, and it never passes through
 --     draw_action -- so it costs no mana (see cast.mana below).
+--   * Add Trigger / Add Timer / Add Death Trigger's forward scan (meta.scan)
+--     removes its cards from the deck directly (table.remove into `hand`),
+--     the target included -- same as RESET's clear, it never calls
+--     draw_action, so none of the scanned cards cost mana either (marked
+--     `scanned = true`; see cast.mana below).
 --
 -- Input : tokens = ordered array of action_id strings (a wand's cards)
 --         meta   = the table from files/structure_meta.lua
@@ -100,9 +105,9 @@
 --                          -- negative-mana card, e.g. Add Mana, subtracts),
 --                          -- Only cards the cast actually PLAYED are counted:
 --                          -- draw_action returns before `mana = mana - cost`
---                          -- for a depleted card, and a card RESET cleared
---                          -- never went through draw_action at all, so neither
---                          -- is charged.
+--                          -- for a depleted card, and a card RESET cleared or
+--                          -- the Add Trigger scan swept up never went through
+--                          -- draw_action at all, so none of them are charged.
 --                 spent = { i, ... } -- slots this cast popped that were
 --                                    -- DEPLETED: consumed, never fired, in no
 --                                    -- node. Absent when there are none. A
@@ -370,9 +375,14 @@ function M.simulate(tokens, meta, opts)
 				mods[#mods + 1] = card.id -- the Add Trigger card itself
 				-- Direct removal, not draw(): the scan only ever touches cards
 				-- already in the deck, so it cannot reload and cannot wrap.
+				-- `scanned = true` (target included): the scan moves these straight
+				-- into `hand` without ever calling draw_action, and draw_action is
+				-- the only place gun.lua charges mana, so none of them cost
+				-- anything -- same rule, same reason, as a RESET `cleared` card.
 				for _ = 1, n do
 					local c = table.remove(deck, 1)
 					if wrapped_now then c.w = true end
+					c.scanned = true
 					hand[#hand + 1] = c
 					touched[#touched + 1] = c
 					note(c)
@@ -551,13 +561,15 @@ function M.simulate(tokens, meta, opts)
 		-- ...but only the cards the cast actually PLAYED. draw_action charges
 		-- `mana = mana - action_mana_required` only after BOTH of its early
 		-- returns, so a DEPLETED card (uses_remaining == 0) is discarded
-		-- unplayed and never billed; and a card RESET cleared never went
-		-- through draw_action at all, so it is never billed either. One rule,
-		-- two card classes: if it did not come off the deck through a draw that
-		-- played it, it is free.
+		-- unplayed and never billed; a card RESET cleared never went through
+		-- draw_action at all, so it is never billed either; and a card the Add
+		-- Trigger scan swept up (`scanned`, target included) is moved straight
+		-- into `hand` by direct table.remove, also bypassing draw_action -- see
+		-- the scan branch above. Three rules collapse to one: if it did not come
+		-- off the deck through a draw that played it, it is free.
 		local mana = 0
 		for _, cd in ipairs(touched) do
-			if not cd.spent and not cd.cleared then
+			if not cd.spent and not cd.cleared and not cd.scanned then
 				mana = mana + (meta_for(meta, cd.id).mana or MANA_DEFAULT)
 			end
 		end
