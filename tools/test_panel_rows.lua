@@ -57,7 +57,12 @@ end
 
 local TITLE = "Wand structure  (1/cast)"
 local LEGEND = "? = depends on game state when cast"
+local BRACKET_LEGEND = "[ ] = spells this card pulls from the wand"
 local GREY = { 0.6, 0.6, 0.6 }
+
+local function same_color(a, b)
+	return a and b and a[1] == b[1] and a[2] == b[2] and a[3] == b[3]
+end
 
 -- Drive the real draw_panel and return just the row labels it drew (the title
 -- and the "|" nesting spines are not rows).
@@ -151,6 +156,107 @@ local function content_shown(labels)
 end
 eq("legend displaces exactly one content row",
 	content_shown(with_l), content_shown(without_l) - 1)
+
+-- ---- 4. two sticky footnotes both survive the clamp ------------------------
+--
+-- Track C's named "?" footnote and Track B's "[ ] = ..." legend are BOTH
+-- sticky now (sim_rows can emit up to two trailing sticky rows). Both must
+-- survive the "... +N more" cut, in order, and the count must still be over
+-- the CONTENT rows only -- two sticky rows now cost two lines of the budget.
+
+local function with_two_stickies(rows)
+	rows[#rows + 1] = { bars = {}, label = LEGEND, color = GREY, sticky = true }
+	rows[#rows + 1] = { bars = {}, label = BRACKET_LEGEND, color = GREY, sticky = true }
+	return rows
+end
+
+-- The bracket legend is long enough that draw_panel's per-label width budget
+-- (fit_label) can truncate it with a trailing "..." -- unrelated to the row
+-- CLAMP this test is about -- so these checks match it by its stable prefix
+-- rather than requiring the exact untruncated string.
+labels = render(with_two_stickies(content_rows(200)), 360)
+n_more, hidden = count_more(labels)
+eq("two-sticky: exactly one '+N more' line", n_more, 1)
+eq("two-sticky: footnote survives the cut", labels[#labels - 1], LEGEND)
+eq("two-sticky: bracket legend survives the cut and stays last",
+	labels[#labels]:match("^%[ %]") ~= nil, true)
+
+shown = 0
+for _, l in ipairs(labels) do
+	if l ~= LEGEND and not l:match("^%[ %]") and not l:match("^%.%.%. %+%d+ more$") then
+		shown = shown + 1
+	end
+end
+eq("two-sticky: hidden count accounts for every content row", shown + hidden, 200)
+
+-- ---- 5. T1.4 -- the named tier footnote + the always-on bracket legend -----
+
+do
+	local node = { kind = "leaf", id = "IF_ENEMY", atype = "OTHER", modifiers = {} }
+	local sim = { casts = { { nodes = { node }, wrapped = false, mana = 0 } }, wrapped = false }
+	local cfg = { spells_per_cast = 1 }
+	local rows = T.sim_rows(sim, cfg, {}, { "ALPHA" })
+
+	local footnote, legend
+	for _, r in ipairs(rows) do
+		if r.label:match("^%?%s*=") then footnote = r end
+		if r.label == BRACKET_LEGEND then legend = r end
+	end
+
+	eq("tier footnote: present", footnote ~= nil, true)
+	eq("tier footnote: names Alpha", footnote and footnote.label:find("Alpha", 1, true) ~= nil, true)
+	eq("tier footnote: sticky", footnote and footnote.sticky, true)
+
+	eq("bracket legend: present", legend ~= nil, true)
+	eq("bracket legend: sticky", legend and legend.sticky, true)
+end
+
+-- ---- 6. T1.9 -- per-cast mana in the header, vs. mana_max ------------------
+
+local function leaf(id)
+	return { kind = "leaf", id = id, atype = "PROJECTILE", modifiers = {} }
+end
+
+local function find_header(rows)
+	for _, r in ipairs(rows) do
+		if r.header then return r end
+	end
+end
+
+local function find_row(rows, label)
+	for _, r in ipairs(rows) do
+		if r.label == label then return r end
+	end
+end
+
+local MANA_FOOTNOTE = "mana = cost of this cast; > max means part of it is discarded"
+
+do
+	-- Overflow: mana_max = 150, the cast costs 210.
+	local sim = { casts = { { nodes = { leaf("LIGHT_BULLET") }, wrapped = false, mana = 210 } },
+		wrapped = false }
+	local cfg = { spells_per_cast = 1, mana_max = 150 }
+	local rows = T.sim_rows(sim, cfg, {})
+	local header = find_header(rows)
+	eq("mana overflow: header shown", header ~= nil, true)
+	eq("mana overflow: header text", header and header.label, "cast 1  mana 210  > max 150")
+	eq("mana overflow: header uses WRAP_COLOR", same_color(header and header.color, T.WRAP_COLOR), true)
+	eq("mana overflow: footnote present", find_row(rows, MANA_FOOTNOTE) ~= nil, true)
+end
+
+do
+	-- No overflow: mana_max = 300, the same 210-mana cast.
+	local sim = { casts = { { nodes = { leaf("LIGHT_BULLET") }, wrapped = false, mana = 210 } },
+		wrapped = false }
+	local cfg = { spells_per_cast = 1, mana_max = 300 }
+	local rows = T.sim_rows(sim, cfg, {})
+	local has_max = false
+	for _, r in ipairs(rows) do
+		if r.label:find("> max", 1, true) then has_max = true end
+	end
+	eq("mana no overflow: no '> max' anywhere", has_max, false)
+	eq("mana no overflow: footnote absent", find_row(rows, MANA_FOOTNOTE), nil)
+end
 
 print("")
 print(failures .. " failure(s)")

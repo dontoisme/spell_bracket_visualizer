@@ -314,5 +314,55 @@ do
 		(flat and flat.y or 0) > BOX_TOP and (flat and flat.y or 0) < rows_geo[1].top)
 end
 
+-- ---- 8. T1.4 -- uncertain-tier wands hide brackets, draw one "?" instead ----
+--
+-- Suppression lives in draw_box_brackets (the planner never sees tier), so
+-- this drives the REAL draw_box_brackets through the same kind of recording
+-- Gui stubs case 7 uses. A wand whose tier is worse than "exact" (ALPHA is
+-- "approximate" in structure_meta.lua) draws no bracket glyphs and exactly
+-- one dim "?" at the row's right end under "hide"; "show" draws the brackets
+-- as before and no "?".
+do
+	local drawn
+	function GuiColorSetForNextWidget() end
+	function GuiImage(gui, id, x, y, path, a, w, h) drawn.images = drawn.images + 1 end
+	function GuiText(gui, x, y, text) drawn.texts[#drawn.texts + 1] = text end
+	function GuiGetTextDimensions(gui, text) return 6 * #text, 9 end
+
+	-- Reuses case 2's ("plain") tokens, which reliably draw two nested bracket
+	-- pairs at spc=4 -- so "show" has something to show. The tier/tier_ids are
+	-- stamped independently here (as collect_wand_boxes would from wand_tier),
+	-- standing in for a wand that also holds an ALPHA somewhere.
+	local UNCERTAIN_TOKENS = { "BURST_3", "LIGHT_BULLET", "BULLET_TIMER", "LIGHT_BULLET" }
+	local function make_wd()
+		return {
+			tokens = UNCERTAIN_TOKENS,
+			xs = { 0, 1, 2, 3 },
+			per_row = 99,
+			cfg = { shuffle = false },
+			tier = "approximate",
+			tier_ids = { "ALPHA" },
+			sim = S.simulate(UNCERTAIN_TOKENS, meta, { spells_per_cast = 4 }),
+			rows_geo = { { top = 100, bot = 112 } },
+			right = 500,
+			top = 80,
+		}
+	end
+
+	drawn = { images = 0, texts = {} }
+	T.draw_box_brackets(nil, 640, { make_wd() }, false, "hide")
+	local qmarks = 0
+	for _, t in ipairs(drawn.texts) do if t == "?" then qmarks = qmarks + 1 end end
+	eq("tier/hide: exactly one '?' glyph", qmarks, 1)
+	eq("tier/hide: no bracket glyphs drawn", drawn.images, 0)
+
+	drawn = { images = 0, texts = {} }
+	T.draw_box_brackets(nil, 640, { make_wd() }, false, "show")
+	qmarks = 0
+	for _, t in ipairs(drawn.texts) do if t == "?" then qmarks = qmarks + 1 end end
+	eq("tier/show: no '?' glyph", qmarks, 0)
+	passck("tier/show: brackets drawn (bracket() draws 3 GuiImage per glyph)", drawn.images > 0)
+end
+
 print(failures == 0 and "\nALL PASS" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)

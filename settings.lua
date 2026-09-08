@@ -40,6 +40,14 @@ mod_settings = {
 		scope = MOD_SETTING_SCOPE_RUNTIME,
 	},
 	{
+		id = "uncertain_brackets",
+		ui_name = "Uncertain Wands: Slot Brackets",
+		ui_description = "A wand holding a spell whose deck effect this mod can't\nfollow exactly (Greek spells, IF spells, random draws, unknown\nmodded spells) draws no slot brackets, and shows a small dim\n'?' at the end of the row instead. Hide keeps that rule. Show\ndraws the brackets anyway, with '?' marks in the panel, for\nplayers who want the approximation and know what it is.",
+		value_default = "hide",
+		values = { { "hide", "Hide (default)" }, { "show", "Show anyway" } },
+		scope = MOD_SETTING_SCOPE_RUNTIME,
+	},
+	{
 		id = "show_debug",
 		ui_name = "Debug Info (for bug reports)",
 		ui_description = "Show a small box (top-right) with your screen/GUI size and\nthe held wand's stats, plus magenta guide-lines on each wand box.\nIf the brackets or panel look wrong, turn this on, open your\nwand, and send the author a screenshot -- it shows your\nresolution, wand size, and where the mod thinks each row is.",

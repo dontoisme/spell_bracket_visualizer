@@ -126,7 +126,7 @@ end
 -- disable the whole panel (init.lua kills it on first error), so a future
 -- game update changing these fields degrades to 1/cast, no shuffle.
 local function read_config(wand)
-	local cfg = { spells_per_cast = 1, shuffle = false, capacity = 0 }
+	local cfg = { spells_per_cast = 1, shuffle = false, capacity = 0, mana_max = 0 }
 	if type(ComponentObjectGetValue2) ~= "function" then return cfg end
 	local ab = EntityGetFirstComponentIncludingDisabled(wand, "AbilityComponent")
 	if not ab then return cfg end
@@ -136,6 +136,14 @@ local function read_config(wand)
 	cfg.shuffle = ok2 and sh == true
 	local ok3, cap = pcall(ComponentObjectGetValue2, ab, "gun_config", "deck_capacity")
 	if ok3 and tonumber(cap) and tonumber(cap) > 0 then cfg.capacity = tonumber(cap) end
+	-- mana_max / mana_charge_speed sit on the AbilityComponent directly (NOT
+	-- inside gun_config, next to it) -- Track E1. mana_max defaults to 0
+	-- (unreadable / no mana system on this wand), which reads as "no warning
+	-- threshold" everywhere it's checked (cfg.mana_max > 0).
+	local ok4, mm = pcall(ComponentGetValue2, ab, "mana_max")
+	if ok4 and tonumber(mm) then cfg.mana_max = tonumber(mm) end
+	local ok5, mcs = pcall(ComponentGetValue2, ab, "mana_charge_speed")
+	if ok5 and tonumber(mcs) then cfg.mana_charge_speed = tonumber(mcs) end
 	return cfg
 end
 
@@ -232,6 +240,15 @@ local function dyn_name(id, rows)
 	return name
 end
 
+-- Print a mana amount without a trailing ".0" (mana is normally integral, but
+-- a modded spell could carry a fractional cost). Shared by sim_rows' cast
+-- headers/footnote, the panel title (M.update) and the debug box.
+local function fmt(n)
+	n = tonumber(n) or 0
+	if n == math.floor(n) then return tostring(math.floor(n)) end
+	return tostring(n)
+end
+
 local function walk(rows, node, ancestor_colors, depth)
 	local mods = ""
 	if node.modifiers and #node.modifiers > 0 then
@@ -258,8 +275,12 @@ local function walk(rows, node, ancestor_colors, depth)
 end
 
 -- Rows for the whole simulation: per-cast headers (when there is more than one
--- cast or a wrap), the trees, and a loud wrap/recharge banner.
-local function sim_rows(sim, cfg, always)
+-- cast, a wrap, or a cast that can never afford itself), the trees, a loud
+-- wrap/recharge banner, and the sticky footnotes ("?" tiers, mana overflow,
+-- the bracket-definition legend). `tier_ids` (Track C) are the wand's
+-- confidence-tier offenders (files/wand_structure.lua M.wand_tier); nil is
+-- fine, old callers keep the generic "?" footnote.
+local function sim_rows(sim, cfg, always, tier_ids)
 	local rows = {}
 	if #always > 0 then
 		local names = {}
@@ -269,21 +290,52 @@ local function sim_rows(sim, cfg, always)
 		rows[#rows + 1] = { bars = {}, label = "always: " .. table.concat(names, ", "),
 			color = COLOR.PASSIVE }
 	end
-	local show_headers = (#sim.casts > 1) or sim.wrapped
+	-- Track E1: a cast costing more than the wand can ever hold has to be
+	-- visible even when it's the only cast (mana_max > 0 and it's readable).
+	local any_over = false
+	if cfg.mana_max and cfg.mana_max > 0 then
+		for _, cast in ipairs(sim.casts) do
+			if cast.mana and cast.mana > cfg.mana_max then any_over = true end
+		end
+	end
+	local show_headers = (#sim.casts > 1) or sim.wrapped or any_over
 	for ci, cast in ipairs(sim.casts) do
+		local over = cfg.mana_max and cfg.mana_max > 0
+			and cast.mana and cast.mana > cfg.mana_max
 		if show_headers then
-			local h = "cast " .. ci
+			local h = "cast " .. ci .. "  mana " .. fmt(cast.mana or 0)
+			if over then h = h .. "  > max " .. fmt(cfg.mana_max) end
 			if cast.wrapped then h = h .. "  -- WRAPS! -> recharge" end
 			rows[#rows + 1] = { bars = {}, label = h,
-				color = cast.wrapped and WRAP_COLOR or HEADER_COLOR, header = true }
+				color = (cast.wrapped or over) and WRAP_COLOR or HEADER_COLOR, header = true }
 		end
 		local spine = show_headers and { HEADER_COLOR } or {}
 		for _, node in ipairs(cast.nodes) do walk(rows, node, spine, 0) end
 	end
-	-- sticky: it explains "?" marks that survive the row clamp, so it must
-	-- outlive the "... +N more" cut rather than being the first line dropped.
+	-- sticky: these explain marks/warnings that survive the row clamp, so they
+	-- must outlive the "... +N more" cut rather than being the first lines
+	-- dropped. draw_panel holds back every trailing sticky row, in order.
 	if rows.any_dynamic then
-		rows[#rows + 1] = { bars = {}, label = "? = depends on game state when cast",
+		if tier_ids and #tier_ids > 0 then
+			local names = {}
+			for _, id in ipairs(tier_ids) do names[#names + 1] = display_name(id) end
+			rows[#rows + 1] = { bars = {},
+				label = "? = " .. table.concat(names, ", ") .. ": structure uncertain",
+				color = COLOR.OTHER, sticky = true }
+		else
+			rows[#rows + 1] = { bars = {}, label = "? = depends on game state when cast",
+				color = COLOR.OTHER, sticky = true }
+		end
+	end
+	if any_over then
+		rows[#rows + 1] = { bars = {},
+			label = "mana = cost of this cast; > max means part of it is discarded",
+			color = COLOR.OTHER, sticky = true }
+	end
+	-- the bracket-definition legend (Track B, docs/ADVANCED_SCENARIOS_PLAN.md
+	-- 1): always present whenever there's at least one cast to explain.
+	if #sim.casts > 0 then
+		rows[#rows + 1] = { bars = {}, label = "[ ] = spells this card pulls from the wand",
 			color = COLOR.OTHER, sticky = true }
 	end
 	return rows
@@ -817,6 +869,14 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_kee
 	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
 	for _, wd in ipairs(wands) do
 		wd.tokens, wd.always, wd.xs, wd.greek = read_deck(wd.e, ignore_depleted, greek_keeps)
+		-- Track C confidence tier: the worst of every card on the wand (deck
+		-- AND always-cast -- an always-cast Greek/random spell is just as
+		-- unfollowable as one in the deck). tier_ids are the offenders, named
+		-- in the panel footnote (sim_rows) and the debug box.
+		local tier_ids_input = {}
+		for _, id in ipairs(wd.tokens) do tier_ids_input[#tier_ids_input + 1] = id end
+		for _, id in ipairs(wd.always) do tier_ids_input[#tier_ids_input + 1] = id end
+		wd.tier, wd.tier_ids = wand_structure.wand_tier(tier_ids_input, emeta)
 		wd.cfg = read_config(wd.e)
 		wd.h, wd.sprite = wand_art_wh(gui, wd.e)
 		wd.sim = wand_structure.simulate(wd.tokens, emeta,
@@ -905,7 +965,22 @@ local function draw_row_probe(gui, refw, wands)
 	end
 end
 
-local function draw_box_brackets(gui, refw, wands, show_probe)
+-- Track C's "no brackets" policy, drawn: a single dim "?" at the right end of
+-- the slot row, in place of the (withheld) brackets, so a blank row reads as
+-- "uncertain", not "broken". Same raw GuiText primitive draw_delims already
+-- uses for its "wraps to front" tag text -- no new drawing path -- dimmed
+-- with COLOR.OTHER, the same grey the panel's tier footnote uses.
+local function draw_uncertain_glyph(gui, wd)
+	local r = wd.rows_geo[1]
+	if not r then return end
+	GuiColorSetForNextWidget(gui, COLOR.OTHER[1], COLOR.OTHER[2], COLOR.OTHER[3], 1)
+	GuiText(gui, wd.right - 8, r.top, "?")
+end
+
+-- `uncertain` is the uncertain_brackets setting ("hide"/"show"). Brackets are
+-- withheld from a wand whose tier is worse than "exact" unless the setting is
+-- "show" -- Track C, docs/ADVANCED_SCENARIOS_PLAN.md 2.
+local function draw_box_brackets(gui, refw, wands, show_probe, uncertain)
 	local idc = { n = 0 }
 	if show_probe then draw_row_probe(gui, refw, wands) end
 	for _, wd in ipairs(wands) do
@@ -915,14 +990,18 @@ local function draw_box_brackets(gui, refw, wands, show_probe)
 		-- panel still shows the slot-order tree WITH its "order varies!"
 		-- warning -- text can hedge, brackets can't.
 		if #wd.tokens > 0 and not wd.cfg.shuffle then
-			-- displayed position of each card: wraps every per_row slots
-			local cols, rows = {}, {}
-			for k, x in ipairs(wd.xs) do
-				cols[k] = x % wd.per_row
-				rows[k] = math.floor(x / wd.per_row)
+			if wd.tier == "exact" or uncertain == "show" then
+				-- displayed position of each card: wraps every per_row slots
+				local cols, rows = {}, {}
+				for k, x in ipairs(wd.xs) do
+					cols[k] = x % wd.per_row
+					rows[k] = math.floor(x / wd.per_row)
+				end
+				draw_delims(gui, collect_wand_delims(wd.sim, cols, rows),
+					refw, wd.rows_geo, idc, wd.right, wd.top * U * refw)
+			else
+				draw_uncertain_glyph(gui, wd)
 			end
-			draw_delims(gui, collect_wand_delims(wd.sim, cols, rows),
-				refw, wd.rows_geo, idc, wd.right, wd.top * U * refw)
 		end
 	end
 end
@@ -1139,19 +1218,23 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	local max_rows = math.floor((bot_limit - y0 - pad - 2 - line_h) / line_h)
 	if max_rows < 2 then max_rows = 2 end
 	if #rows > max_rows then
-		-- A sticky trailing row (the "?" footnote) is held back from the cut and
-		-- re-appended after it: dropping the legend while its "?" marks stay
-		-- visible above would leave them unexplained. It costs one line of the
-		-- budget, so the "+N more" count is over the CONTENT rows only.
-		local sticky = rows[#rows].sticky and rows[#rows] or nil
-		local budget = max_rows - (sticky and 1 or 0)
-		local content = #rows - (sticky and 1 or 0)
+		-- Every trailing sticky row (the "?" tier/mana footnotes, the bracket
+		-- legend) is held back from the cut and re-appended after it, in order:
+		-- dropping one while the marks/warnings it explains stay visible above
+		-- would leave them unexplained. They cost one line of the budget each,
+		-- so the "+N more" count is over the CONTENT rows only.
+		local n_sticky = 0
+		while rows[#rows - n_sticky] and rows[#rows - n_sticky].sticky do
+			n_sticky = n_sticky + 1
+		end
+		local budget = math.max(1, max_rows - n_sticky)
+		local content = #rows - n_sticky
 		local kept = {}
 		for i = 1, budget - 1 do kept[i] = rows[i] end
 		kept[budget] = { bars = {},
 			label = "... +" .. (content - budget + 1) .. " more",
 			color = HEADER_COLOR }
-		if sticky then kept[#kept + 1] = sticky end
+		for i = content + 1, #rows do kept[#kept + 1] = rows[i] end
 		rows = kept
 	end
 
@@ -1209,6 +1292,18 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 			"rows modeled=%d   cast-wraps=%s   greek=%s",
 			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no",
 			wd.greek and "yes (keeping depleted)" or "no")
+		-- Track C: the wand's confidence tier and the ids responsible.
+		lines[#lines + 1] = string.format(
+			"tier=%s (%s)", wd.tier or "exact", table.concat(wd.tier_ids or {}, ", "))
+		-- Track E1: the wand's mana ceiling/regen and what each cast costs.
+		lines[#lines + 1] = string.format(
+			"mana_max=%s charge=%s",
+			tostring(wd.cfg.mana_max or 0), tostring(wd.cfg.mana_charge_speed or "?"))
+		local manas = {}
+		if wd.sim then
+			for _, cast in ipairs(wd.sim.casts) do manas[#manas + 1] = fmt(cast.mana or 0) end
+		end
+		lines[#lines + 1] = "cast mana: " .. table.concat(manas, ", ")
 		-- exact SPRITE_OVERRIDES key for the held wand (copy if it sits wrong)
 		lines[#lines + 1] = "sprite: " .. (wd.sprite or "(unknown)")
 	else
@@ -1357,6 +1452,9 @@ function M.update()
 	local ignore_depleted = get("spell_bracket_visualizer.ignore_depleted_spells") ~= false
 	local greek_keeps = get("spell_bracket_visualizer.greek_keeps_depleted") ~= false
 	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
+	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
+	-- is worse than exact; "show" draws them anyway. See draw_box_brackets.
+	local uncertain_brackets = get("spell_bracket_visualizer.uncertain_brackets") or "hide"
 
 	local sw, sh = GuiGetScreenDimensions(gui)
 	-- refw: the GEOMETRY reference width. The engine draws the inventory in fixed
@@ -1381,7 +1479,7 @@ function M.update()
 		-- strongly negative z = "bring to front": lower z draws on top, and
 		-- this must beat the engine's spell-frame layer, not just our own gui
 		GuiZSet(gui, -10)
-		draw_box_brackets(gui, refw, boxes, show_debug)
+		draw_box_brackets(gui, refw, boxes, show_debug, uncertain_brackets)
 		GuiZSet(gui, 1)
 	end
 
@@ -1395,7 +1493,20 @@ function M.update()
 		-- order randomizes at cast time, so even the panel's slot-order tree
 		-- is just one arrangement of many -- not worth showing.
 		if wd and not wd.cfg.shuffle and (#wd.tokens > 0 or #wd.always > 0) then
-			local title = "Wand structure  (" .. wd.cfg.spells_per_cast .. "/cast)"
+			-- When there's only one cast and it doesn't overflow mana_max, the
+			-- cast header is never shown (sim_rows), so the mana number has
+			-- nowhere to appear -- put it in the title instead, so it's always
+			-- visible somewhere (Track E1).
+			local mana_suffix = ""
+			if wd.sim and #wd.sim.casts == 1 and not wd.sim.wrapped then
+				local c1 = wd.sim.casts[1]
+				local over1 = wd.cfg.mana_max and wd.cfg.mana_max > 0
+					and c1.mana and c1.mana > wd.cfg.mana_max
+				if not over1 and c1.mana ~= nil then
+					mana_suffix = ", mana " .. fmt(c1.mana)
+				end
+			end
+			local title = "Wand structure  (" .. wd.cfg.spells_per_cast .. "/cast" .. mana_suffix .. ")"
 			local geo = {} -- per-box GUI geometry: top edge (vertical anchor) + right edge (width clamp)
 			for i, b in ipairs(boxes) do
 				geo[i] = { top = b.top * U * refw, right = b.right }
@@ -1404,7 +1515,7 @@ function M.update()
 				boxes = geo,
 				sel   = sel,
 			}
-			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always), title, sw, sh, anchor, panel_scale)
+			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.tier_ids), title, sw, sh, anchor, panel_scale)
 		end
 	end
 
@@ -1439,6 +1550,7 @@ M._test = {
 	collect_wand_delims  = collect_wand_delims,
 	plan_delims     = plan_delims,
 	draw_delims     = draw_delims, -- pixel-level check with a recording Gui stub
+	draw_box_brackets = draw_box_brackets, -- Track C tier suppression, at the draw level
 
 	nest_color      = nest_color,
 	WRAP_COLOR      = WRAP_COLOR,
