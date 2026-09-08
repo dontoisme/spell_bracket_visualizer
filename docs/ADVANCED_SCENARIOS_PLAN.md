@@ -86,6 +86,17 @@ and D3, and §3's `reflecting` premise — and D5's open question is answered.
 Lead the thread post with this. "I now run your code against mine" is a
 stronger answer to "this shows false results" than any feature in this plan.
 
+Harness part 2 has since landed: `tools/test_gun_differential.lua` compares
+per-cast **consumption**, not the play trace, and also checks per-cast mana
+(`cast.mana` vs. `gun.lua`'s own spend, §5) — it is the merge gate for every
+simulator change in this plan. It currently carries 44 differential cases (41
+structural, 3 mana) and reports `0 divergences, 0 unsupported, 1 known`; the
+one known divergence is TAU's copy-live unpredictability (it indirectly
+triggers a forced draw through the card it copies), which §4 D3 records —
+the divergence is expected under D3's tier and is resolved there by keeping
+ALPHA/GAMMA/TAU `approximate`, not by modeling class-1 copy-live exactly
+(that stays v1.5.0 work).
+
 ### 0.2 Point 1 — where this plan departs, and on what evidence
 
 KoObEy named three families: *"particularly for Divides, Greeks and Add
@@ -197,6 +208,20 @@ as its opening paragraph. Ship in the same release as Track C.
 
 ## 2. Track C — confidence tiers and the "no brackets" policy
 
+> **Status: implemented.** `gen_structure_meta.py`'s `OVERRIDES` table emits
+> `tier="approximate"` for IF_ELSE / IF_ENEMY / IF_HALF / IF_HP / IF_PROJECTILE,
+> DRAW_RANDOM / DRAW_RANDOM_X3 / DRAW_3_RANDOM / RANDOM_SPELL /
+> RANDOM_MODIFIER, and ALPHA / GAMMA / TAU / OMEGA / PHI / MU / SIGMA, and
+> `tier="unknown"` for ZETA, matching this section's table exactly.
+> `wand_structure.lua` has `M.tier(rec)` and `M.wand_tier(ids, meta)`, and
+> `grouping_overlay.lua` stamps `wd.tier` / `wd.tier_ids` on every wand and
+> checks it in `draw_box_brackets` next to the shuffle check. The
+> `uncertain_brackets` setting (values `hide`/`show`, default `hide`) is live;
+> Hide draws the dim `?` glyph at the end of the slot row, `sim_rows` extends
+> the `?` footnote into a named list of offending ids, and the Debug Info box
+> prints `tier=%s (%s)` with the offenders. The rest of this section is the
+> design that produced the shipped tier table.
+
 Every card in a wand gets a **tier**, derived from its metadata record — never
 from `ACTION_TYPE` alone (KoObEy's "OTHER that is not a note" is really "OTHER
 whose body does something the simulator can't follow"; the notes are
@@ -259,6 +284,21 @@ modded multicast gathers nothing — exactly Night's "multiple casts when there 
 only one". Two layers fix it; the second is KoObEy's suggestion.
 
 ### A1 — read the game's live `actions` table (cheap, do first)
+
+> **Status: implemented.** `files/runtime_meta.lua` loads `gun_actions.lua`
+> lazily (after `gun_enums.lua`) inside a `pcall`, builds
+> `runtime_meta[id] = {type, name, mana, rp}` per id, and merges it beneath
+> `structure_meta.lua` in `meta_for`'s fallback chain; the type-fallback table
+> below is what it emits for an id with no generated record. Any failure
+> leaves `M.runtime` empty, `M.status = "failed: ..."`, and `M.merged()`
+> degrades to plain `structure_meta` — `M.status_line()` reports this on the
+> Debug Info box. Tested offline against `.gun_ref/` in
+> `tools/test_runtime_meta.lua`, which also confirmed the finding below that
+> loading `gun_actions.lua` needs no other file-scope global beyond
+> `gun_enums.lua`'s `ACTION_TYPE_*` constants and the file's own two
+> `dofile_once` deps — so nothing else has to be stubbed for A1 to work. A2
+> (the probe), A3 (probe-vs-meta regression) and A4 (settings/debug) remain
+> planned for v1.5.0.
 
 Every spell the game knows, including every spell other mods appended via
 `ModLuaFileAppend("data/scripts/gun/gun_actions.lua", …)`, is an entry in the
@@ -535,6 +575,17 @@ non-first repeat); DIVIDE_10 at depth 3.
 
 ### D3 — the Greeks: three classes, not one
 
+> **Status: partially implemented.** The generator bug this section blamed for
+> ALPHA / GAMMA / TAU's chaining is fixed: `gen_structure_meta.py`'s
+> draws-regex used to read the commented-out `--draw_actions( 1, true )` line
+> in those three bodies as live; comments are stripped before the regex runs
+> now, so all three carry no `draws` and are leaves in `structure_meta.lua`,
+> confirmed by `tools/test_gun_differential.lua`'s three "does not chain"
+> cases. What is **not** done is modeling class 1's copy-live consumption
+> itself — what ALPHA/GAMMA/TAU indirectly draw through the card they copy —
+> which stays v1.5.0 work and is the one KNOWN divergence the differential
+> harness reports (§0.1; the TAU case above).
+
 This plan treated the eight as a uniform family that copies a card by reference
 and force-draws one card afterwards. Neither half of that is generally true.
 The `draw_actions(1, true)` call this plan attributed to "most of them" is
@@ -604,6 +655,25 @@ Simulating both branches and greying the skipped span remains a later option,
 not in this plan.
 
 ### D5 — depleted cards and the retry rule (KoObEy point 3) — resolved
+
+> **Status: implemented.** `wand_structure.lua`'s `simulate` takes `opts.uses`
+> (slot → `uses_remaining`) and `draw()` retries past a depleted card exactly
+> as `gun.lua` does, with the retry able to fire only on the first attempt of
+> each draw — a later retry cannot wrap. A depleted card lands in `cast.spent`
+> rather than being pre-filtered, and `sim_rows` gives a cast whose every draw
+> hit a depleted card (`#cast.nodes == 0` but `#cast.spent > 0`) its own
+> `-- no spells left (depleted)` header so the panel doesn't read as
+> "nothing happened". `greek_keeps_depleted` is kept in `settings.lua` as a
+> visible no-op — its description now says "No longer does anything ... This
+> option will be removed in the next release" — because `read_deck` no longer
+> pre-filters by Greek wand at all; the actual removal is deferred to v1.5.0.
+> Six `uses=` cases in `tools/test_gun_differential.lua` confirm the model
+> against `gun.lua` itself: a depleted modifier retried past, a multicast
+> retrying past one and still gathering 2, a depleted *last* card losing its
+> draw without wrapping (both a root draw and a forced draw onto it), the same
+> on a Greek wand (TAU — the one KNOWN divergence, §0.1/§4 D3), and RESET
+> clearing a depleted card exactly like a live one. The rest of this section
+> is the reasoning that produced the fix.
 
 The open question was whether `draw_actions(N)` **retries** after a depleted
 card or **counts it** toward N. `gun.lua:299-322` answers it: **retry.** When
@@ -752,6 +822,20 @@ arithmetic:
 
 ### E1 — per-cast mana total vs. max mana (ship with 1.4)
 
+> **Status: implemented.** `wand_structure.lua`'s cast loop sums `cast.mana`
+> over every card the cast drew (`meta_for(meta, cd.id).mana or MANA_DEFAULT`),
+> excluding the three free-card classes: `spent` (a depleted card, discarded
+> unplayed, §4 D5), `cleared` (RESET's direct removal, §4 D6) and `scanned`
+> (the Add Trigger scan's forward sweep, §4 D1) — none of the three ever pass
+> through `draw_action`, so none are billed. `grouping_overlay.lua` reads
+> `mana_max` off the wand's `AbilityComponent` directly (not inside
+> `gun_config`, next to it), defaulting to 0 meaning "no threshold". The cast
+> header gains `mana N` and, when `cast.mana > mana_max`, `> max N` in the
+> warning color; the sticky footnote and Debug Info box carry the same rule.
+> `tools/test_gun_differential.lua`'s three `mana_spent` cases check
+> `cast.mana` against `gun.lua`'s own `mana` global for exactly the scanned-
+> and cleared-card exclusions, and pass.
+
 `mana` per card from A1's runtime table (vanilla fallback: emit `mana=` in
 `structure_meta.lua`, defaulting absent values to 10). `simulate` already knows
 which cards each cast consumed; sum over them, excluding always-cast cards and
@@ -789,26 +873,41 @@ C tiers into claims rather than hopes.
 **v1.4.0 — "checked against the game"** — answers 1, 2 (partially) and 3, and
 throws in 4 and 5:
 
-- **Track B** — the consumption definition, stated in `README.md`, the Workshop
-  description, and the panel legend. *(point 4)*
-- **Track C** — tiers, `uncertain_brackets`, the `?` slot glyph, the named
-  footnote. *(point 1, with §0.2's departure)*
-- **A1** — read the live `actions` table so modded modifiers stop reading as
-  projectiles and modded multicasts group correctly. This is Night's fix, and it
-  is "some form of" point 2 arriving *in* the gating release rather than after
-  it.
+- ~~**Track B** — the consumption definition, stated in `README.md`, the
+  Workshop description, and the panel legend.~~ **done** *(point 4)*
+- ~~**Track C** — tiers, `uncertain_brackets`, the `?` slot glyph, the named
+  footnote.~~ **done** *(point 1, with §0.2's departure — see §2's status)*
+- ~~**A1** — read the live `actions` table so modded modifiers stop reading as
+  projectiles and modded multicasts group correctly.~~ **done** (see §3 A1's
+  status). This is Night's fix, and it is "some form of" point 2 arriving *in*
+  the gating release rather than after it.
 - **D1** — ~~Add Trigger, corrected~~ **done** (see §4 D1): forward scan,
   variable-width consumption, inline modifier application,
   `payload = related_projectiles[2] or 1`, and the `valid` fallback where it
   casts the projectile plainly with no trigger at all. Cross-checked against the
   real `gun.lua`, which is the first thing the harness has paid for.
-- **D5** — the two 0-charge gaps from §0.3: Greek wands honoring the filter, and
-  the lost draw at deck end. *(point 3)*
-- **E1** — per-cast mana total vs. `mana_max`, warning-colored when over.
-  *(point 5)*
-- **Harness part 2** — decks in, real `gun.lua` results out, diffed against
-  `wand_structure.lua`, as `tools/test_gun_differential.lua`. This is what D1
-  and the Track C tiers are justified by, so it lands first.
+- ~~**D5** — the two 0-charge gaps from §0.3: Greek wands honoring the filter,
+  and the lost draw at deck end.~~ **done** *(point 3 — see §4 D5's status)*
+- ~~**E1** — per-cast mana total vs. `mana_max`, warning-colored when over.~~
+  **done** *(point 5 — see §5 E1's status)*
+- ~~**Harness part 2** — decks in, real `gun.lua` results out, diffed against
+  `wand_structure.lua`, as `tools/test_gun_differential.lua`.~~ **done** — this
+  is what D1 and the Track C tiers are justified by, so it landed first (§0.1).
+
+Extra items landed beyond this list, all gated by the same harness: **D6**
+RESET, including the wrap-restore correction the differential harness found
+past what this plan's D6 originally guessed (§4 D6); the retirement of the
+Python mirror of `wand_structure.lua` in favor of the differential harness as
+the cross-check (commit fb9a68f); the differential suite's `MAGIC_SHOT`
+placeholder replaced with `SPITTER`, a real Noita action id the engine can
+actually deck (`tools/test_gun_differential.lua`'s header); and
+`RANDOM_MODIFIER`'s chaining, previously unmodeled, now `draws=1,
+tier="approximate"` (§2's status, and the note in `gen_structure_meta.py`'s
+`OVERRIDES`).
+
+What is left of v1.4.0 is T1.12's release text (the Workshop/README writeup of
+everything above) and the in-game checks under §7 — nothing in this plan's own
+list remains unimplemented.
 
 **v1.5.0 — "modded spells"** — completes point 2:
 
@@ -880,6 +979,11 @@ v1.5.0 — not anything in v1.4.0:
 2. Are `mana_max` / `mana_charge_speed` / `mana` readable on the wand's
    `AbilityComponent` with `ComponentGetValue2` (expected yes; same component as
    `gun_config`)? This gates E1's warning threshold, so check it early.
+   **Status: still needs the in-game check.** `grouping_overlay.lua` reads
+   `mana_max` via `pcall(ComponentGetValue2, ab, "mana_max")` and defaults to 0
+   (no threshold) if that fails, so E1 (§5) degrades safely either way — but
+   whether the real read succeeds in a running game, rather than just failing
+   closed, has not been confirmed.
 3. Does `.gun_ref/` survive a Noita update, or does `extract_gun.py` need a
    version guard? The harness silently testing against stale rules would be the
    one failure mode worse than not having it.
