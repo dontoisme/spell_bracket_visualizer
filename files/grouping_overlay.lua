@@ -150,11 +150,20 @@ end
 -- Returns the deck tokens (slot order) and the always-cast ids separately:
 -- always-cast cards never sit in the deck -- the engine plays them at the
 -- start of every cast -- so they must not take part in the deck simulation.
-local function read_deck(wand, ignore_depleted, greek_keeps)
-	-- First pass: gather every card (id, slot, always-cast flag, uses). We need
-	-- the whole id list before filtering, because a Greek spell anywhere on the
-	-- wand disables the depleted-card filter (see wand_structure.has_greek).
-	local raw, ids = {}, {}
+--
+-- T1.7: the simulator now models depleted cards itself (a retried-past pop
+-- that lands in cast.spent, per files/wand_structure.lua's header), so this
+-- no longer pre-filters anything. ALL non-permanent cards go into `tokens` in
+-- slot order, depleted or not, and `uses` carries every reading of
+-- uses_remaining this pass could take, keyed by the card's position in
+-- `tokens` (the same index simulate() calls `card.i`) -- ignore_depleted just
+-- decides, at the call site (collect_wand_boxes), whether that table is
+-- handed to simulate() at all. `xs` used to remap surviving cards past the
+-- ones the old filter dropped; with nothing dropped that remap is the
+-- identity, but the return shape stays so callers (collect_wand_boxes,
+-- draw_box_brackets) don't have to change.
+local function read_deck(wand, ignore_depleted)
+	local raw = {}
 	local children = EntityGetAllChildren(wand) or {}
 	for _, child in ipairs(children) do
 		local iac = EntityGetFirstComponentIncludingDisabled(child, "ItemActionComponent")
@@ -173,44 +182,32 @@ local function read_deck(wand, ignore_depleted, greek_keeps)
 					oku, uses = pcall(ComponentGetValue2, ic, "uses_remaining")
 				end
 				raw[#raw + 1] = { id = aid, x = sx, y = sy, perm = perm, uses = uses, oku = oku }
-				ids[#ids + 1] = aid
 			end
 		end
 	end
 
-	-- A limited-charge spell at 0 uses won't fire (gun.lua skips it), so drop it
-	-- from the deck -- the wand brackets/wraps as though the slot were empty; xs
-	-- maps survivors to their real columns so the depleted card renders bracket-
-	-- less. Gated by the Ignore Depleted Spells setting (ignore_depleted), with a
-	-- Greek exception: on a Greek wand the Greeks re-cast cards by position so a
-	-- depleted card still matters -- keep the full structure when greek_keeps is on.
 	local cards, always = {}, {}
-	local greek = wand_structure.has_greek(ids)
-	local apply_filter = ignore_depleted and not (greek and greek_keeps)
 	for _, r in ipairs(raw) do
-		local depleted = apply_filter and r.oku and not wand_structure.card_fires(r.uses)
-		if not depleted then
-			if r.perm then
-				always[#always + 1] = r.id
-			else
-				cards[#cards + 1] = { id = r.id, x = r.x, y = r.y }
-			end
+		if r.perm then
+			always[#always + 1] = r.id
+		else
+			cards[#cards + 1] = r
 		end
 	end
 	table.sort(cards, function(a, b)
 		if a.y ~= b.y then return a.y < b.y end
 		return a.x < b.x
 	end)
-	-- tokens = deck order; xs[i] = that card's real slot column, so brackets
-	-- land right even when the wand has leading/interior empty slots.
-	local tokens, xs = {}, {}
-	for _, c in ipairs(cards) do
-		tokens[#tokens + 1] = c.id
-		xs[#xs + 1] = c.x
+	-- tokens = deck order; xs[i] = that card's real slot column (identity now
+	-- that nothing is dropped, but see the comment above); uses[i] = the live
+	-- charge count for every card whose read succeeded.
+	local tokens, xs, uses = {}, {}, {}
+	for i, c in ipairs(cards) do
+		tokens[i] = c.id
+		xs[i] = c.x
+		if c.oku then uses[i] = c.uses end
 	end
-	-- greek = the wand has a Greek spell, so the depleted-card filter was off
-	-- (surfaced in the debug readout).
-	return tokens, always, xs, greek
+	return tokens, always, xs, uses
 end
 
 -- ---- flatten the simulation into colored, indented display lines -------------
@@ -298,12 +295,26 @@ local function sim_rows(sim, cfg, always, tier_ids)
 			if cast.mana and cast.mana > cfg.mana_max then any_over = true end
 		end
 	end
-	local show_headers = (#sim.casts > 1) or sim.wrapped or any_over
+	-- T1.7: a cast whose every draw hit a depleted card has nodes = {} and a
+	-- non-empty `spent` (files/wand_structure.lua) -- a real cast that emptied
+	-- part of the deck without firing anything. That needs a header even on a
+	-- wand with exactly one cast, or the panel would say nothing happened at
+	-- all.
+	local any_empty_spent = false
+	for _, cast in ipairs(sim.casts) do
+		if #cast.nodes == 0 and cast.spent and #cast.spent > 0 then any_empty_spent = true end
+	end
+	local show_headers = (#sim.casts > 1) or sim.wrapped or any_over or any_empty_spent
 	for ci, cast in ipairs(sim.casts) do
 		local over = cfg.mana_max and cfg.mana_max > 0
 			and cast.mana and cast.mana > cfg.mana_max
+		local empty_spent = #cast.nodes == 0 and cast.spent and #cast.spent > 0
 		if show_headers then
-			local h = "cast " .. ci .. "  mana " .. fmt(cast.mana or 0)
+			local h = "cast " .. ci
+			if empty_spent then
+				h = h .. "  -- no spells left (depleted)"
+			end
+			h = h .. "  mana " .. fmt(cast.mana or 0)
 			if over then h = h .. "  > max " .. fmt(cfg.mana_max) end
 			if cast.wrapped then h = h .. "  -- WRAPS! -> recharge" end
 			rows[#rows + 1] = { bars = {}, label = h,
@@ -622,6 +633,11 @@ local function collect_wand_delims(sim, cols, rows)
 		-- so its bracket is pure ink -- drop it (user call 2026-08-07). This is
 		-- also what kills the redundant pair on a cast whose single spell IS a
 		-- group: the two spans were identical, drawn twice in two colors.
+		-- `#cast.nodes <= 1` also catches `#cast.nodes == 0`: a cast whose every
+		-- draw hit a depleted card (T1.6/T1.7's `spent`-only cast) still has a
+		-- real cast.first/last span -- it popped cards -- but no node built from
+		-- it, so there is nothing to bracket either. Intentional, not an
+		-- accident of the `<= 1`: an empty cast draws no cast bracket.
 		if rec and #cast.nodes <= 1 then
 			table.remove(out, cast_rec)
 		end
@@ -850,7 +866,7 @@ end
 
 -- sw param is the GEOMETRY reference width (refw = sh*CAL_ASPECT), not live
 -- screen width -- everything here is layout. See draw_delims / update().
-local function collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_keeps)
+local function collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 	local players = EntityGetWithTag("player_unit")
 	if not players or #players == 0 then return {}, BOX.top0 * U * refw, 0 end
 	local items = GameGetAllInventoryItems(players[1]) or {}
@@ -868,7 +884,7 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_kee
 
 	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
 	for _, wd in ipairs(wands) do
-		wd.tokens, wd.always, wd.xs, wd.greek = read_deck(wd.e, ignore_depleted, greek_keeps)
+		wd.tokens, wd.always, wd.xs, wd.uses = read_deck(wd.e, ignore_depleted)
 		-- Track C confidence tier: the worst of every card on the wand (deck
 		-- AND always-cast -- an always-cast Greek/random spell is just as
 		-- unfollowable as one in the deck). tier_ids are the offenders, named
@@ -879,8 +895,14 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_kee
 		wd.tier, wd.tier_ids = wand_structure.wand_tier(tier_ids_input, emeta)
 		wd.cfg = read_config(wd.e)
 		wd.h, wd.sprite = wand_art_wh(gui, wd.e)
+		-- ignore_depleted (default on) is the "model the engine" setting: ON
+		-- hands the live charge counts to the simulator, which retries past a
+		-- depleted card exactly as gun.lua does (no bracket on it, per
+		-- wand_structure.lua's header); OFF omits `uses` entirely and every
+		-- card is simulated as though it fires.
 		wd.sim = wand_structure.simulate(wd.tokens, emeta,
-			{ spells_per_cast = wd.cfg.spells_per_cast })
+			{ spells_per_cast = wd.cfg.spells_per_cast,
+			  uses = ignore_depleted and wd.uses or nil })
 
 		-- displayed slot rows: capacity wraps every per_row slots (fall back
 		-- to the highest occupied slot if the capacity read failed). per_row is
@@ -1289,9 +1311,21 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 			wd.cfg.capacity, #wd.tokens, wd.cfg.spells_per_cast,
 			wd.cfg.shuffle and "yes" or "no")
 		lines[#lines + 1] = string.format(
-			"rows modeled=%d   cast-wraps=%s   greek=%s",
-			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no",
-			wd.greek and "yes (keeping depleted)" or "no")
+			"rows modeled=%d   cast-wraps=%s",
+			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no")
+		-- T1.7: depleted cards the simulator retried past this cast, per cast
+		-- (replaces the old "greek=" line -- the simulator models depleted
+		-- cards itself now, so there's nothing Greek-specific left to report).
+		do
+			local spents = {}
+			if wd.sim then
+				for _, cast in ipairs(wd.sim.casts) do
+					spents[#spents + 1] = (cast.spent and #cast.spent > 0)
+						and table.concat(cast.spent, ", ") or "none"
+				end
+			end
+			lines[#lines + 1] = "spent slots: " .. table.concat(spents, " | ")
+		end
 		-- Track C: the wand's confidence tier and the ids responsible.
 		lines[#lines + 1] = string.format(
 			"tier=%s (%s)", wd.tier or "exact", table.concat(wd.tier_ids or {}, ", "))
@@ -1446,11 +1480,13 @@ function M.update()
 	local show_slots = get("spell_bracket_visualizer.show_slot_brackets") ~= false
 	local show_debug = get("spell_bracket_visualizer.show_debug") == true
 	if not show_panel and not show_slots and not show_debug then return end
-	-- Ignore depleted (0-use) spells in the structure (default on), unless the wand
-	-- has a Greek spell and the Greek exception is on (default on). Both gate the
-	-- filter in read_deck. See settings.lua / wand_structure.has_greek.
+	-- Model depleted (0-use) spells the way gun.lua does: ON (default) hands the
+	-- simulator the live charge counts, so a depleted card is retried past (no
+	-- bracket on it, per wand_structure.lua's header); OFF pretends every card
+	-- fires. greek_keeps_depleted no longer does anything -- the simulator now
+	-- models depleted cards itself, so Greek spells see the right positions
+	-- automatically; see settings.lua.
 	local ignore_depleted = get("spell_bracket_visualizer.ignore_depleted_spells") ~= false
-	local greek_keeps = get("spell_bracket_visualizer.greek_keeps_depleted") ~= false
 	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
 	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
 	-- is worse than exact; "show" draws them anyway. See draw_box_brackets.
@@ -1473,7 +1509,7 @@ function M.update()
 	-- First frame only: fold the game's live `actions` table in under
 	-- structure_meta so modded spells simulate (and get named) correctly.
 	ensure_runtime_meta()
-	local boxes = collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_keeps)
+	local boxes = collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
 		-- strongly negative z = "bring to front": lower z draws on top, and

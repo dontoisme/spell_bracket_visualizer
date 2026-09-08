@@ -258,6 +258,44 @@ do
 	eq("mana no overflow: footnote absent", find_row(rows, MANA_FOOTNOTE), nil)
 end
 
+-- ---- 7. T1.7 -- an empty, all-depleted cast gets a header saying so --------
+--
+-- A cast whose every draw hit a depleted card has nodes = {} and a non-empty
+-- `spent` (files/wand_structure.lua's header) -- a real cast that emptied part
+-- of the deck without firing anything. Even as the wand's ONLY cast (so none
+-- of sim_rows' other header triggers -- multiple casts, a wrap, mana overflow
+-- -- apply), it must still get a header, or the panel would render nothing at
+-- all for a cast that did happen.
+
+do
+	local sim = { casts = { { nodes = {}, spent = { 3 }, mana = 0 } }, wrapped = false }
+	local cfg = { spells_per_cast = 1 }
+	local rows = T.sim_rows(sim, cfg, {})
+	local header = find_header(rows)
+	eq("empty cast: header shown even as the only cast", header ~= nil, true)
+	eq("empty cast: header says no spells left",
+		header and header.label:find("no spells left", 1, true) ~= nil, true)
+	eq("empty cast: header still carries the mana suffix",
+		header and header.label:find("mana 0", 1, true) ~= nil, true)
+end
+
+do
+	-- A normal cast alongside an empty/depleted one: the tree for the normal
+	-- cast must still render, and only the empty cast's header changes.
+	local sim = { casts = {
+		{ nodes = { leaf("LIGHT_BULLET") }, spent = nil, mana = 10 },
+		{ nodes = {}, spent = { 5 }, mana = 0 },
+	}, wrapped = false }
+	local cfg = { spells_per_cast = 1 }
+	local rows = T.sim_rows(sim, cfg, {})
+	local headers = {}
+	for _, r in ipairs(rows) do if r.header then headers[#headers + 1] = r end end
+	eq("mixed casts: two headers", #headers, 2)
+	eq("mixed casts: cast 1 header is plain", headers[1].label, "cast 1  mana 10")
+	eq("mixed casts: cast 2 header says no spells left",
+		headers[2].label:find("no spells left", 1, true) ~= nil, true)
+end
+
 print("")
 print(failures .. " failure(s)")
 os.exit(failures == 0 and 0 or 1)

@@ -364,5 +364,96 @@ do
 	passck("tier/show: brackets drawn (bracket() draws 3 GuiImage per glyph)", drawn.images > 0)
 end
 
+-- ---- 9. T1.7 -- read_deck stops filtering, hands back `uses` -----------------
+--
+-- read_deck used to drop a depleted card out of the deck entirely (and remap
+-- the survivors' columns through `xs`, gated by a Greek-wand exception). The
+-- simulator now models depleted cards itself (a retried-past pop, see
+-- files/wand_structure.lua's header), so read_deck's only job is to report
+-- every non-permanent card AS-IS -- id, real column, and its uses_remaining
+-- where readable -- and let the caller decide whether to hand `uses` to
+-- simulate() at all (collect_wand_boxes). This drives the REAL read_deck
+-- through stubs of the three game APIs it calls, a 3-card wand with slot 2
+-- depleted (uses_remaining == 0).
+do
+	local WAND = "WAND"
+	local CARDS = {
+		{ id = "LIGHT_BULLET", x = 0, uses = -1 }, -- unlimited use: -1
+		{ id = "HEAVY_SPREAD", x = 1, uses = 0 },  -- depleted
+		{ id = "DAMAGE",       x = 2, uses = 5 },
+	}
+
+	function EntityGetAllChildren(e)
+		if e ~= WAND then return {} end
+		local out = {}
+		for i = 1, #CARDS do out[i] = i end
+		return out
+	end
+	function EntityGetFirstComponentIncludingDisabled(child, name)
+		if name == "ItemActionComponent" then return "IAC" .. child end
+		if name == "ItemComponent" then return "IC" .. child end
+		return nil
+	end
+	function ComponentGetValue2(comp, field)
+		local kind, idx = comp:match("^(%a+)(%d+)$")
+		local card = CARDS[tonumber(idx)]
+		if kind == "IAC" then
+			if field == "action_id" then return card.id end
+		elseif kind == "IC" then
+			if field == "inventory_slot" then return card.x, 0 end
+			if field == "permanently_attached" then return false end
+			if field == "uses_remaining" then return card.uses end
+		end
+		return nil
+	end
+
+	local tokens, always, xs, uses = T.read_deck(WAND, true)
+	eq("read_deck/three tokens", #tokens, 3)
+	eq("read_deck/no always-cast cards", #always, 0)
+	eq("read_deck/slot 2 is depleted", uses[2], 0)
+	passck("read_deck/nothing pre-filtered -- HEAVY_SPREAD stays in tokens",
+		tokens[2] == "HEAVY_SPREAD")
+	passck("read_deck/xs is the identity (real column per token, nothing dropped)",
+		xs[1] == 0 and xs[2] == 1 and xs[3] == 2)
+
+	-- Clean up the stubs so they don't leak into later runs of this file (none
+	-- follow today, but the plan() helper above never expected these globals).
+	EntityGetAllChildren = nil
+	EntityGetFirstComponentIncludingDisabled = nil
+	ComponentGetValue2 = nil
+end
+
+-- ---- 10. T1.7 -- a depleted card inside a multicast's gather ----------------
+--
+-- BURST_2 (draws=2) gathers the next two CARDS THAT FIRE, not the next two
+-- slots: with slot 2 depleted, drawing retries past it (files/wand_structure.lua
+-- M.simulate's `draw()`), so the group's children are the cards at slots 3 and
+-- 4 -- but the group's span is still 1..4, because the span is [head .. last
+-- child], and slot 2 sits inside that range even though no node covers it.
+-- That is the definition working as designed (§ T1.7 point 4): a bracket
+-- spanning across a spent slot visually includes it, and this is the one test
+-- that pins the behavior down instead of just asserting it in a comment.
+do
+	local glyphs, groups, sim = plan(
+		{ "BURST_2", "X", "A", "B" }, 1, nil, nil)
+	-- plan() doesn't thread `uses` through simulate, so drive M.simulate
+	-- directly here the same way plan() does internally.
+	sim = S.simulate({ "BURST_2", "X", "A", "B" }, meta,
+		{ spells_per_cast = 1, uses = { [2] = 0 } })
+	local cols, rows = {}, {}
+	for i = 1, 4 do cols[i] = i - 1; rows[i] = 0 end
+	groups = T.collect_wand_delims(sim, cols, rows)
+	glyphs = T.plan_delims(groups)
+
+	eq("spent-span/one cast", #sim.casts, 1)
+	local node = sim.casts[1].nodes[1]
+	eq("spent-span/BURST_2 head at slot 1", node.first, 1)
+	eq("spent-span/gather reaches slot 4 (B), past the depleted slot 2", node.last, 4)
+	eq("spent-span/cast consumed slot 2 as spent, not in a node",
+		sim.casts[1].spent and sim.casts[1].spent[1], 2)
+	eq("spent-span/the multicast bracket spans columns 0..3 (slots 1..4)",
+		show(glyphs), "L0 R3")
+end
+
 print(failures == 0 and "\nALL PASS" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)
