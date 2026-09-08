@@ -1415,6 +1415,10 @@ M._test = {
 
 	nest_color      = nest_color,
 	WRAP_COLOR      = WRAP_COLOR,
+
+	sim_rows        = sim_rows,
+	read_deck       = read_deck,
+	read_config     = read_config,
 }
 
 return M
