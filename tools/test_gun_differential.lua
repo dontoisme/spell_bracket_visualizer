@@ -163,6 +163,54 @@ local CASES = {
 	  tokens = { "ADD_DEATH_TRIGGER", "LIGHT_BULLET", "BOMB" }, spc = nil, casts = 2 },
 	{ name = "add trigger: modifier before it keeps its place",
 	  tokens = { "DAMAGE", "ADD_TRIGGER", "LIGHT_BULLET", "BOMB" }, spc = nil, casts = 2 },
+
+	-- ---- RESET: direct removal of the whole rest of the deck (T1.10) ----
+	-- These are the cases that corrected docs/ADVANCED_SCENARIOS_PLAN.md Sec.4
+	-- D6. D6 read RESET's body as far as "moves every card in hand and deck to
+	-- discarded and empties both", and concluded the cast ends there for want of
+	-- cards. The body does not end there:
+	--
+	--     if ( force_stop_draws == false ) then
+	--         force_stop_draws = true
+	--         move_discarded_to_deck()
+	--         order_deck()
+	--     end
+	--
+	-- so the deck comes back FULL, in slot order, holding everything discarded
+	-- so far this cycle. Two things follow, and both are checked below because
+	-- neither was predicted: the restore reads as a WRAP (gun_harness counts the
+	-- move_discarded_to_deck at draw depth, and the mod agrees -- later draws in
+	-- the cast really are wrapped-in cards from the wand's start), and a cast's
+	-- slot set NETS OUT, because a card RESET took and handed straight back was
+	-- not, on balance, taken out of the deck at all. On the first four wands
+	-- that nets to {} for the RESET cast.
+	{ name = "reset clears the rest of the wand",
+	  tokens = { "LIGHT_BULLET", "RESET", "SPITTER", "BOMB" }, spc = 1, casts = 4 },
+	{ name = "reset clears a single trailing card",
+	  tokens = { "RESET", "SPITTER" }, spc = 1, casts = 3 },
+	{ name = "reset alone clears nothing",
+	  tokens = { "RESET" }, spc = 1, casts = 3 },
+	{ name = "reset takes a modifier prefix",
+	  tokens = { "DAMAGE", "RESET", "SPITTER" }, spc = 1, casts = 3 },
+	-- The interesting one. BURST_2's first child is RESET, whose restore refills
+	-- the deck -- so the multicast's SECOND child is drawn from slot 1 and finds
+	-- BURST_2 again, which draws RESET again. That second RESET restores nothing
+	-- (force_stop_draws is already set) and the deck is finally empty, with the
+	-- inner multicast's own second child lost: force_stop_draws disables
+	-- draw_action's reload path too, so it cannot even wrap for it. The engine
+	-- plays "BURST_2 >RESET ~>BURST_2 ~>>RESET" and this cast drains the wand:
+	-- slots {1,2,3,4}, and the two casts after it are empty.
+	{ name = "reset inside a multicast re-draws the wand from slot 1",
+	  tokens = { "BURST_2", "RESET", "SPITTER", "BOMB" }, spc = 1, casts = 3 },
+	-- Two root draws at 2 spells/cast: the second one comes off the restored
+	-- deck and is the SAME RESET card again, which this time clears for good.
+	{ name = "reset twice in one cast: the second restores nothing",
+	  tokens = { "RESET", "SPITTER", "BOMB" }, spc = 2, casts = 3 },
+	-- A card RESET clears is cleared whatever its charges: the body never looks
+	-- at uses_remaining, so a depleted SPITTER moves exactly like a live one.
+	{ name = "reset clears a depleted card too",
+	  tokens = { "RESET", "SPITTER", "BOMB" }, spc = 1, casts = 3,
+	  uses = { [2] = 0 } },
 }
 
 -- Divergences already understood and traced to the ENGINE, not to a simulator

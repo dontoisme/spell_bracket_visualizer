@@ -49,6 +49,40 @@
 --         does NOT wrap for it. Only the FIRST attempt of each draw can wrap.
 --     The same draw_action path handles a card the caster cannot afford, so
 --     mana exhaustion will inherit this model unchanged.
+--   * RESET (meta consumes="rest") empties the WHOLE remaining deck directly.
+--     Its body moves every card in `hand` and every card in `deck` into
+--     `discarded` and empties both -- no draw_actions call anywhere, so like
+--     the Add Trigger scan it can never wrap FOR a card. Under the bracket
+--     definition its bracket is therefore the entire rest of the wand.
+--     THE TAIL OF THE BODY IS THE PART THAT SURPRISES (the plan's D6 stops one
+--     line early; the differential harness is what found it):
+--
+--         if ( force_stop_draws == false ) then
+--             force_stop_draws = true
+--             move_discarded_to_deck()
+--             order_deck()
+--         end
+--
+--     so the deck does NOT stay empty -- it comes straight back FULL, holding
+--     every card discarded so far this recharge cycle (including RESET itself
+--     and everything it just cleared), in slot order. Three consequences:
+--       - the cast is NOT over for lack of cards. A multicast that played
+--         RESET as its first child draws its next child off the restored deck,
+--         starting again at the wand's first slot. Those draws are wrapped-in
+--         cards in every sense the mod means, so the restore is counted as a
+--         WRAP here (which is also what tools/gun_harness.lua reports) and, as
+--         with any wrap, the recharge cycle ends after this cast.
+--       - force_stop_draws is sticky for the rest of the cast, so a SECOND
+--         RESET in the same cast restores nothing and really does leave the
+--         deck empty -- and it also disables draw_action's reload path, so no
+--         later forced draw in that cast can wrap either.
+--       - the cast's slot trace nets out. A card the cast drew and RESET then
+--         handed back to the deck was not, on balance, taken out of it: the
+--         engine's own deck-diff says so, and `cast.slots` is computed the same
+--         way (touched-this-cast MINUS still-in-the-deck) so the two agree.
+--     A cleared card is NOT a "spent" card: RESET moves it whether or not it
+--     had charges left, it is never played, and it never passes through
+--     draw_action -- so it costs no mana (see cast.mana below).
 --
 -- Input : tokens = ordered array of action_id strings (a wand's cards)
 --         meta   = the table from files/structure_meta.lua
@@ -64,6 +98,11 @@
 --                 first, last, wfirst, wlast,
 --                 mana = N -- total mana this cast's drawn cards cost (a
 --                          -- negative-mana card, e.g. Add Mana, subtracts),
+--                          -- Only cards the cast actually PLAYED are counted:
+--                          -- draw_action returns before `mana = mana - cost`
+--                          -- for a depleted card, and a card RESET cleared
+--                          -- never went through draw_action at all, so neither
+--                          -- is charged.
 --                 spent = { i, ... } -- slots this cast popped that were
 --                                    -- DEPLETED: consumed, never fired, in no
 --                                    -- node. Absent when there are none. A
@@ -87,6 +126,13 @@
 --               children={...}, modifiers={ids} }
 --   trigger   { kind="trigger",   id, atype, trigger=kind, payload=N,
 --               children={...}, modifiers={ids} }
+--   reset     { kind="reset",      id, atype, modifiers={ids},
+--               cleared={ i, ... } } -- the slots RESET emptied out of the
+--               deck, sorted; {} when the deck was already empty. They are NOT
+--               children: they are consumed blanks, not expressions -- nothing
+--               about them was executed. They ARE inside the node's span
+--               (first/last, and the wrapped halves), which is the whole point:
+--               the bracket has to reach them.
 -- A modifier chain that exhausts the deck with nothing left to wrap in
 -- becomes a leaf with dangling=true. Nodes built across a wrap get wrap=true,
 -- plus wfirst/wlast = min/max slot index of the cards drawn AFTER the wrap
@@ -223,6 +269,16 @@ function M.simulate(tokens, meta, opts)
 
 	local wrap_count = 0
 	local wrapped_now = false -- this cast has wrapped; later draws are wrapped-in
+	-- gun.lua's `force_stop_draws`, reset by _start_shot at every cast: RESET
+	-- sets it, and while it is set draw_action's empty-deck branch takes the
+	-- `reloading = true` path instead of reloading, so nothing can wrap.
+	local force_stop = false
+	-- Every card this cast took out of the deck by ANY route -- ordinary draw,
+	-- depleted retry, Add Trigger scan, RESET clear. Distinct from `hand`, which
+	-- is the engine's hand and which RESET empties mid-cast: the cast's span,
+	-- spent list and mana are all questions about what the cast touched, and the
+	-- answer must survive a RESET moving the hand out from under them.
+	local touched = {}
 
 	-- One draw off the deck, modelling draw_actions' retry loop (see the header).
 	-- Forced draws (from a card's own draw_actions / trigger payload) wrap the
@@ -234,7 +290,7 @@ function M.simulate(tokens, meta, opts)
 		local first_attempt = true
 		while true do
 			if #deck == 0 then
-				if first_attempt and forced and #discard > 0 then
+				if first_attempt and forced and #discard > 0 and not force_stop then
 					table.sort(discard, function(a, b) return a.i < b.i end)
 					deck, discard = discard, {}
 					wrap_count = wrap_count + 1
@@ -249,6 +305,7 @@ function M.simulate(tokens, meta, opts)
 			-- so it is inside the cast's wrapped-in span.
 			if wrapped_now then card.w = true end
 			hand[#hand + 1] = card -- lands in the discard at cast end either way
+			touched[#touched + 1] = card
 			if M.card_fires(uses[card.i]) then return card end
 			-- Depleted: consumed, never played, never note()d into a node span.
 			card.spent = true
@@ -317,6 +374,7 @@ function M.simulate(tokens, meta, opts)
 					local c = table.remove(deck, 1)
 					if wrapped_now then c.w = true end
 					hand[#hand + 1] = c
+					touched[#touched + 1] = c
 					note(c)
 					if c ~= target then mods[#mods + 1] = c.id end
 				end
@@ -342,6 +400,40 @@ function M.simulate(tokens, meta, opts)
 				-- Scan ran off the deck, or landed on a card that cannot carry a
 				-- trigger: the body consumes nothing and does nothing.
 				node.kind = "leaf"
+			end
+		elseif m.consumes == "rest" then
+			-- RESET. Direct removal of the entire remaining deck, plus the hand,
+			-- plus the one-shot restore -- see the header. The cleared cards are
+			-- consumed blanks: they are noted into this node's span (so the
+			-- bracket covers them) and listed in node.cleared, but they are not
+			-- children, because nothing about them ran.
+			node.kind = "reset"
+			local cleared, pile = {}, {}
+			while #deck > 0 do
+				local c = table.remove(deck, 1)
+				if wrapped_now then c.w = true end
+				c.cleared = true
+				touched[#touched + 1] = c
+				pile[#pile + 1] = c
+				cleared[#cleared + 1] = c.i
+				note(c)
+			end
+			table.sort(cleared)
+			node.cleared = cleared
+			-- `for i,v in ipairs(hand) ... table.insert(discarded, v)`, then the
+			-- same for the deck, then `hand = {} deck = {}`. RESET is itself in
+			-- the hand by now (play_action inserts the card BEFORE calling the
+			-- body), so it goes to the discard too -- and is therefore part of
+			-- what the restore below hands back.
+			for _, c in ipairs(hand) do discard[#discard + 1] = c end
+			for _, c in ipairs(pile) do discard[#discard + 1] = c end
+			hand = {}
+			if not force_stop then
+				force_stop = true
+				table.sort(discard, function(a, b) return a.i < b.i end)
+				deck, discard = discard, {}
+				wrap_count = wrap_count + 1
+				wrapped_now = true
 			end
 		elseif is_multicast(m) then
 			node.kind = "multicast"
@@ -390,7 +482,9 @@ function M.simulate(tokens, meta, opts)
 	while #deck > 0 and #casts < 64 do -- cap: a wrap ends each cycle anyway
 		local wraps_before = wrap_count
 		hand = {}
+		touched = {}
 		wrapped_now = false
+		force_stop = false
 		local nodes = parse_seq(spc, false)
 		local wrapped = wrap_count > wraps_before
 		-- The CAST's own slot span, straight off the hand (every card this cast
@@ -401,12 +495,24 @@ function M.simulate(tokens, meta, opts)
 		-- as a node: first/last forward, wfirst/wlast for the wrapped-in run.
 		local cast = { nodes = nodes, wrapped = wrapped }
 		if opts.trace then
-			-- Every card this cast took out of the deck, by slot: the hand holds
-			-- normal draws, depleted cards retried past, AND the Add Trigger
-			-- scan's direct removals -- exactly the engine's notion of what a
-			-- cast consumes (harness `cast.drawn`).
-			local slots = {}
-			for _, cd in ipairs(hand) do slots[#slots + 1] = cd.i end
+			-- Every card this cast took out of the deck, by slot: ordinary
+			-- draws, depleted cards retried past, the Add Trigger scan's direct
+			-- removals, and RESET's clear -- MINUS anything still sitting in the
+			-- deck, because RESET can hand a card it took straight back. That
+			-- subtraction is exactly how the engine side measures it (harness
+			-- `cast.drawn` = start-of-cast deck, plus everything a wrap put back,
+			-- minus the deck at the end of the draw phase), and without it a
+			-- RESET cast would claim slots the deck still holds. De-duplicated
+			-- for the same reason: after a RESET a cast can draw one slot twice.
+			local in_deck = {}
+			for _, cd in ipairs(deck) do in_deck[cd.i] = true end
+			local slots, seen_slot = {}, {}
+			for _, cd in ipairs(touched) do
+				if not in_deck[cd.i] and not seen_slot[cd.i] then
+					seen_slot[cd.i] = true
+					slots[#slots + 1] = cd.i
+				end
+			end
 			table.sort(slots)
 			cast.slots = slots
 		end
@@ -414,15 +520,18 @@ function M.simulate(tokens, meta, opts)
 		-- a renderer can say why a cast holds slots nothing was built from --
 		-- including the degenerate cast whose every draw hit one, which has
 		-- nodes = {} and is still a real cast that emptied part of the deck.
-		local spent = {}
-		for _, cd in ipairs(hand) do
-			if cd.spent then spent[#spent + 1] = cd.i end
+		local spent, seen_spent = {}, {}
+		for _, cd in ipairs(touched) do
+			if cd.spent and not seen_spent[cd.i] then
+				seen_spent[cd.i] = true
+				spent[#spent + 1] = cd.i
+			end
 		end
 		if #spent > 0 then
 			table.sort(spent)
 			cast.spent = spent
 		end
-		for _, cd in ipairs(hand) do
+		for _, cd in ipairs(touched) do
 			if cd.w then
 				if cast.wfirst == nil or cd.i < cast.wfirst then cast.wfirst = cd.i end
 				if cast.wlast == nil or cd.i > cast.wlast then cast.wlast = cd.i end
@@ -439,9 +548,18 @@ function M.simulate(tokens, meta, opts)
 		-- draw_action), so they are excluded here for free, which is right:
 		-- they are never charged. This is the cast's COST only -- the pool and
 		-- the not-enough-mana discards are E2 and deliberately not modeled.
+		-- ...but only the cards the cast actually PLAYED. draw_action charges
+		-- `mana = mana - action_mana_required` only after BOTH of its early
+		-- returns, so a DEPLETED card (uses_remaining == 0) is discarded
+		-- unplayed and never billed; and a card RESET cleared never went
+		-- through draw_action at all, so it is never billed either. One rule,
+		-- two card classes: if it did not come off the deck through a draw that
+		-- played it, it is free.
 		local mana = 0
-		for _, cd in ipairs(hand) do
-			mana = mana + (meta_for(meta, cd.id).mana or MANA_DEFAULT)
+		for _, cd in ipairs(touched) do
+			if not cd.spent and not cd.cleared then
+				mana = mana + (meta_for(meta, cd.id).mana or MANA_DEFAULT)
+			end
 		end
 		cast.mana = mana
 		casts[#casts + 1] = cast
