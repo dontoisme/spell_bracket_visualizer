@@ -13,6 +13,9 @@
 --        target of a scan; also marks the card as able to carry a trigger.
 -- chain: attaches to the next card with NO forced draw (DIVIDE_*: an
 --        empty deck means it does nothing -- never wraps).
+-- consumes: cards removed from the deck DIRECTLY, with no forced draw.
+--        "rest" (RESET) = the entire remaining deck, which the body then
+--        hands straight back as a full deck in slot order.
 -- dynamic: "conditional" (IF_*: skips deck cards when false at cast time)
 --        or "random" (casts extra cards chosen at random at cast time).
 -- tier: "approximate" (position/state-dependent -- Greeks, IF_* branches,
@@ -339,7 +342,7 @@ return {
 	["RECOIL_DAMPER"] = { type="MODIFIER", name="$action_recoil_damper", draws=1, mana=5 },
 	["REGENERATION_FIELD"] = { type="STATIC_PROJECTILE", name="$action_regeneration_field", rp=1, mana=80 },
 	["REMOVE_BOUNCE"] = { type="MODIFIER", name="$action_remove_bounce", draws=1, mana=0 },
-	["RESET"] = { type="UTILITY", name="$action_reset", mana=20 },
+	["RESET"] = { type="UTILITY", name="$action_reset", consumes="rest", mana=20 },
 	["ROCKET"] = { type="PROJECTILE", name="$action_rocket", rp=1, mana=70 },
 	["ROCKET_DOWNWARDS"] = { type="MODIFIER", name="$action_rocket_downwards", draws=1, mana=90 },
 	["ROCKET_OCTAGON"] = { type="MODIFIER", name="$action_rocket_octagon", draws=1, mana=100 },

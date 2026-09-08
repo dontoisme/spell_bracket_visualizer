@@ -33,6 +33,12 @@ local function show_node(node)
 		tag = "x" .. (node.group == -1 and "all" or tostring(node.group))
 	elseif node.kind == "trigger" then
 		tag = "trig" .. tostring(node.payload)
+	elseif node.kind == "reset" then
+		-- RESET's bracket is the rest of the wand. The cleared slots are listed,
+		-- not counted, because WHICH slots they are is the whole claim -- and on
+		-- a wand where RESET clears nothing (it is the last card) the empty
+		-- "clears[]" says so out loud instead of reading as a plain leaf.
+		tag = "clears[" .. table.concat(node.cleared, ",") .. "]"
 	end
 	if node.dangling then tag = "dangling" end
 	if node.wrap then tag = tag .. "~WRAP" end
@@ -314,6 +320,85 @@ check("greek wand: depleted card still retried past",
 	{ "TAU", "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, 1,
 	"{TAU} | {LIGHT_BULLET} | {LIGHT_BULLET}", { [3] = 0 })
 
+-- ---- RESET: the bracket is the rest of the wand (T1.10) --------------------
+-- RESET calls no draw_actions at all. Its body moves every card in `hand` and
+-- every card in `deck` to `discarded`, empties both, and then -- unless
+-- force_stop_draws is already set -- sets it and calls move_discarded_to_deck()
+-- + order_deck(), handing the deck straight back FULL in slot order. So:
+--   * the cards it took out of the deck are cleared, not spent and not cast:
+--     no draw_action ran for them, so they cost no mana and fire nothing. They
+--     are listed as node.cleared and printed here as "clears[...]".
+--   * the restore is a WRAP by every meaning the mod attaches to the word (the
+--     deck is back at the wand's start and later draws in this cast are
+--     wrapped-in), and tools/gun_harness.lua counts it as one, so the cast
+--     carries W and the recharge cycle ends after it.
+-- Every wand below was run through the real gun.lua first; the differential
+-- cases in tools/test_gun_differential.lua are the same wands.
+
+check("reset clears the rest of the wand and ends the cycle",
+	{ "LIGHT_BULLET", "RESET", "SPITTER", "BOMB" }, 1,
+	"{LIGHT_BULLET} | {RESET:clears[3,4]~WRAP}W")
+
+check("reset clears a single trailing card",
+	{ "RESET", "SPITTER" }, 1,
+	"{RESET:clears[2]~WRAP}W")
+
+-- Alone on the wand there is nothing left to clear -- but RESET still PLAYS
+-- (it is drawn and its body runs), so it is a real node with an empty bracket,
+-- not a no-op and not a leaf.
+check("reset with an empty deck clears nothing and is still a node",
+	{ "RESET" }, 1,
+	"{RESET:clears[]~WRAP}W")
+
+-- A modifier in front of RESET prefixes it exactly like any other head.
+check("reset takes a modifier prefix",
+	{ "DAMAGE", "RESET", "SPITTER" }, 1,
+	"{[DAMAGE]RESET:clears[3]~WRAP}W")
+
+-- THE INTERESTING ONE, and the case that corrects
+-- docs/ADVANCED_SCENARIOS_PLAN.md Sec.4 D6. D6 says the cast ends at RESET
+-- because the deck is empty. It does not: the tail of RESET's body hands the
+-- whole discard pile back as a full deck, so the multicast's SECOND child is
+-- drawn from the wand's start and finds BURST_2 again. That second BURST_2
+-- draws RESET again -- and this time force_stop_draws is already set, so the
+-- restore is skipped, the deck really does stay empty, and its own second
+-- child cannot be drawn (nor can it wrap: force_stop_draws also disables
+-- draw_action's reload path). Confirmed against gun.lua, which plays exactly
+-- "BURST_2 >RESET ~>BURST_2 ~>>RESET" and reports slots {1,2,3,4}.
+check("reset inside a multicast: the restore feeds the next child from slot 1",
+	{ "BURST_2", "RESET", "SPITTER", "BOMB" }, 1,
+	"{(BURST_2:x2~WRAP RESET:clears[3,4]~WRAP (BURST_2:x2 RESET:clears[3,4]))}W")
+
+-- The bookkeeping behind those trees: cleared slots are inside the node's span
+-- (the bracket must reach them) and listed on the node, but they are not
+-- children and they are not `spent` -- RESET moves a card whether or not it had
+-- charges left, which is a different thing from a depleted card being retried
+-- past. And `cast.slots` NETS OUT: the cast drew RESET and cleared slots 3-4,
+-- then handed all of them back to the deck, so on balance it removed nothing --
+-- which is exactly what the engine's own deck diff reports.
+sim = S.simulate({ "LIGHT_BULLET", "RESET", "SPITTER", "BOMB" }, meta,
+	{ spells_per_cast = 1, trace = true })
+local rnode = sim.casts[2].nodes[1]
+passck("reset node: kind, head and cleared list",
+	rnode.kind == "reset" and rnode.head == 2
+		and #rnode.cleared == 2 and rnode.cleared[1] == 3 and rnode.cleared[2] == 4
+		and rnode.children == nil,
+	string.format(" (kind=%s head=%s cleared=%d)", tostring(rnode.kind),
+		tostring(rnode.head), #rnode.cleared))
+passck("reset node: the span covers the cleared cards",
+	rnode.first == 2 and rnode.last == 4,
+	string.format(" (first=%s last=%s)", tostring(rnode.first), tostring(rnode.last)))
+passck("reset cast: nets out to no slots, and reports no spent cards",
+	#sim.casts[2].slots == 0 and sim.casts[2].spent == nil and sim.casts[2].wrapped,
+	string.format(" (slots=%d spent=%s)", #sim.casts[2].slots,
+		tostring(sim.casts[2].spent)))
+-- A DEPLETED card that RESET clears is cleared, not spent: RESET moves every
+-- card in the deck regardless of charges, and never looks at uses_remaining.
+sim = S.simulate({ "RESET", "SPITTER", "BOMB" }, meta,
+	{ spells_per_cast = 1, trace = true, uses = { [2] = 0 } })
+passck("a depleted card RESET clears is cleared, not spent",
+	sim.casts[1].spent == nil and #sim.casts[1].nodes[1].cleared == 2)
+
 -- ---- tiers (T1.3) ------------
 
 local function eq(name, got, expect)
@@ -362,8 +447,8 @@ check_tier("wand tier: synthetic dynamic record via __index fallback",
 -- Costs are read out of the generated table, never hardcoded here.
 local function cost(id) return meta[id].mana end
 
-local function check_mana(name, tokens, spc, expect)
-	local sim = S.simulate(tokens, meta, { spells_per_cast = spc })
+local function check_mana(name, tokens, spc, expect, uses)
+	local sim = S.simulate(tokens, meta, { spells_per_cast = spc, uses = uses })
 	local got = {}
 	for _, c in ipairs(sim.casts) do got[#got + 1] = "mana=" .. tostring(c.mana) end
 	local want = {}
@@ -393,6 +478,25 @@ check_mana("mana: Add Mana subtracts",
 check_mana("mana: per-cast, not per-wand",
 	{ "LIGHT_BULLET", "BOMB" }, 1,
 	{ cost("LIGHT_BULLET"), cost("BOMB") })
+
+-- Only cards the cast PLAYED are billed. draw_action reaches
+-- `mana = mana - action_mana_required` only after both of its early returns, so
+-- a DEPLETED card is discarded unplayed and costs nothing -- cast 3 below pops
+-- slot 3, fires nothing, and is free.
+check_mana("mana: a depleted card is popped but not charged",
+	{ "LIGHT_BULLET", "LIGHT_BULLET", "DAMAGE" }, 1,
+	{ cost("LIGHT_BULLET"), cost("LIGHT_BULLET"), 0 }, { [3] = 0 })
+
+-- Same rule, other card class: a card RESET cleared never went through
+-- draw_action at all, so the cast costs RESET (plus any prefix) and nothing for
+-- the two cards it emptied out of the deck.
+check_mana("mana: cards RESET clears are free",
+	{ "LIGHT_BULLET", "RESET", "SPITTER", "BOMB" }, 1,
+	{ cost("LIGHT_BULLET"), cost("RESET") })
+
+check_mana("mana: a prefix on RESET is still charged",
+	{ "DAMAGE", "RESET", "SPITTER" }, 1,
+	{ cost("DAMAGE") + cost("RESET") })
 
 print(string.format("\n%d failure(s)", failures))
 os.exit(failures > 0 and 1 or 0)

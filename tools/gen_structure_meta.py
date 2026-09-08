@@ -73,6 +73,18 @@ OVERRIDES = {
     "ADD_TRIGGER":       {"scan": True, "trigger": "hit_world"},
     "ADD_TIMER":         {"scan": True, "trigger": "timer"},
     "ADD_DEATH_TRIGGER": {"scan": True, "trigger": "death"},
+    # consumes="rest" -- RESET. Its body (gun_actions.lua:10439) calls no
+    # draw_actions at all, so the draws-regex sees nothing and the card would
+    # read as a plain UTILITY leaf. What it actually does is move EVERY card in
+    # `hand` and in `deck` to `discarded` and empty both -- direct removal, no
+    # forced draw, so it can never wrap for a card. Under the bracket definition
+    # (docs/ADVANCED_SCENARIOS_PLAN.md Sec.0.1) that makes its bracket the whole
+    # remaining deck. The tail of the body is the part Sec.4 D6 missed and the
+    # differential harness found: unless `force_stop_draws` is already set it
+    # sets it and calls move_discarded_to_deck() + order_deck(), so the deck
+    # comes straight back FULL, in slot order. See wand_structure.lua's
+    # consumes=="rest" branch for what that means for the cast.
+    "RESET":     {"consumes": "rest"},
     "DIVIDE_2":  {"chain": True},
     "DIVIDE_3":  {"chain": True},
     "DIVIDE_4":  {"chain": True},
@@ -201,6 +213,7 @@ def to_lua(meta):
         if "scan" in rec:    parts.append('trigger="%s", scan=true' % rec["trigger"])
         if "rp" in rec:      parts.append("rp=%d" % rec["rp"])
         if "chain" in rec:   parts.append("chain=true")
+        if "consumes" in rec: parts.append('consumes="%s"' % rec["consumes"])
         if "dynamic" in rec: parts.append('dynamic="%s"' % rec["dynamic"])
         if "tier" in rec:    parts.append('tier="%s"' % rec["tier"])
         if "mana" in rec:
@@ -223,6 +236,9 @@ def to_lua(meta):
         "--        target of a scan; also marks the card as able to carry a trigger.",
         "-- chain: attaches to the next card with NO forced draw (DIVIDE_*: an",
         "--        empty deck means it does nothing -- never wraps).",
+        '-- consumes: cards removed from the deck DIRECTLY, with no forced draw.',
+        '--        "rest" (RESET) = the entire remaining deck, which the body then',
+        "--        hands straight back as a full deck in slot order.",
         '-- dynamic: "conditional" (IF_*: skips deck cards when false at cast time)',
         '--        or "random" (casts extra cards chosen at random at cast time).',
         '-- tier: "approximate" (position/state-dependent -- Greeks, IF_* branches,',
@@ -248,10 +264,12 @@ def main():
     n_rp = sum("rp" in r for r in meta.values())
     n_approx = sum(r.get("tier") == "approximate" for r in meta.values())
     n_unknown = sum(r.get("tier") == "unknown" for r in meta.values())
+    n_consumes = sum("consumes" in r for r in meta.values())
     n_mana = sum("mana" in r for r in meta.values())
     n_mana_default = sum(r.get("mana") == DEFAULT_MANA for r in meta.values())
     print(f"wrote structure_meta.lua: {len(meta)} actions "
           f"({n_group} multicast, {n_trig} trigger, {n_scan} scan, {n_rp} rp, "
+          f"{n_consumes} direct-consume, "
           f"{n_approx} approximate, {n_unknown} unknown, "
           f"{n_mana} mana ({n_mana_default} at default {DEFAULT_MANA}))")
 
