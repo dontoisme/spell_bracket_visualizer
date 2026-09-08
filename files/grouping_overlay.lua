@@ -15,6 +15,25 @@
 local meta = dofile_once("mods/spell_bracket_visualizer/files/structure_meta.lua") or {}
 local sprite_wh_meta = dofile_once("mods/spell_bracket_visualizer/files/wand_sprite_meta.lua") or {}
 local wand_structure = dofile_once("mods/spell_bracket_visualizer/files/wand_structure.lua")
+local runtime_meta = dofile_once("mods/spell_bracket_visualizer/files/runtime_meta.lua")
+
+-- The EFFECTIVE metadata table: structure_meta.lua with the game's live
+-- `actions` table underneath it (files/runtime_meta.lua), so spells appended by
+-- other mods stop reading as cast-ending OTHER leaves. Starts as plain
+-- structure_meta and is upgraded once, on the first update() -- by then every
+-- mod has finished its ModLuaFileAppend. If anything about the runtime read
+-- fails, `emeta` simply stays `meta` and the mod behaves exactly as before.
+local emeta = meta
+local runtime_tried = false
+local function ensure_runtime_meta()
+	if runtime_tried or not runtime_meta then return end
+	runtime_tried = true
+	local ok, merged = pcall(function()
+		runtime_meta.load()
+		return runtime_meta.merged(meta)
+	end)
+	if ok and merged then emeta = merged end
+end
 
 local M = {}
 local gui = nil
@@ -77,7 +96,7 @@ end
 
 -- Localized spell name ($action_*) if available, else a prettified id.
 local function display_name(id)
-	local m = meta[id]
+	local m = emeta[id]
 	if m and m.name and type(GameTextGet) == "function" then
 		local t = GameTextGet(m.name)
 		if t and t ~= "" then return t end
@@ -205,7 +224,7 @@ end
 -- condition-true / no-extras path; the "?" says so instead of pretending.
 local function dyn_name(id, rows)
 	local name = display_name(id)
-	local m = meta[id]
+	local m = emeta[id]
 	if m and m.dynamic then
 		rows.any_dynamic = true
 		return name .. "?"
@@ -800,7 +819,7 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_kee
 		wd.tokens, wd.always, wd.xs, wd.greek = read_deck(wd.e, ignore_depleted, greek_keeps)
 		wd.cfg = read_config(wd.e)
 		wd.h, wd.sprite = wand_art_wh(gui, wd.e)
-		wd.sim = wand_structure.simulate(wd.tokens, meta,
+		wd.sim = wand_structure.simulate(wd.tokens, emeta,
 			{ spells_per_cast = wd.cfg.spells_per_cast })
 
 		-- displayed slot rows: capacity wraps every per_row slots (fall back
@@ -1195,6 +1214,11 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 	else
 		lines[#lines + 1] = "wand:  (none held -- select/hold a wand)"
 	end
+	-- Modded-spell fallback layer (3 A1): how many spells the live `actions`
+	-- table yielded, or why the read failed.
+	if runtime_meta then
+		lines[#lines + 1] = runtime_meta.status_line()
+	end
 	-- Font probe: RAW engine readings, no floors. The width ratio is the whole
 	-- diagnosis (docs/FONT_COMPAT.md) -- with the vanilla pixel font it equals
 	-- the requested 0.6, so "x0.60 ok" prints; under a font that ignores
@@ -1348,6 +1372,9 @@ function M.update()
 	-- one measure/read pass shared by the brackets and the panel's dock anchor.
 	-- per_row is the aspect-calibrated wrap column (99 = no wrap at >= 16:9)
 	local per_row = wrap_columns(sw, sh)
+	-- First frame only: fold the game's live `actions` table in under
+	-- structure_meta so modded spells simulate (and get named) correctly.
+	ensure_runtime_meta()
 	local boxes = collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_keeps)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
@@ -1419,6 +1446,10 @@ M._test = {
 	sim_rows        = sim_rows,
 	read_deck       = read_deck,
 	read_config     = read_config,
+
+	-- runtime (modded-spell) metadata layer, 3 A1
+	ensure_runtime_meta = ensure_runtime_meta,
+	effective_meta      = function() return emeta end,
 }
 
 return M
