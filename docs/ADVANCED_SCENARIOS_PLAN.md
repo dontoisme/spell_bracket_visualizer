@@ -8,31 +8,136 @@ to be *correct or explicitly silent* on every wand instead.
 Everything here builds on what already exists: `wand_structure.lua` is a real
 deck simulator, `structure_meta.lua` carries per-card draw facts, and the
 `?` marking + shuffle-wand suppression already embody the right instinct
-(hedge in text, never lie in brackets). Nothing gets rewritten; the
-simulator grows three node kinds, the metadata gets a second (runtime)
-source, and a confidence policy decides when the slot row stays blank.
+(hedge in text, never lie in brackets). Nothing gets rewritten; the simulator
+grows a handful of node kinds, the metadata gets a second (runtime) source, and
+a confidence policy decides when the slot row stays blank.
 
-Engine facts below are tagged **verified** (already checked against
-`data.wak` for a shipped feature) or **VERIFY** (from memory of
-`gun_actions.lua` / `gun.lua`; must be confirmed with the dump tool in §7
-before code is written against them). Nothing tagged VERIFY should be
-implemented from this document alone.
+**On the engine facts in this document.** An earlier draft tagged them
+**verified** or **VERIFY**, the latter meaning "from memory of `gun_actions.lua`
+/ `gun.lua`, confirm before coding". Every one of them has since been read
+directly from `.gun_ref/`, extracted by `tools/extract_gun.py` (§0.1), and the
+tags are gone. Several of the remembered facts were wrong in ways that changed
+the design — Add Trigger's consumption width (§4 D1), Divide's repeat semantics
+(D2), which Greeks force-draw at all (D3), the `reflecting` safety premise
+(§3 A2), and always-cast mana (§5). Where that happened, the correction records
+the original guess beside it, because the gap between the two is the argument
+for the differential harness.
 
 ---
 
 ## 0. The feedback, mapped
 
-| # | Who | Point | Where it lands |
-|---|-----|-------|----------------|
-| — | Night | modded modifiers / multicasts show as separate casts ("registers as projectile spells") | Track A (runtime metadata + probe) |
-| 1 | KoObEy | a wand holding an unmodeled OTHER-type spell should get **no brackets at all** | Track C (confidence tiers) |
-| 2 | KoObEy | learn what modded spells draw the way the game builds tooltips: empty shot state, execute, read back | Track A2 (the probe) |
-| 3 | KoObEy | proper 0-charge logic | **Already shipped** (v1.2.6 → v1.3.0). One open verification, §4 D5 |
-| 4 | KoObEy | Greeks etc. need a *stated definition* of what a bracket means; the four candidate definitions diverge | Track B (the definition) + Track D3 (Greek modeling) |
-| 5 | KoObEy | mana: sum per cast vs. max mana, warn | Track E |
+The thread runs Aug 22 – Sep 3 and contains two different criticisms, not one.
+A **method** objection (UserK, endorsed by KoObEy) came first: the mod guesses
+at rules it could simply run. A **results** objection followed (Night, then
+KoObEy's five numbered points): here is where the guess is wrong. The method
+objection is listed first because answering it is what makes everything else
+verifiable — and because the answer has changed since the Aug 26 reply.
 
-Point 3 is the easy win in the reply: KoObEy's "from the version I last
-tried" predates 1.3.0. Ask them to retest with *Ignore Depleted Spells* on.
+| # | Who | Date | Point | Where it lands |
+|---|-----|------|-------|----------------|
+| — | UserK | Aug 22 | hook into the game's gun system and simulate with the game's own code instead of guessing; "would also likely play nicer with mods" | §0.1 — **position reversed** |
+| — | KoObEy | Aug 23 | "I agree with UserK, that running the game code to get the actual results would be the better approach"; "As is, this mod shows false results" | §0.1 |
+| — | Night | Sep 2 | modded modifiers and multicasts register as projectile spells, so wands show several casts where only one exists | Track A1 — v1.4.0 |
+| 1 | KoObEy | Sep 3 | a wand holding an OTHER-type spell that is not a note should get **no brackets at all** — "particularly for Divides, Greeks and Add Triggers" | Track C, with a stated departure — §0.2 |
+| 2 | KoObEy | Sep 3 | identify what modded spells draw the way the game builds tooltips: empty shot state, execute the spell, read the shot state back | Track A1 (partial) v1.4.0; Track A2 (full) v1.5.0 |
+| 3 | KoObEy | Sep 3 | proper 0-charges logic — "pretty easy", "used in a lot of practical wands" | **not actually done** — §0.3 |
+| 4 | KoObEy | Sep 3 | Greeks and complex spells need a clear stated definition of what a bracket means; his four candidate readings diverge | Track B + D3 |
+| 5 | KoObEy | Sep 3 | mana: sum cost per cast, compare against max mana, warn | Track E1 |
+
+The release-gating set is KoObEy's own:
+
+> "With some form of my suggestions **1-3** included, I would fully retract my
+> criticism and end up recommending this mod."
+
+1, 2 and 3 are conditions; 4 and 5 he volunteered as improvements. §6 slices on
+that basis. An earlier draft of this plan shipped 1, 3, 4 and 5 first and held
+2 back — precisely the wrong subset to lead with.
+
+### 0.1 The method objection — reversing the Aug 26 answer
+
+The Aug 26 reply said: *"I'm choosing to not hook into the games code since this
+mod is mostly intended as a teaching tool ... I am intentionally not trying to
+simulate the entire cast of every spell."* That defended two things at once:
+keeping the mod a lightweight panel, which is still right, and guessing at the
+draw rules, which is not. They are separable, and this plan separates them.
+
+What changed: `tools/extract_gun.py` pulls `gun.lua`, `gun_actions.lua` and
+their dependencies out of `data.wak` into a gitignored `.gun_ref/`, and
+`tools/gun_harness.lua` runs **Noita's own cast code** over a deck outside the
+game (branch `harness/gun-differential`, commit 8263221). The simulator can now
+be diffed against the real rules, deck by deck, as a test.
+
+That adopts the substance of UserK's suggestion in the form that fits an
+overlay mod:
+
+- **Not** hooking the live gun system while the player is casting. That is Wand
+  DBG's job, it risks perturbing real cast state, and it would turn a panel into
+  a heavyweight dependency.
+- **Yes** running the game's real code as a **differential oracle** offline, so
+  what ships provably agrees with the engine on every deck the harness covers,
+  and its disagreements are known rather than discovered by players.
+
+This is also why the rest of this document could be corrected before any of it
+was written: the engine facts below are now read from `.gun_ref/` instead of
+remembered. Several that this plan asserted from memory were wrong — §4 D1, D2
+and D3, and §3's `reflecting` premise — and D5's open question is answered.
+
+Lead the thread post with this. "I now run your code against mine" is a
+stronger answer to "this shows false results" than any feature in this plan.
+
+### 0.2 Point 1 — where this plan departs, and on what evidence
+
+KoObEy named three families: *"particularly for Divides, Greeks and Add
+Triggers."* Track C hides brackets for **Greeks** and agrees with him there. It
+does **not** hide them for Divides and Add Triggers. That disagreement should be
+stated plainly rather than presented as compliance.
+
+The reason is that both are deterministic once modeled correctly — but this
+plan's first draft modeled both *incorrectly*, so the departure is only earned
+once §4 D1 and D2 land and the harness confirms them:
+
+- **Add Trigger** is not "consumes the next card". It scans forward past
+  MODIFIER / PASSIVE / OTHER / DRAW_MANY cards, executes each intervening
+  MODIFIER body inline under `dont_draw_actions`, then consumes **all** of them
+  plus the projectile (`gun_actions.lua:9313`). Deterministic, but a
+  variable-width prefix.
+- **Divide** reads `deck[iter]`, suppresses the draws of its *first* invocation,
+  and consumes `iter_max` cards only at the outermost level
+  (`gun_actions.lua:10063`). Deterministic, but not "repeat N times".
+
+**The gate:** each family keeps the `exact` tier only while the differential
+harness agrees with the simulator on its test decks. If the harness disagrees
+and cannot be reconciled, the family drops to `approximate` and its brackets
+hide themselves under the default policy — KoObEy's rule applying
+automatically, by evidence rather than by argument. That is the honest version
+of "we think we can do better than hiding these".
+
+Greeks are a different case, and he is simply right about them: §4 D3 shows they
+are two incompatible groups rather than one.
+
+### 0.3 Point 3 — conceded; it is not done
+
+The earlier claim here ("shipped in 1.3.0, ask KoObEy to retest") does not
+survive checking. `ignore_depleted_spells` does default to **on**, so there is
+nothing for him to switch. But two real gaps remain, and they are plausibly the
+"currently incorrect edge cases" he meant:
+
+1. **Greek wands ignore the setting by default.** `greek_keeps_depleted` also
+   defaults on, and `grouping_overlay.lua:162` computes
+   `apply_filter = ignore_depleted and not (greek and greek_keeps)`. So on any
+   wand holding a Greek spell the 0-charge filter is off entirely. His point 3
+   ("a lot of practical wands") and his point 4 (Greeks) intersect exactly here,
+   and the intersection is unhandled.
+2. **A depleted card at the end of the deck eats a draw instead of wrapping.**
+   `draw_actions` (`gun.lua:299`) does **retry** past a depleted card — the repo
+   comment gets that right and no `spent` node kind is needed — but the retry
+   loop is `while #deck > 0` and never reaches the reload path, so the iteration
+   is silently lost rather than wrapping the wand. The same path handles
+   insufficient mana, so Track E inherits the answer.
+
+Both land in v1.4.0, and the reply concedes the point instead of asking him to
+retest.
 
 ---
 
@@ -66,12 +171,20 @@ Consequences, all of which are *features* of picking one definition:
 - Trigger payloads stay nested (they are consumed by the trigger's forced
   draw). The bracket says "consumed here", not "fires now" — the panel's
   `trig` wording already carries the timing.
-- Divide By stays a prefix (consumes the next card). Add Trigger becomes a
-  prefix too (§4 D1).
-- Greek spells get **no bracket to the card they copy**. What they *do*
-  consume — the one card most of them force-draw afterwards, plus any cards
-  the copied body itself force-draws — is bracketed under the Greek, because
-  those cards really do leave the deck.
+- Divide By and Add Trigger stay prefixes, but neither consumes just "the next
+  card": Divide charges `iter_max` cards at the outermost level (§4 D2) and Add
+  Trigger swallows its whole forward scan (§4 D1). The bracket width is
+  computed, not assumed.
+- Greek spells get **no bracket to the card they copy**. What they consume
+  besides that varies by class and is often *nothing at all*: ALPHA / GAMMA /
+  TAU let the copied body draw for real, while OMEGA / PHI / MU / SIGMA / ZETA
+  run it under `dont_draw_actions` so it consumes nothing, and only MU / SIGMA /
+  ZETA force-draw a card of their own (§4 D3). Since the definition would give
+  OMEGA and PHI a visibly empty bracket, all eight hide their brackets by
+  default and the panel names the copy in text instead.
+- RESET's bracket encloses the entire remaining wand — it moves all of `hand`
+  and `deck` to `discarded` (§4 D6). That is the definition working, not an
+  edge case.
 - The definition goes three places: `README.md` "How it works", the
   Workshop description ("What a bracket means"), and a one-line legend the
   panel can show (`[ ] = spells this card pulls from the wand`), reusing the
@@ -84,40 +197,55 @@ as its opening paragraph. Ship in the same release as Track C.
 
 ## 2. Track C — confidence tiers and the "no brackets" policy
 
-Every card in a wand gets a **tier**, derived from its metadata record —
-never from `ACTION_TYPE` alone (KoObEy's "OTHER that is not a note" is
-really "OTHER whose body does something the simulator can't follow"; the
-notes are structurally trivial leaves and should keep their brackets):
+Every card in a wand gets a **tier**, derived from its metadata record — never
+from `ACTION_TYPE` alone (KoObEy's "OTHER that is not a note" is really "OTHER
+whose body does something the simulator can't follow"; the notes are
+structurally trivial leaves and should keep their brackets).
+
+Tiers below are assigned from the bodies as read in `.gun_ref/`, not from type:
 
 | tier | meaning | vanilla members |
 |------|---------|-----------------|
-| **exact** | the body's deck effects are fully captured by `draws` / `group` / `payload` / `chain` and are deterministic | every PROJECTILE / STATIC_PROJECTILE / MATERIAL leaf; every draws=1 MODIFIER / PASSIVE / UTILITY; every DRAW_MANY; trigger projectiles; DIVIDE_* (once D2 lands); ADD_TRIGGER family (once D1 lands); KANTELE_* / OCARINA_* notes; any OTHER/UTILITY whose body draws nothing (CESSATION, SUMMON_PORTAL, X_RAY, TEMPORARY_WALL, ALL_* …) |
-| **approximate** | modeled, but position- or state-dependent: shown with `?` | the 8 Greeks (D3); IF_* requirement spells; RESET and ALL_SPELLS until their bodies are checked (§7) |
-| **unknown** | no usable record: a mod spell the probe could not classify, or a probe error | anything not in `structure_meta.lua` and not probed |
+| **exact** | the body's deck effects are fully captured by the record and are deterministic | every PROJECTILE / STATIC_PROJECTILE / MATERIAL leaf; every draws=1 MODIFIER / PASSIVE / UTILITY; every DRAW_MANY; trigger projectiles; KANTELE_* / OCARINA_* notes; `IF_END` (draws 1); **RESET** (consumes the entire remaining deck **and** hand — §4 D6); any OTHER/UTILITY whose body has no deck effect, now confirmed to include **ALL_SPELLS** (entity load only), CESSATION, SUMMON_PORTAL, X_RAY, TEMPORARY_WALL |
+| **exact, harness-gated** | deterministic, but only after the corrected model lands and `test_gun_differential.lua` agrees — otherwise demoted to *approximate* automatically (§0.2) | DIVIDE_2 / _3 / _4 / _10 (D2); ADD_TRIGGER / ADD_TIMER / ADD_DEATH_TRIGGER (D1) |
+| **approximate** | modeled, but position- or state-dependent: shown with `?` | ALPHA / GAMMA / TAU (copy live, D3 class 1); OMEGA / PHI / MU / SIGMA (copy suppressed, D3 class 2); `IF_ENEMY`, `IF_HP`, `IF_PROJECTILE` (branch on world state); `IF_HALF` (alternates on a persistent global — predictable in *pairs* but not from a single frame, D4) |
+| **unknown** | no usable record | **ZETA** (reads the player's *other* wands and seeds RNG from position + frame number — unknowable statically, D3 class 3); any modded spell the probe could not classify, or a probe error; any vanilla id absent from `structure_meta.lua` (see below) |
+
+**The 422/490 gap.** `gun_actions.lua` defines **490** ids; `structure_meta.lua`
+carries **422**. The generator filters ~68 unobtainable internals (`BAAB_*`,
+`BUILDING_*`, `*_LEGACY`, enemy-only projectiles). Those resolve to
+`{type="OTHER"}` today and would land in *unknown*, blanking the brackets on any
+wand that somehow holds one. A1's runtime read lifts them to *approximate* at
+best, which still hides. Decide explicitly: widen the generator's filter to
+cover them, or accept that these wands go bracket-less.
 
 Policy (new setting, `uncertain_brackets`, enum):
 
 - **Hide (default)** — a wand containing any *unknown* card, or any
-  *approximate* card, draws **no slot brackets**. A small dim `?` glyph at
-  the right end of the slot row says why the row is blank (so "no brackets"
-  reads as *uncertain*, not *broken*). The panel still draws the tree with
-  `?` marks and the footnote names the spells responsible:
+  *approximate* card, draws **no slot brackets**. A small dim `?` glyph at the
+  right end of the slot row says why the row is blank (so "no brackets" reads as
+  *uncertain*, not *broken*). The panel still draws the tree with `?` marks and
+  the footnote names the spells responsible:
   `? = Alpha, Unknown Modded Spell: structure uncertain`.
-- **Show** — brackets drawn anyway, `?` marks in the panel as today. For
-  players who want the approximation and know what it is.
+- **Show** — brackets drawn anyway, `?` marks in the panel as today. For players
+  who want the approximation and know what it is.
 
-This is KoObEy's point 1 verbatim, generalized so it also covers mods
-(Night's case) and future unknowns without a hand-maintained exception list.
+This is KoObEy's point 1 generalized so it also covers mods (Night's case) and
+future unknowns without a hand-maintained exception list. It is **not** point 1
+verbatim: he asked for Divides and Add Triggers to be hidden too, and they are
+not — see §0.2 for the departure and the harness gate that keeps it honest.
 The shuffle-wand suppression stays a separate, absolute rule.
 
 Implementation notes:
 
 - `wand_structure.lua`: `M.tier(meta_record)` (pure) and `M.wand_tier(ids, meta)`
-  → `"exact" | "approximate" | "unknown"` with the offending ids. Tested
-  in `tools/test_wand_structure.lua`.
+  → `"exact" | "approximate" | "unknown"` with the offending ids. The
+  harness-gated tier is not a fourth runtime value — it resolves to `exact` or
+  `approximate` at generation time, from whether the differential suite passed.
+  Tested in `tools/test_wand_structure.lua`.
 - `grouping_overlay.lua`: `collect_wand_boxes` stamps `wd.tier`;
-  `draw_box_brackets` checks it next to the shuffle check; `sim_rows`
-  extends the existing `any_dynamic` footnote into a named list.
+  `draw_box_brackets` checks it next to the shuffle check; `sim_rows` extends the
+  existing `any_dynamic` footnote into a named list.
 - Debug Info box: print the wand's tier and the offending ids.
 
 ---
@@ -125,21 +253,26 @@ Implementation notes:
 ## 3. Track A — runtime spell metadata (the modded-spell fix)
 
 Today `meta_for()` returns `{ type = "OTHER" }` for any id not in
-`structure_meta.lua`, so a modded modifier is a leaf that ends its cast and
-a modded multicast gathers nothing — exactly Night's "multiple casts when
-there is only one". Two layers fix it; the second is KoObEy's suggestion.
+`structure_meta.lua`, so a modded modifier is a leaf that ends its cast and a
+modded multicast gathers nothing — exactly Night's "multiple casts when there is
+only one". Two layers fix it; the second is KoObEy's suggestion.
 
 ### A1 — read the game's live `actions` table (cheap, do first)
 
 Every spell the game knows, including every spell other mods appended via
-`ModLuaFileAppend("data/scripts/gun/gun_actions.lua", …)`, is an entry in
-the global `actions` table produced by `dofile_once("data/scripts/gun/gun_actions.lua")`
-(after `gun_enums.lua` for the `ACTION_TYPE_*` constants). Load it lazily
-on the first `M.update()` (all mods have finished appending by then), inside
-the usual `pcall`, and build `runtime_meta[id] = { type, name, mana, max_uses, related_projectiles ~= nil }`.
+`ModLuaFileAppend("data/scripts/gun/gun_actions.lua", …)`, is an entry in the
+global `actions` table — confirmed a plain global assignment at
+`gun_actions.lua:4`, produced by
+`dofile_once("data/scripts/gun/gun_actions.lua")` (after `gun_enums.lua` for the
+`ACTION_TYPE_*` constants). Load it lazily on the first `M.update()` (all mods
+have finished appending by then), inside the usual `pcall`, and build
+`runtime_meta[id] = { type, name, mana, max_uses, related_projectiles ~= nil }`.
 
-Merge order for `meta_for(id)`: **probe result (A2) > structure_meta.lua >
-type-only fallback from A1 > `{type="OTHER"}`**. The type-only fallback:
+Merge order for `meta_for(meta, id)` — note the real signature is
+`(meta, id)` and it is file-local in `wand_structure.lua:89`, so this becomes a
+module-level merge rather than a change to that function's arity:
+**probe result (A2) > structure_meta.lua > type-only fallback from A1 >
+`{type="OTHER"}`**. The type-only fallback:
 
 | runtime `type` | assumed record | tier |
 |----------------|----------------|------|
@@ -148,280 +281,608 @@ type-only fallback from A1 > `{type="OTHER"}`**. The type-only fallback:
 | PROJECTILE / STATIC_PROJECTILE / MATERIAL | leaf | approximate (could be a trigger) |
 | UTILITY / OTHER | leaf | unknown |
 
-A1 alone already turns most modded modifiers from "cast boundary" into
-"prefix", which is the bulk of Night's complaint. The `name` field also
-gives modded spells localized panel labels for free, and `mana` feeds Track E.
+A1 alone already turns most modded modifiers from "cast boundary" into "prefix",
+which is the bulk of Night's complaint. The `name` field also gives modded
+spells localized panel labels for free, and `mana` feeds Track E — with the
+caveat from §5 that a `nil` mana means `ACTION_MANA_DRAIN_DEFAULT` (10), not
+zero.
 
-`structure_meta.lua` stays: it is the offline test fixture and the fallback
-when the runtime read fails, and the generator should start emitting `mana=`
-so the mana tests run without the game.
+`structure_meta.lua` stays: it is the offline test fixture and the fallback when
+the runtime read fails, and the generator should start emitting `mana=` so the
+mana tests run without the game.
 
-### A2 — the probe: execute each unknown spell in a stub shot state
+### A2 — the probe: execute an unknown spell in a stub shot state
 
-KoObEy's observation is right and it is how the engine itself works:
-`gun.lua` keeps a global `reflecting`, and every action body in
-`gun_actions.lua` wraps its world side effects (entity loads, GamePrint,
-material spawns) in `if not reflecting then … end` so the tooltip pass can
-run the body harmlessly. Well-behaved modded spells honor it too, because
-their tooltips go through the same pass.
+**Scope has narrowed.** The probe was designed because there was no way to run
+the real code. There is now (§0.1), and for vanilla spells the differential
+harness is strictly better evidence. A2's remaining job is the one the harness
+cannot do: classifying **modded** spells at runtime, whose bodies are not in
+`data.wak`. Everything below is scoped to that.
 
-So: for each id not fully described by `structure_meta.lua`, run
-`actions[i].action()` **once, in a sandbox, with `reflecting = true`**, and
-record what it did to the deck. The record *is* the metadata — no regex,
-no guessing from type.
+**The original safety argument was wrong and needs replacing.** This plan
+claimed every action body wraps its world side effects in
+`if not reflecting then … end`. It does not: `reflecting` appears **twice in
+490 vanilla actions** (`gun_actions.lua:10757` in `IF_HALF`, and `:11095`).
+The protection actually lives in `gun.lua`'s wrappers — `add_projectile`,
+`add_projectile_trigger_*` all return early under `reflecting` — not in a
+convention the bodies follow. So a modded body called with `reflecting = true`
+is **not** thereby harmless, and the real safety comes from our own stubbing of
+every engine global. Say that honestly in the design doc; it changes the risk
+assessment, not the approach.
 
-The sandbox (`files/action_probe.lua`, pure Lua, no game API so it runs
-under `lua5.1`/`5.4` in the tools):
+Two consequences worth recording:
 
-- **Globals the body sees** (via `setfenv` on the function when available,
-  otherwise a plain global swap guarded by "only if `draw_actions == nil`
-  in this VM", see §7): `deck`, `hand`, `discarded` (stub cards),
-  `c` and `shot_effects` (tables with a `__index` that returns `0` for any
-  unknown field, so `c.damage = c.damage + 1` and `c.extra_entities .. "x,"`
-  both work), `reflecting = true`, `recursion_level = 0`, `mana = 1e9`,
-  `current_reload_time`, `ACTION_TYPE_*` constants, the Lua stdlib, and
-  **every uppercase-initial global (engine API) replaced by a no-op that
-  returns 0** except a short allowlist (`Random`, `SetRandomSeed`,
-  `GameGetFrameNum` → 0, `GetUpdatedEntityID` → 0, `EntityGetTransform` → 0,0).
+- `draw_action` itself begins `if reflecting then return end`
+  (`gun.lua:236`). So the *real* engine draws nothing during a reflecting pass.
+  The harness must therefore run with `reflecting = false`, and the probe's
+  `reflecting = true` only makes sense because the probe supplies its own
+  `draw_actions` stub rather than gun.lua's.
+- `IF_HALF` branches on `reflecting` and takes the no-skip path when it is set,
+  so the probe sees exactly one of its two behaviors. Any modded spell that
+  copies that idiom has the same blind spot. Record it as
+  `dynamic = "reflect-blind"` rather than pretending the record is complete.
+
+The sandbox (`files/action_probe.lua`, pure Lua, no game API so it runs under
+`lua5.1`/`5.4` in the tools):
+
+- **Globals the body sees** (via `setfenv` where available, otherwise a plain
+  global swap guarded by "only if `draw_actions == nil` in this VM", §7):
+  `deck`, `hand`, `discarded` (stub cards), `c` and `shot_effects` (tables with
+  an `__index` returning `0` for unknown fields), `reflecting = true`,
+  `recursion_level = 0`, `dont_draw_actions = false`, `mana = 1e9`,
+  `current_reload_time`, the `ACTION_TYPE_*` constants, the Lua stdlib, and
+  every uppercase-initial global (engine API) replaced by a stub.
+- **Engine stubs must not blanket-return `0`.** `0` is truthy in Lua, so a
+  uniform `return 0` makes every engine predicate take its true branch. The live
+  example is in the Add Trigger body: `ActionUsesRemainingChanged` returning `0`
+  makes `if not reduce_uses` unreachable. Stub returns are per-function:
+  `false` for predicates (`EntityHasTag`, `HasFlagPersistent`, `GameHasFlagRun`),
+  `nil` or `{}` for lookups (`EntityGetInRadiusWithTag`, `EntityGetAllChildren`),
+  `0` only for genuine numerics (`GameGetFrameNum`, `GetUpdatedEntityID`),
+  `0, 0` for `EntityGetTransform`, `""` for `GlobalsGetValue`. Anything
+  unlisted returns `nil` and is logged, so the gaps are visible.
 - **Stubbed gun.lua functions, each recording**: `draw_actions(n, forced)`
-  (records `n`; `n == #deck` at call time ⇒ `-1`; pops `n` stub cards to
-  `hand`), `draw_shot`/`create_shot` and the three
-  `add_projectile_trigger_*` (record `{ trigger = kind, payload = n }`,
-  do **not** recurse), `add_projectile`, `check_recursion` (returns
-  `recursion_level + 1`), `move_discarded_to_deck`, `order_deck`,
-  `set_current_action`, `register_action`, `play_action`, `Reflection_*`.
-- **Stub cards** are 16 dummies `{ id = "__PROBE_k", type = PROJECTILE, deck_index = k, uses_remaining = -1, action = <records "recast k"> }`.
-  Their `action` recording is what detects a Greek-style re-cast by
-  reference; the deck shrinking *without* a `draw_actions` call is what
-  detects direct consumption (Divide By, Add Trigger, and any modded
-  look-alike). The probe is run with `deck[1].type` set to each of
-  PROJECTILE / MODIFIER / OTHER in turn so type-conditional bodies (Add
-  Trigger only consumes a projectile) are seen both ways.
-- **Determinism**: run 3× with different `SetRandomSeed`; a differing record
-  ⇒ `dynamic = "random"`. Guard: the `draw_actions` stub errors after 64
-  calls (a runaway loop against our stub deck terminates instead of hanging).
+  (records `n`; `n == #deck` at call time ⇒ `-1`; pops `n` stub cards to `hand`;
+  honors `dont_draw_actions`, which several vanilla bodies set — see §4 D2/D3 —
+  and which a modded body may copy), `draw_shot` / `create_shot` and the three
+  `add_projectile_trigger_*` (record `{ trigger = kind, payload = n }`, do
+  **not** recurse), `add_projectile`, `check_recursion` (mirror the real one:
+  `-1` past `recursion_limit = 2` for `recursive` cards, else `rec + 1`),
+  `move_discarded_to_deck`, `order_deck`, `set_current_action`,
+  `register_action`, `play_action`, `Reflection_*`.
+- **Stub cards** are 16 dummies
+  `{ id = "__PROBE_k", type = PROJECTILE, deck_index = k, uses_remaining = -1,
+  related_projectiles = {"__probe.xml", 1}, action = <records "recast k"> }`.
+  Their `action` recording is what detects a Greek-style re-cast by reference;
+  the deck shrinking *without* a `draw_actions` call is what detects direct
+  consumption (Divide, Add Trigger, RESET, and any modded look-alike).
+  `related_projectiles` must be present or the Add Trigger family silently takes
+  its no-op path. Run the probe with `deck[1].type` set to each of PROJECTILE /
+  MODIFIER / OTHER in turn so type-conditional bodies are seen every way.
+- **Determinism**: run 3× with different `SetRandomSeed`; a differing record ⇒
+  `dynamic = "random"`. Guard: the `draw_actions` stub errors after 64 calls.
 - **Any error** ⇒ the id is cached as `unknown` and never probed again this
-  session (so a hostile or sloppy modded spell costs one `pcall`, once).
-  Everything runs from `OnWorldPostUpdate` while the inventory is open, never
-  inside a cast, and never touches the real gun state — the mod's Lua VM does
-  not hold `gun.lua` (§7 confirms).
+  session. Everything runs from `OnWorldPostUpdate` while the inventory is open,
+  never inside a cast, and never touches real gun state (§7 confirms the mod's
+  VM does not hold `gun.lua`).
 
 Record produced, superset of today's fields:
 
 ```lua
 { type, name, mana,
   draws = n | -1,            -- forced draws (draw_actions)
-  consumes = n,              -- cards removed from deck[1] directly (no forced draw)
-  consumes_type = "PROJECTILE" | nil,   -- only when deck[1] is of that type
-  repeats = n,               -- times the consumed card's body was invoked (Divide)
-  recasts = { "hand[1]" | "deck[last]" | "deck[1..2]" | "all" | … },
+  consumes = n | "scan" | "rest",  -- removed from the deck with no forced draw:
+                             --   n      fixed count (Divide's iter_max case)
+                             --   scan   variable-width forward scan (Add Trigger)
+                             --   rest   the entire remaining deck (RESET)
+  consumes_skip = { types },  -- for "scan": types stepped over and swallowed
+  repeats = n,               -- times the consumed card's body was invoked
+  repeats_first_silent = true,-- first invocation runs under dont_draw_actions
+  recasts = { "hand[1]" | "discarded[1]" | "deck[#deck]" | "all" | … },
+  recasts_silent = true,      -- the copied body runs under dont_draw_actions
   trigger = kind, payload = n,
-  dynamic = "random" | nil }
+  dynamic = "random" | "reflect-blind" | nil }
 ```
 
-`chains()` / `is_multicast()` in `wand_structure.lua` keep working on the
-same `draws`/`chain`/`payload` fields; `consumes`, `repeats`, `recasts` are
-new and drive D1–D3.
+`chains()` / `is_multicast()` in `wand_structure.lua` keep working on the same
+`draws` / `chain` / `payload` fields; the rest are new and drive D1–D3.
 
 ### A3 — the probe as a regression test for the vanilla table
 
-`tools/dump_gun_actions.py` (reuse the wak reader in `gen_structure_meta.py`)
-writes `gun_actions.lua` to a scratch dir; `tools/probe_actions.lua` loads
-it with `action_probe.lua` and prints a record for all 422 vanilla ids;
-`tools/test_probe_vs_meta.lua` diffs that against `structure_meta.lua`.
-Every disagreement is either a regex miss in the generator (ADD_TRIGGER,
-§4 D1, is the known one) or a probe bug — both worth knowing before the
-probe is trusted on other people's spells. Once they agree, the generator
-can be *replaced* by the probe (`gen_structure_meta.py` → thin wrapper), and
-the Python cross-check mirror `test_wand_structure.py` should be retired
-rather than taught the new node kinds twice.
+`tools/extract_gun.py` already writes `gun_actions.lua` to `.gun_ref/` (§0.1 —
+do *not* build the `dump_gun_actions.py` this plan originally proposed);
+`tools/probe_actions.lua` loads it with `action_probe.lua` and prints a record
+per id; `tools/test_probe_vs_meta.lua` diffs that against `structure_meta.lua`.
+Scope the diff to the 422 ids `structure_meta.lua` actually carries, or the
+first run is 68 lines of noise (§2).
+
+Every disagreement is either a regex miss in the generator (ADD_TRIGGER, §4 D1,
+is the known one) or a probe bug — both worth knowing before the probe is
+trusted on other people's spells. Note that agreement between probe and
+generator proves only that two *guesses* match; the differential harness is what
+proves either matches the engine. Once all three agree, the generator can be
+replaced by the probe (`gen_structure_meta.py` → thin wrapper), and the Python
+cross-check mirror `test_wand_structure.py` should be retired rather than taught
+the new node kinds twice.
 
 ### A4 — settings and debug
 
-- `probe_modded_spells` (default on): A2 on/off. With it off, A1's
-  type-only fallback applies and those wands are *approximate* → no
-  brackets under the default policy.
-- Debug Info box: for the held wand, one line per card: `id  tier  src=meta|runtime|probe  draws/consumes/payload`.
-  That is the screenshot that makes a modded-spell bug report actionable.
+- `probe_modded_spells` (default on): A2 on/off. With it off, A1's type-only
+  fallback applies and those wands are *approximate* → no brackets under the
+  default policy.
+- Debug Info box: for the held wand, one line per card:
+  `id  tier  src=meta|runtime|probe  draws/consumes/payload`. That is the
+  screenshot that makes a modded-spell bug report actionable.
 
 ---
 
 ## 4. Track D — specific vanilla spells
 
-### D1 — Add Trigger / Add Timer / Add Death Trigger (**likely a live bug**)
+Every body in this section has now been read in `.gun_ref/`; line references are
+to `gun_actions.lua` and `gun.lua` as extracted by `tools/extract_gun.py`. The
+**VERIFY** tags are gone — where an earlier draft of this plan guessed, the
+guess is recorded alongside the correction, because the shape of the mistake is
+the reason the harness exists.
 
-`structure_meta.lua` records them as `trigger=…, payload=1` with no
-`draws`, so the simulator makes the Add Trigger card itself a trigger head
-whose payload is the **next** card — for `ADD_TRIGGER, SPARK, BOMB` it draws
-`(ADD_TRIGGER SPARK) BOMB`: Spark as the payload, Bomb in a new cast.
+### D1 — Add Trigger / Add Timer / Add Death Trigger (confirmed live bug)
 
-VERIFY: the body peeks `deck[1]`; if it is a PROJECTILE with
-`related_projectiles`, it spawns that projectile itself as a trigger via
-`add_projectile_trigger_hit_world(file, 1)` (which force-draws the 1-card
-payload) and moves `deck[1]` to `discarded` **without** `draw_actions()`;
-otherwise it does nothing and consumes nothing. If confirmed, the correct
-structure is `(ADD_TRIGGER→SPARK BOMB)`: prefix on Spark, Bomb nested as the
-payload, and — like Divide — an Add Trigger at the end of the wand does
-nothing and cannot wrap, while the *payload* draw is forced and can.
+`structure_meta.lua:15-17` records the three as `trigger=…, payload=1` with no
+`draws`, so the simulator makes the Add Trigger card a trigger head whose
+payload is the **next** card: `ADD_TRIGGER, SPARK, BOMB` renders
+`(ADD_TRIGGER SPARK) BOMB`. That is wrong, and the real body
+(`gun_actions.lua:9313`, and structurally identical at `ADD_TIMER` and
+`ADD_DEATH_TRIGGER`) is wrong in a more interesting way than this plan first
+guessed.
 
-Fix: meta `consumes=1, consumes_type="PROJECTILE", trigger="hit_world", payload=1`
-(the probe in A2 produces exactly this); simulator: a `consumes` head reads
-the next card without a forced draw, requires the type, then opens its
-payload. Tests: the three cases above plus "Add Trigger before a modifier
-does nothing", "trailing Add Trigger does not wrap", "payload wraps".
+*The earlier guess was:* peek `deck[1]`; if it is a projectile with
+`related_projectiles`, consume that one card and open a 1-card payload;
+otherwise do nothing. **What it actually does:**
 
-### D2 — Divide By followed by a multicast or trigger
+1. **Forward scan.** Starting at `deck[1]`, step forward while the card is
+   MODIFIER / PASSIVE / OTHER / DRAW_MANY, counting into `how_many`.
+2. **Modifiers are applied in passing.** Each stepped-over MODIFIER has its
+   `data.action()` invoked inline under `dont_draw_actions = true` — so it
+   modifies the trigger projectile *and* its own forced draw is suppressed.
+   Cards whose id is one of the three Add Trigger spells, and depleted cards,
+   are skipped without being executed but are still counted.
+3. **Consumption is variable-width.** If the card the scan lands on has
+   `related_projectiles`, the body consumes **all `how_many` cards** —
+   `for i=1,how_many do table.insert(discarded, deck[1]); table.remove(deck,1) end`
+   — the stepped-over modifiers included. Not one card.
+4. **Payload count is not 1.** `count = data.related_projectiles[2] or 1`, and
+   the body loops `for i=1,count do add_projectile_trigger_hit_world(target, 1) end`.
+   A spell whose `related_projectiles` declares 3 opens three 1-card payloads,
+   so the forced draw is `count`, not 1. `ADD_TIMER` calls
+   `add_projectile_trigger_timer(target, 20, 1)` (20-frame delay);
+   `ADD_DEATH_TRIGGER` calls `add_projectile_trigger_death(target, 1)`.
+5. **The `valid` fallback.** Before spawning, the body scans the *remaining*
+   deck for any PROJECTILE / STATIC_PROJECTILE / MATERIAL / UTILITY. If it finds
+   none, `valid` is false and it runs `data.action()` under `dont_draw_actions`
+   instead — i.e. **it casts the projectile plainly, with no trigger at all**,
+   having already consumed the cards. So "a trailing Add Trigger does nothing
+   and cannot wrap" is false: it consumes, it fires, it just does not trigger.
 
-Known limitation in the README: the divided card is invoked N times and
-each invocation draws *fresh* cards. `DIVIDE_2, BURST_2, A, B, C, D` is one
-expression `(DIVIDE_2 (BURST_2 A B) (BURST_2 C D))`. With `repeats=N` in
-meta (VERIFY N: 2/3/4/10 — and whether the last invocation on an exhausted
-deck wraps, since the *inner* `draw_actions` is forced even though Divide's
-own read is not), `parse_expr` runs the consumed card's body `repeats`
-times, collecting each invocation's children as siblings. Tier: exact.
-Tests: the example above; divide → trigger; divide → divide; divide →
-multicast at wand end (wrap inside repeat 2).
+So `ADD_TRIGGER, DAMAGE, SPARK, BOMB` is `(ADD_TRIGGER→DAMAGE SPARK (BOMB))`:
+Damage and Spark both consumed by the scan, Bomb drawn as the payload.
 
-### D3 — the Greeks
+Metadata: `consumes = "scan"`, `consumes_skip = {MODIFIER, PASSIVE, OTHER,
+DRAW_MANY}`, `trigger = "hit_world" | "timer" | "death"`,
+`payload = "related_projectiles[2] or 1"`, `payload_fallback = "plain_cast"`.
+Simulator: a `"scan"` head walks the token list itself, applying the same type
+predicate, then opens `count` payloads — or, when no projectile-ish card
+remains, emits a plain cast node.
 
-Current model: draws=1 chaining cards, and `has_greek()` disables the
-depleted filter. Under the Track B definition they become **recast nodes**:
+Tests: the three-card and four-card cases above; Add Trigger before a lone
+modifier (scan runs off the end, consumes nothing); trailing Add Trigger (the
+`valid` fallback, plain cast); a `related_projectiles[2] > 1` spell (multiple
+payloads); Add Trigger followed by Add Trigger (second one counted, not
+executed); payload wraps.
 
-- Panel: `Alpha ⇒ copy of Light Bullet` as a dim row under the Greek, no
-  bracket bars of its own; if the copied card has `draws`/`payload`, its
-  forced draws are real consumption and appear as bracketed children of the
-  Greek's head (`Alpha ⇒ copy of Double Spell` then two consumed cards).
-- Slot row: the copied card gets no bracket; the consumed cards do.
-- Which card each Greek copies (VERIFY, and this is what decides the tier):
-  Alpha `hand[1]` (first card drawn *this cast*, which is the wand's first
-  card only on the first cast of a cycle), Gamma `deck[#deck]` (last card
-  *still in the deck*, not the wand's last slot), Tau `deck[1]`,`deck[2]`,
-  Omega every card in deck+hand+discarded, Mu / Phi / Sigma the same
-  filtered by type, Zeta a random spell not on the wand. The simulator
-  already tracks `hand`/`deck`/`discard` per cast, so the *static* answer
-  for each cast is computable; it stays **approximate** because the piles
-  depend on where the cycle is when the player fires.
-- Zeta: `dynamic="random"`, `?`, never bracketed.
+### D2 — Divide By
 
-Ship D3 after A2, since the probe's `recasts` field is how the reference
-rule gets recorded and cross-checked against the source dump.
+*The earlier guess was:* Divide consumes the next card and invokes its body
+`repeats` times, each invocation drawing fresh cards, so
+`DIVIDE_2, BURST_2, A, B, C, D` is `(DIVIDE_2 (BURST_2 A B) (BURST_2 C D))`.
+**That example is wrong on both counts.** The real body
+(`gun_actions.lua:10063`):
+
+- **Reads `deck[iter]`, not `deck[1]`.** `iter = iteration or 1`, where
+  `iteration` is passed down by an enclosing Divide. Nested Divides therefore
+  read progressively deeper into the deck.
+- **The first invocation is silent.** The loop is
+  `for i=1,count do if i == 1 then dont_draw_actions = true end;
+  data.action(rec, iter+1); dont_draw_actions = false end`. So invocation 1
+  runs with draws suppressed and gathers **nothing**; only invocations 2..count
+  draw. The example above is `(DIVIDE_2 (BURST_2) (BURST_2 A B))` — one
+  populated group, not two.
+- **Counts degrade with depth.** `DIVIDE_2` count 2, dropping to 1 at
+  `iter >= 5`; `DIVIDE_3` count 3, dropping at `iter >= 4`; `DIVIDE_4` count 4,
+  dropping at `iter >= 4`; `DIVIDE_10` count 10, dropping at `iter >= 3`.
+- **Consumption happens once, at the outermost level, and is not 1 card.**
+  Guarded by `if (iter == 1)`, the body removes `iter_max` cards to `discarded`,
+  where `iter_max` is the deepest `iteration` any nested Divide reported back
+  (each returns `iter_max`). `DIVIDE_2, DIVIDE_2, SPARK` consumes 2.
+- Answering the old §7 question: the consumed cards go to **`discarded`**, not
+  `hand`.
+
+Metadata: `repeats = count`, `repeats_first_silent = true`,
+`repeats_decay_at = iter`, `consumes = "iter_max"`. Simulator: `parse_expr`
+tracks an `iter` depth, invokes the consumed card's body `count` times with the
+first invocation collecting no children, and charges `iter_max` cards to the
+outermost Divide only.
+
+Tests: the corrected example; divide → trigger; divide → divide (consumption of
+2, and the depth-degraded count); divide → multicast at wand end (wrap inside a
+non-first repeat); DIVIDE_10 at depth 3.
+
+### D3 — the Greeks: three classes, not one
+
+This plan treated the eight as a uniform family that copies a card by reference
+and force-draws one card afterwards. Neither half of that is generally true.
+The `draw_actions(1, true)` call this plan attributed to "most of them" is
+**commented out in the game's source** for three of them, and four others
+suppress the copied body's draws entirely.
+
+| Greek | reads | copied body draws? | own force-draw | refunds copied mana |
+|-------|-------|--------------------|----------------|---------------------|
+| ALPHA | `discarded[1]` → `hand[1]` → `deck[1]` | **yes, live** | none (`--draw_actions( 1, true )`) | no |
+| GAMMA | `deck[#deck]` → `hand[#hand]` | **yes, live** | none (commented out) | no |
+| TAU | `deck[1]` and `deck[2]` | **yes, live** | none (commented out) | no |
+| OMEGA | every card in `discarded`, `hand`, `deck` | no — `dont_draw_actions` | none | yes |
+| PHI | as OMEGA, type-filtered | no — `dont_draw_actions` | none | yes |
+| MU | as OMEGA, type-filtered | no — `dont_draw_actions` | `draw_actions(1, true)` | yes |
+| SIGMA | as OMEGA, type-filtered | no — `dont_draw_actions` | `draw_actions(1, true)` | yes |
+| ZETA | a random spell from the player's **other quick-inventory wands** | no — `dont_draw_actions` | `draw_actions(1, true)` | no |
+
+Three corrections that change the design:
+
+1. **ALPHA reads `discarded[1]`, not `hand[1]`.** This plan had it as "the first
+   card drawn this cast". It is the first card *discarded* — which, because
+   `discarded` accumulates across casts until a reload, is usually the wand's
+   first card of the current cycle, and is empty only on the very first draw.
+   The fallback chain to `hand[1]` then `deck[1]` matters on that first cast.
+2. **Class 1 (ALPHA / GAMMA / TAU) is the only class where the copied body's
+   forced draws are real consumption.** This plan's worked example — `Alpha ⇒
+   copy of Double Spell` then two consumed cards — is correct here and *only*
+   here.
+3. **Class 2 (OMEGA / PHI / MU / SIGMA) and ZETA consume nothing through the
+   copy.** `dont_draw_actions = true` wraps every `data.action()` call, and
+   `draw_actions` is a no-op while it is set (`gun.lua:300`). So an Omega on a
+   wand full of multicasts draws nothing at all from them. Under the Track B
+   consumption definition, OMEGA and PHI consume **nothing whatsoever** — their
+   bracket would be empty — while MU, SIGMA and ZETA consume exactly the one
+   card of their own trailing `draw_actions(1, true)`.
+
+An empty bracket is a worse lie than no bracket, so this is an independent
+argument for KoObEy's position on Greeks specifically: **all eight stay
+`approximate` or `unknown` and hide their brackets by default**, and the panel
+names the copy in text (`Alpha ⇒ copy of Light Bullet`) without drawing bars.
+ZETA is `unknown` outright — it reads entities off the player's other wands and
+seeds `SetRandomSeed` from position plus `GameGetFrameNum()`, so it is not a
+function of the wand at all.
+
+One shared fact for all eight: `check_recursion` (`gun.lua`) returns `-1` once a
+`recursive` card is nested past `recursion_limit = 2`, at which point the copy
+silently does not happen. The simulator should model the same cutoff rather than
+recursing freely.
 
 ### D4 — IF_* requirement spells
 
-Stay `?` / approximate. A later option is to simulate both branches and
-show the false-branch skip as a greyed span; not in this plan.
+Now read rather than assumed. `IF_END` is a plain `draws=1` card and is
+**exact**. The branching four scan the deck for their matching `IF_END` /
+`IF_ELSE` and remove the skipped span, so they do have real deck effects:
 
-### D5 — depleted-card verification (KoObEy point 3)
+- `IF_ENEMY` counts `homing_target` entities within radius 240 (skips when
+  fewer than 15), `IF_HP` and `IF_PROJECTILE` similarly read world state —
+  genuinely runtime, so **approximate**.
+- `IF_HALF` is different and worth noting: it toggles a persistent global
+  (`GUN_ACTION_IF_HALF_STATUS`) and alternates every cast. It is fully
+  deterministic *as an alternation* but not determinable from a single frame,
+  and it is one of only two vanilla bodies that reads `reflecting` — so the
+  probe is structurally blind to one of its branches (§3 A2). **approximate**,
+  flagged `dynamic = "reflect-blind"`.
 
-Shipped rule (`card_fires`, v1.3.0): a 0-use card is dropped before
-simulation, "as if the slot were empty". One VERIFY before claiming
-"proper": in `gun.lua`, does `draw_actions(N)` **retry** after a depleted
-card (so the card costs nothing) or **count it as one of the N** (so
-`BURST_2, DEPLETED, A, B` gathers only A)? The repo comment says retry; if
-it is instead counted, a depleted card is a *consumed blank*, which the
-simulator can model as a node kind `spent` (bracketed, greyed) rather than
-being filtered out. Also confirm the mana-discard path (§5) uses the same
-mechanism, since the answer applies to both.
+Simulating both branches and greying the skipped span remains a later option,
+not in this plan.
+
+### D5 — depleted cards and the retry rule (KoObEy point 3) — resolved
+
+The open question was whether `draw_actions(N)` **retries** after a depleted
+card or **counts it** toward N. `gun.lua:299-322` answers it: **retry.** When
+`draw_action` returns false, the caller enters `while #deck > 0 do if
+draw_action(...) then break end end` and keeps drawing until one succeeds. So
+`BURST_2, DEPLETED, A, B` gathers A and B; the repo comment is right, the
+shipped `card_fires` filter models it correctly, and the speculative `spent`
+node kind is **not needed**. Drop it.
+
+Two things the resolution turned up that *are* needed, and that §0.3 concedes to
+KoObEy:
+
+- **The retry loop cannot wrap.** It is guarded on `#deck > 0` and never reaches
+  the `instant_reload_if_empty` path that `draw_action` uses for a normal empty
+  deck. If the deck empties during retry, the iteration is silently lost — the
+  wand does **not** wrap for it. A depleted card near the end of the deck
+  therefore eats a draw. The simulator currently filters depleted cards out
+  entirely and so cannot express this; it needs to keep them as a consumed blank
+  *for the purpose of the draw count at deck end* while still not rendering them
+  as fired.
+- **`greek_keeps_depleted` disables the whole filter on Greek wands** by default
+  (`grouping_overlay.lua:162`). Given D3 — Greeks read `discarded`, `hand` and
+  `deck` by position — the setting's rationale is sound, but "off by default on
+  exactly the wands point 3 is about" is not. With D3's per-class model in place
+  the filter can stay on for classes that do not read by index, and the setting
+  narrows to ALPHA / GAMMA / TAU.
+
+The same `draw_action` path handles insufficient mana, so §5 inherits both
+answers.
+
+### D6 — RESET (new; found while tiering)
+
+`RESET` (`gun_actions.lua:10439`) was listed as "unchecked" in the tier table.
+It is checked now, and it is not a leaf: it moves **every** card from `hand` and
+from `deck` into `discarded` and empties both, plus
+`current_reload_time -= 25`. Under the Track B definition its bracket encloses
+the entire remaining wand, and the cast ends there because the deck is empty.
+That is deterministic and cheap to model — `consumes = "rest"`, tier **exact** —
+and it is a striking bracket to draw, which is an argument for shipping it
+rather than hiding it.
+
+`ALL_SPELLS`, also previously unchecked, loads an entity and touches
+`c.fire_rate_wait` / `current_reload_time` only. No deck effect: **exact** leaf.
 
 ---
 
 ## 5. Track E — mana
 
-Engine rule (VERIFY the retry-vs-count question with D5): a card the wand
-cannot afford is drawn and discarded without executing, and drawing goes on
-— so a mana shortfall shifts everything after it, and, as KoObEy says,
-"allows later wrapping".
+The engine rule is now read rather than assumed (`gun.lua:236-287`). Mana is a
+single global for the whole cast, seeded by `_start_shot(current_mana)` and
+handed back at the end. `draw_action` charges each card **as it is drawn**:
+
+```lua
+local action_mana_required = action.mana or ACTION_MANA_DRAIN_DEFAULT  -- 10
+if action_mana_required > mana then
+    OnNotEnoughManaForAction(); table.insert(discarded, action); return false
+end
+mana = mana - action_mana_required
+```
+
+So an unaffordable card is drawn, discarded unexecuted, and `draw_actions`
+**retries** for it — the identical path to the depleted case in D5, including
+the inability to wrap when the deck empties mid-retry. KoObEy's "lacking mana
+discards the spell and allows later wrapping" is right about the discard; the
+"later wrapping" is subtler, because the retry itself consumes an extra card
+and, at the end of the deck, silently loses the draw instead of wrapping.
+
+Four corrections to this plan's original E1 sketch, all of which change the
+arithmetic:
+
+1. **`nil` mana is 10, not 0.** `ACTION_MANA_DRAIN_DEFAULT = 10` (`gun.lua:5`).
+   A modded spell that omits `mana` costs 10, and the generator must emit the
+   default explicitly rather than leaving the field absent.
+2. **Always-cast spells are free — exclude them from the sum.** This plan said
+   to add "the always-cast cards" to each cast's total. They never pass through
+   `draw_action`: `_play_permanent_card` (`gun.lua:575`) calls `play_action`
+   directly, so no mana is deducted. It calls `handle_mana_addition` first,
+   which means an always-cast **Add Mana** (negative `mana`) still *adds* to the
+   pool. So always-cast contributes zero or a credit, never a cost.
+3. **Trigger payloads share the cast's pool.** `draw_shot` swaps the shot state
+   `c` but leaves `mana` global (`gun.lua:307-318`), and the payload is drawn
+   during the cast, not at hit time. So a per-*cast* total that includes payload
+   cards is the correct unit — which is what KoObEy proposed and what the panel
+   already groups by.
+4. **OMEGA / PHI / MU / SIGMA refund what they copy.** Each saves
+   `local mana_ = mana` before its copy loop and restores `mana = mana_` after,
+   so the copied spells' costs vanish. ALPHA / GAMMA / TAU / ZETA do not.
+   Since all eight hide their brackets by default (D3), this only matters for
+   the mana row — which should show the Greek's own cost and not the copies'.
 
 ### E1 — per-cast mana total vs. max mana (ship with 1.4)
 
 `mana` per card from A1's runtime table (vanilla fallback: emit `mana=` in
-`structure_meta.lua`). `simulate` already knows every card each cast
-consumed (its `hand` → the cast's slot spans); sum `mana` over them plus the
-always-cast cards, store `cast.mana`. Wand `mana_max` from
-`AbilityComponent` (`mana_max`, `mana_charge_speed`, current `mana` are all
-readable next to `gun_config`).
+`structure_meta.lua`, defaulting absent values to 10). `simulate` already knows
+which cards each cast consumed; sum over them, excluding always-cast cards and
+Greek-copied cards per the corrections above, and store `cast.mana`. Wand
+`mana_max` from `AbilityComponent` (`mana_max`, `mana_charge_speed`, current
+`mana`, all next to `gun_config`).
 
-Panel: cast header gains `  mana 210` and, when `cast.mana > mana_max`,
-turns warning-colored with `> max 150` — a cast that costs more than the
-wand can ever hold *never* fires as drawn. Footnote:
-`mana = cost of this cast; > max means part of it will be discarded`.
-Debug box: the per-cast totals and the wand's mana fields.
+Panel: the cast header gains `  mana 210` and, when `cast.mana > mana_max`,
+turns warning-colored with `> max 150` — a cast costing more than the wand can
+ever hold never fires as drawn. Footnote: `mana = cost of this cast; > max means
+part of it will be discarded`. Debug box: per-cast totals plus the wand's mana
+fields.
 
 This is exactly KoObEy's middle ground: always true as a statement, never
-pretends to know the current pool.
+pretending to know the current pool.
 
 ### E2 — optional "assume full mana" discard simulation (later)
 
-Setting off by default. Simulate each cast with the pool at `mana_max`
-(or the live `mana` — but that flickers as it regenerates, so full pool is
-the honest static choice): the first card whose cost exceeds the remaining
-pool is discarded blank, later cheaper cards may still fire, and the
-resulting shifts and wraps are drawn with `?`. Needs D5's answer for how a
-discarded card counts toward a multicast.
+Setting off by default. Simulate each cast with the pool at `mana_max` (not the
+live `mana`, which flickers as it regenerates): the first card whose cost
+exceeds the remaining pool is discarded blank, the retry pulls a replacement,
+later cheaper cards may still fire, and the resulting shifts are drawn with `?`.
+D5's answer applies unchanged — retry, not count, and no wrap if the deck
+empties during the retry.
 
 ---
 
 ## 6. Release slicing
 
-**v1.4.0 — "honest brackets"** (all vanilla, all testable offline):
-Track B (definition, three places) · Track C (tiers, `uncertain_brackets`,
-the `?` slot glyph, named footnote) · D1 Add Trigger fix · D5 verification
-(and the `spent` node if it turns out to count) · E1 mana totals · A1
-runtime table read (modded modifiers become prefixes; modded unknowns hide
-brackets). This answers KoObEy 1, 3, 4, 5 and gives Night a correct, if
-conservative, result immediately. Workshop post before release, as promised
-in the thread, with the definition as its centerpiece.
+Sliced against KoObEy's retraction condition (1-3), not against what is easiest
+to build. Every simulator change in both releases lands with a differential
+harness case (§0.1) as well as unit tests — that gating is what turns the Track
+C tiers into claims rather than hopes.
 
-**v1.5.0 — "modded spells"**: A2 probe · A3 probe-vs-meta test (retire the
-Python mirror) · A4 settings/debug · D2 Divide repeats · D3 Greek recast
-nodes. Ask Night for the mod list they play with and test against those
-spells specifically.
+**v1.4.0 — "checked against the game"** — answers 1, 2 (partially) and 3, and
+throws in 4 and 5:
+
+- **Track B** — the consumption definition, stated in `README.md`, the Workshop
+  description, and the panel legend. *(point 4)*
+- **Track C** — tiers, `uncertain_brackets`, the `?` slot glyph, the named
+  footnote. *(point 1, with §0.2's departure)*
+- **A1** — read the live `actions` table so modded modifiers stop reading as
+  projectiles and modded multicasts group correctly. This is Night's fix, and it
+  is "some form of" point 2 arriving *in* the gating release rather than after
+  it.
+- **D1** — Add Trigger, corrected: forward scan, variable-width consumption,
+  inline modifier application, `payload = related_projectiles[2] or 1`, and the
+  `valid` fallback where it casts the projectile plainly with no trigger at all.
+  Larger than the original estimate; still the clearest live bug in the mod.
+- **D5** — the two 0-charge gaps from §0.3: Greek wands honoring the filter, and
+  the lost draw at deck end. *(point 3)*
+- **E1** — per-cast mana total vs. `mana_max`, warning-colored when over.
+  *(point 5)*
+- **Harness part 2** — decks in, real `gun.lua` results out, diffed against
+  `wand_structure.lua`, as `tools/test_gun_differential.lua`. This is what D1
+  and the Track C tiers are justified by, so it lands first.
+
+**v1.5.0 — "modded spells"** — completes point 2:
+
+- **A2** the probe · **A3** probe-vs-meta regression · **A4** settings and debug.
+- **D2** Divide, corrected: `deck[iter]`, first-invocation draw suppression,
+  `iter_max` consumption at the outermost level only.
+- **D3** the Greeks, corrected — two classes, not one. ALPHA / GAMMA / TAU copy
+  by reference with their own `draw_actions(1, true)` **commented out in the
+  game's source**, and let the copied body draw for real. OMEGA / MU / PHI /
+  SIGMA wrap the copied body in `dont_draw_actions`, so it consumes nothing;
+  only MU and SIGMA force-draw a card of their own. Under the Track B definition
+  several Greeks therefore consume *nothing at all* and would get an empty
+  bracket — which is an independent argument for keeping them hidden by default
+  even after they are modeled.
+- Ask Night for their mod list and test against those spells specifically.
 
 **Later**: E2, D4.
 
-Test discipline stays as it is: every simulator change lands with cases in
-`tools/test_wand_structure.lua` (Lua 5.1-compatible code, run under whatever
-`lua` the machine has — there is none in this remote environment, so the
-suite runs locally), slot-row behavior in `tools/test_slot_delims.lua`, and
-`tools/preview_wand.lua` gains `--tier` and `--mana` flags so a reported
-wand can be reproduced from its spell list without the game.
+Two scope changes that fall out of the engine reading:
+
+- **A2 is now optional rather than load-bearing.** The probe was designed
+  because there was no way to run the real code. There is now. For vanilla
+  spells the harness is strictly better evidence, so A2's remaining job is
+  narrow and honest: classifying *modded* spells at runtime, where `.gun_ref/`
+  cannot help because the spell is not in `data.wak`. §3's safety argument needs
+  rewriting too — `reflecting` appears **twice in 490 vanilla actions**, so it is
+  `gun.lua`'s wrappers and our own global stubbing that make the probe safe, not
+  a convention the bodies follow.
+- **§7 mostly collapses.** Its item-1 sub-questions are answered from `.gun_ref/`
+  and folded into §4 and §5. What still needs the running game: `setfenv`
+  availability under the mod's API restrictions, whether
+  `dofile_once("data/scripts/gun/gun_actions.lua")` from `OnWorldPostUpdate`
+  returns other mods' appended spells, and the `AbilityComponent` mana fields.
+
+Test discipline stays as it is, plus the harness: every simulator change lands
+with cases in `tools/test_wand_structure.lua` (Lua 5.1-compatible, run under
+whatever `lua` the machine has — there is none in the remote environment, so the
+suite runs locally), slot-row behavior in `tools/test_slot_delims.lua`, a
+differential case in `tools/test_gun_differential.lua` wherever the rule came
+from `.gun_ref/`, and `tools/preview_wand.lua` gains `--tier` and `--mana` flags
+so a reported wand can be reproduced from its spell list without the game.
 
 ---
 
-## 7. Verification list (needs the game / `data.wak`; do before coding)
+## 7. Verification list
 
-1. `tools/dump_gun_actions.py`: extract `gun_actions.lua` and `gun.lua` to
-   the scratch dir (the wak reader already exists). Then read:
-   - ADD_TRIGGER / ADD_TIMER / ADD_DEATH_TRIGGER bodies (D1)
-   - DIVIDE_* bodies: repeat counts, and whether the consumed card is moved
-     to `discarded` or `hand` (D2)
-   - ALPHA / GAMMA / TAU / OMEGA / MU / PHI / SIGMA / ZETA: which pile and
-     index each reads, and which of them call `draw_actions(1, true)` (D3)
-   - RESET, ALL_SPELLS, SUMMON_PORTAL, CESSATION: any deck effect? (tiering)
-   - `gun.lua` `draw_action` / `draw_actions`: depleted-card and
-     insufficient-mana handling — retry or count (D5, E)
-   - `gun.lua` tooltip / `reflecting` pass: which globals it sets up
-     (the probe should mirror that setup, not invent one)
-2. In-game, in this mod's VM: is `setfenv` available under
-   `request_no_api_restrictions="0"`? Is `draw_actions` nil (i.e. the mod's
-   Lua state does not share `gun.lua`'s globals)? Does
+Most of what this section originally listed is done. `tools/extract_gun.py`
+already puts `gun.lua` and `gun_actions.lua` in `.gun_ref/` (§0.1), and every
+question under the old item 1 has been answered and folded into §2, §4 and §5:
+
+| old question | answer | where |
+|--------------|--------|-------|
+| ADD_TRIGGER / ADD_TIMER / ADD_DEATH_TRIGGER bodies | forward scan, variable-width consumption, `count` payloads, plain-cast fallback | §4 D1 |
+| DIVIDE_* repeat counts; consumed card to `discarded` or `hand` | 2/3/4/10 with depth decay; first invocation silent; `iter_max` cards to **`discarded`** | §4 D2 |
+| the eight Greeks: which pile and index, which force-draw | three classes; three have their force-draw commented out; four suppress the copied body | §4 D3 |
+| RESET, ALL_SPELLS, SUMMON_PORTAL, CESSATION deck effects | RESET consumes the entire deck **and** hand; ALL_SPELLS and the rest are leaves | §4 D6, §2 |
+| `draw_actions` depleted / insufficient-mana handling: retry or count | **retry**, and the retry loop cannot wrap | §4 D5, §5 |
+| the `reflecting` tooltip pass and its globals | `draw_action` returns early under `reflecting`; only 2 of 490 bodies read it | §3 A2 |
+
+What genuinely still needs the running game, and gates only the A2 probe in
+v1.5.0 — not anything in v1.4.0:
+
+1. In this mod's VM: is `setfenv` available under
+   `request_no_api_restrictions="0"`? Is `draw_actions` nil (i.e. the mod's Lua
+   state does not share `gun.lua`'s globals)? Does
    `dofile_once("data/scripts/gun/gun_actions.lua")` from `OnWorldPostUpdate`
-   return a table that includes another mod's appended spells? (Test with
-   any spell-adding mod from the Workshop.)
-3. Are `mana_max` / `mana_charge_speed` / `mana` readable on the wand's
-   `AbilityComponent` with `ComponentGetValue2` (expected yes; same
-   component as `gun_config`).
+   return a table including another mod's appended spells? (Test with any
+   spell-adding mod from the Workshop.)
+2. Are `mana_max` / `mana_charge_speed` / `mana` readable on the wand's
+   `AbilityComponent` with `ComponentGetValue2` (expected yes; same component as
+   `gun_config`)? This gates E1's warning threshold, so check it early.
+3. Does `.gun_ref/` survive a Noita update, or does `extract_gun.py` need a
+   version guard? The harness silently testing against stale rules would be the
+   one failure mode worse than not having it.
 
 ---
 
-## 8. Thread reply, short form
+## 8. Thread post — the promised discussion, before release
 
-- Thanks; the definition question (4) is the real one and the answer is
-  "consumed from the deck" — brackets will be documented to mean that and
-  nothing more.
-- 0-charge handling (3) shipped in 1.3.0 — please retest.
-- Next release: wands with a spell the mod can't follow get no brackets and
-  a `?`, Add Trigger grouping fixed, per-cast mana vs. max shown.
-- Release after: modded spells classified by running them in a stub shot
-  state with `reflecting` on, as suggested; Greeks shown as copies with
-  their real draws bracketed. Will post the design before shipping.
+Per the Sep 3 reply (*"I'll make a post after I have a sense of things but
+before releasing anything to have a discussion"*), this goes up **before** 1.4.0
+ships, and asks for disagreement rather than announcing a changelog. Draft:
+
+---
+
+Alright — I dove in. Thanks again for this thread; a couple of you were right
+about something I pushed back on, so let me start there.
+
+**On running the game's code (UserK, and KoObEy agreeing).** I said I wasn't
+going to do this. I was wrong to bundle two separate things together: keeping
+this mod a lightweight panel, and guessing at the draw rules myself. I've kept
+the first and dropped the second. The mod now extracts Noita's own `gun.lua` and
+`gun_actions.lua` from `data.wak` and runs the real cast code outside the game,
+so my simulator gets diffed against the actual engine, deck by deck, as a test.
+I'm still not hooking the live gun system while you're casting — that's Wand
+DBG's job and I don't want to touch real cast state — but "does my answer match
+the game's answer" is now something I check instead of assert. Doing that
+immediately turned up several things I had flat wrong, including a real Add
+Trigger bug.
+
+**What a bracket means (KoObEy #4).** This is the important one, and I'd like
+you to poke at the answer before I ship it. Of your four readings I'm taking the
+fourth — *no longer in the deck after the first spell executed* — because this
+mod is a deck-stream visualizer and consumption is the only one of the four it
+can honestly claim to track:
+
+> A bracket encloses exactly the cards the engine removed from the deck while
+> executing the bracket's head card. A card a spell re-casts *by reference*
+> (Alpha, Omega, ...) is never inside a bracket — the panel names it as a copy
+> instead.
+
+The consequences are load-bearing, so worth stating: trigger payloads stay
+nested, because they're consumed by the forced draw, even though they fire
+later; Divide and Add Trigger become prefixes; Greeks get no bracket at all to
+the card they copy. If you think a different one of the four is the better
+teaching choice, now is the time to say so.
+
+**0 charges (KoObEy #3).** You were right, and my first pass at this concluded
+it was already handled. It isn't, in two places: on any wand carrying a Greek
+spell the depleted-spell filter silently switches itself off, and a depleted card
+at the very end of the deck eats a draw instead of wrapping the wand. Both fixed
+next release. (For the record, the engine does *retry* past a depleted card
+rather than counting it toward a multicast — that part the mod had right.)
+
+**No brackets on OTHER-type spells (KoObEy #1).** Adopting this, with one
+disagreement I'd rather flag than sneak past. Every card gets a confidence tier,
+and a wand containing any spell the mod can't follow draws no brackets at all —
+with a small `?` saying the row is blank because it's *uncertain*, not broken.
+That covers Greeks, modded unknowns, and whatever comes later. But I'm **not**
+hiding Divides and Add Triggers: having now actually read both bodies, they're
+fully deterministic, and I'd rather show them correctly than hide them. The
+safeguard is that they keep their brackets only while the differential harness
+agrees with me — if it stops agreeing, they drop to "uncertain" and hide
+themselves automatically. So it's your rule, with an exemption that has to keep
+earning itself.
+
+**Modded spells (Night, KoObEy #2).** Night, your diagnosis was exact: the mod
+had no idea what modded spells were and defaulted them to projectiles, which is
+why one cast rendered as several. First fix ships next release — the mod reads
+the game's live `actions` table, which includes everything other mods appended,
+so modded modifiers and multicasts get their real types. After that I'm doing
+KoObEy's tooltip trick properly: executing unknown spells in a stub shot state
+and recording what they actually do to the deck. If you can tell me which spell
+mods you play with, I'll test against those specifically.
+
+**Mana (KoObEy #5).** Taking the middle ground you suggested — per-cast cost
+summed and compared against the wand's max mana, with a warning when a cast can
+never afford itself. Not simulating the live pool; it flickers as it regenerates
+and I'd rather show something always-true than something usually-true.
+
+1.4.0 covers your 1-3 plus 4 and 5. Happy to argue about any of it first,
+particularly the bracket definition, since everything else hangs off it.
