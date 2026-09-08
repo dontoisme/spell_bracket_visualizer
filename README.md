@@ -117,7 +117,9 @@ files/grouping_overlay.lua   # reads the live wand + draws the panel / slot brac
 tools/gen_structure_meta.py  # regenerates structure_meta.lua from data.wak
 tools/preview_wand.lua       # prints any wand's brackets as a Lisp line, no game needed
 tools/test_wand_structure.lua # runs the real wand_structure.lua + tests (primary)
-tools/test_wand_structure.py # Python cross-check mirror of wand_structure.lua
+tools/test_gun_differential.lua # differential check against Noita's own gun.lua (via .gun_ref/)
+tools/gun_harness.lua        # runs the extracted gun.lua from .gun_ref/ over test wands
+tools/extract_gun.py         # extracts gun.lua, gun_actions.lua from data.wak into .gun_ref/
 tools/test_slot_delims.lua   # runs the real slot-bracket planner (nesting, casts, wrap)
 tools/test_panel_rows.lua    # runs the real panel row clamp (+N more fold, sticky legend)
 tools/gen_icons.py           # (retired icon-recolor feature; see below)
@@ -141,15 +143,17 @@ python3 tools/gen_structure_meta.py
 2. Hold a wand and open the inventory: the panel docks beside its box; with
    Slot Brackets enabled, rainbow strips mark each group in the wand boxes.
 3. `lua tools/test_wand_structure.lua` runs the simulator's test suite against
-   the real `wand_structure.lua`; `python3 tools/test_wand_structure.py` runs the
-   Python cross-check mirror (kept in sync; slated for retirement once the Lua
-   harness is fully trusted).
-4. `lua tools/test_slot_delims.lua` runs the real slot-bracket planner —
+   the real `wand_structure.lua`.
+4. `lua tools/test_gun_differential.lua` runs a differential check against
+   Noita's own `gun.lua`, verifying the simulator on every test wand. Requires
+   `python3 tools/extract_gun.py` first (writes gitignored `.gun_ref/`);
+   therefore local-only.
+5. `lua tools/test_slot_delims.lua` runs the real slot-bracket planner —
    nesting depth, cast brackets, the wrap enclosure, stacking on a shared card
    edge, wands with empty slots.
-5. `lua tools/test_panel_rows.lua` runs the real panel row clamp — the
+6. `lua tools/test_panel_rows.lua` runs the real panel row clamp — the
    `... +N more` fold and the sticky `?` legend that has to survive it.
-6. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
+7. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
    (`docs/FONT_COMPAT.md`) by driving the real panel layout with stubbed
    pixel-like / zero-measuring / nil-returning fonts, then prints the in-game
    checklist for verifying against the Better Font mod or a TTF language.

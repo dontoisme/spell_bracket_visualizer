@@ -1,15 +1,13 @@
 #!/usr/bin/env lua5.4
--- Runs the REAL files/wand_structure.lua against the REAL generated
--- files/structure_meta.lua -- no Python mirror, no translation. This is the
--- ground-truth test: it executes the exact Lua that ships in the mod.
+-- Ground-truth unit test of the shipped wand_structure.lua simulator,
+-- running against the real generated files/structure_meta.lua.
+-- This harness executes the exact Lua that ships in the mod.
 --
 --     lua5.4 tools/test_wand_structure.lua
 --
--- The Python mirror (tools/test_wand_structure.py) is kept as a cross-check;
--- the same wands and the same expected strings live in both, so a divergence
--- between mirror and real code shows up as one file passing and the other
--- failing. Edit both when you change the simulator (or delete the mirror once
--- this harness is trusted -- see docs/STATUS.md).
+-- The independent cross-check is tools/test_gun_differential.lua, which runs
+-- Noita's own gun.lua from .gun_ref/ (extracted by tools/extract_gun.py).
+-- It verifies the simulator against the engine on every test wand.
 
 local here = arg[0]:match("^(.*)[/\\]") or "."
 local MOD = here .. "/.."
@@ -23,7 +21,7 @@ assert(n > 400, "structure_meta.lua parse failed (" .. n .. " entries)")
 local S = dofile(MOD .. "/files/wand_structure.lua")
 assert(type(S) == "table" and S.simulate, "wand_structure.lua did not return a module")
 
--- ---- compact tree printer (mirror of the Python show_node/show) ------------
+-- ---- compact tree printer ------------
 
 local function show_node(node)
 	local mods = ""
@@ -57,7 +55,7 @@ local function show(sim)
 	return table.concat(parts, " | ")
 end
 
--- ---- tests (same wands + expected strings as the Python mirror) ------------
+-- ---- tests ------------
 
 local failures = 0
 
@@ -70,9 +68,9 @@ local function check(name, tokens, spc, expect)
 end
 
 check("doc example, one cast",
-	{ "DAMAGE", "BURST_2", "LIGHT_BULLET", "LIGHT_BULLET_TRIGGER", "MAGIC_SHOT" },
+	{ "DAMAGE", "BURST_2", "LIGHT_BULLET", "LIGHT_BULLET_TRIGGER", "SPITTER" },
 	nil,
-	"{([DAMAGE]BURST_2:x2 LIGHT_BULLET (LIGHT_BULLET_TRIGGER:trig1 MAGIC_SHOT))}")
+	"{([DAMAGE]BURST_2:x2 LIGHT_BULLET (LIGHT_BULLET_TRIGGER:trig1 SPITTER))}")
 
 check("spells/cast=2 splits casts",
 	{ "LIGHT_BULLET", "LIGHT_BULLET", "LIGHT_BULLET", "LIGHT_BULLET" }, 2,
@@ -96,8 +94,8 @@ check("dangling modifier, no wrap possible",
 	"{[DAMAGE]DAMAGE:dangling}")
 
 check("multicast wraps for missing child",
-	{ "LIGHT_BULLET", "BURST_2", "MAGIC_SHOT" }, 1,
-	"{LIGHT_BULLET} | {(BURST_2:x2~WRAP MAGIC_SHOT LIGHT_BULLET:~WRAP)}W")
+	{ "LIGHT_BULLET", "BURST_2", "SPITTER" }, 1,
+	"{LIGHT_BULLET} | {(BURST_2:x2~WRAP SPITTER LIGHT_BULLET:~WRAP)}W")
 
 check("RANDOM_MODIFIER is terminal",
 	{ "RANDOM_MODIFIER", "LIGHT_BULLET" }, 1,
@@ -108,8 +106,8 @@ check("ALPHA chains",
 	"{[ALPHA]LIGHT_BULLET}")
 
 check("BURST_X takes rest of deck",
-	{ "BURST_X", "LIGHT_BULLET", "MAGIC_SHOT", "SPITTER" }, 1,
-	"{(BURST_X:xall LIGHT_BULLET MAGIC_SHOT SPITTER)}")
+	{ "BURST_X", "LIGHT_BULLET", "SPITTER", "SPITTER" }, 1,
+	"{(BURST_X:xall LIGHT_BULLET SPITTER SPITTER)}")
 
 -- DIVIDE_* invoke deck[1] directly (no draw_actions call) -> they chain like
 -- a modifier prefix, firing WITH the next card in the same cast.
@@ -130,9 +128,9 @@ check("trailing DIVIDE does not wrap",
 	"{LIGHT_BULLET} | {[DIVIDE_2]DIVIDE_2:dangling}")
 
 check("wrap restores slot order",
-	{ "MAGIC_SHOT", "LIGHT_BULLET", "BURST_2" }, 1,
-	"{MAGIC_SHOT} | {LIGHT_BULLET} | " ..
-	"{(BURST_2:x2~WRAP MAGIC_SHOT:~WRAP LIGHT_BULLET)}W")
+	{ "SPITTER", "LIGHT_BULLET", "BURST_2" }, 1,
+	"{SPITTER} | {LIGHT_BULLET} | " ..
+	"{(BURST_2:x2~WRAP SPITTER:~WRAP LIGHT_BULLET)}W")
 
 -- span / head / wrapped-span structural checks
 local function passck(name, ok, detail)
@@ -145,7 +143,7 @@ local node = sim.casts[3].nodes[1]
 passck("wrap span reaches slot 1", node.first == 1 and node.last == 3,
 	string.format(" (first=%s last=%s)", node.first, node.last))
 
-sim = S.simulate({ "DAMAGE", "BURST_2", "LIGHT_BULLET", "MAGIC_SHOT" }, meta, {})
+sim = S.simulate({ "DAMAGE", "BURST_2", "LIGHT_BULLET", "SPITTER" }, meta, {})
 node = sim.casts[1].nodes[1]
 passck("head excludes modifier prefix", node.first == 1 and node.head == 2 and node.last == 4,
 	string.format(" (first=%s head=%s last=%s)", node.first, node.head, node.last))

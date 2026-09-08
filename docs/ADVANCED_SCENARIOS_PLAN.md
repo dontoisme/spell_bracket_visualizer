@@ -405,8 +405,8 @@ trusted on other people's spells. Note that agreement between probe and
 generator proves only that two *guesses* match; the differential harness is what
 proves either matches the engine. Once all three agree, the generator can be
 replaced by the probe (`gen_structure_meta.py` → thin wrapper), and the Python
-cross-check mirror `test_wand_structure.py` should be retired rather than taught
-the new node kinds twice.
+cross-check mirror `test_wand_structure.py` has been retired in favor of
+`tools/test_gun_differential.lua`.
 
 ### A4 — settings and debug
 
