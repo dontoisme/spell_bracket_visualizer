@@ -77,18 +77,64 @@ OVERRIDES = {
     "DIVIDE_3":  {"chain": True},
     "DIVIDE_4":  {"chain": True},
     "DIVIDE_10": {"chain": True},
-    "IF_ELSE":       {"dynamic": "conditional"},
+    # tier="approximate": modeled, but position- or state-dependent at cast
+    # time (docs/ADVANCED_SCENARIOS_PLAN.md Sec.2). IF_END is deliberately
+    # excluded below: it is a plain draws=1 card with no branch of its own.
+    "IF_ELSE":       {"dynamic": "conditional", "tier": "approximate"},
     "IF_END":        {"dynamic": "conditional"},
-    "IF_ENEMY":      {"dynamic": "conditional"},
-    "IF_HALF":       {"dynamic": "conditional"},
-    "IF_HP":         {"dynamic": "conditional"},
-    "IF_PROJECTILE": {"dynamic": "conditional"},
-    "DRAW_RANDOM":     {"dynamic": "random"},
-    "DRAW_RANDOM_X3":  {"dynamic": "random"},
-    "DRAW_3_RANDOM":   {"dynamic": "random"},
-    "RANDOM_SPELL":    {"dynamic": "random"},
-    "RANDOM_MODIFIER": {"dynamic": "random"},
+    "IF_ENEMY":      {"dynamic": "conditional", "tier": "approximate"},
+    "IF_HALF":       {"dynamic": "conditional", "tier": "approximate"},
+    "IF_HP":         {"dynamic": "conditional", "tier": "approximate"},
+    "IF_PROJECTILE": {"dynamic": "conditional", "tier": "approximate"},
+    "DRAW_RANDOM":     {"dynamic": "random", "tier": "approximate"},
+    "DRAW_RANDOM_X3":  {"dynamic": "random", "tier": "approximate"},
+    "DRAW_3_RANDOM":   {"dynamic": "random", "tier": "approximate"},
+    "RANDOM_SPELL":    {"dynamic": "random", "tier": "approximate"},
+    # RANDOM_MODIFIER's body picks a random MODIFIER action and calls its
+    # `.action()` directly -- it never calls draw_actions() itself, so the
+    # draws-regex finds nothing here. But nearly every MODIFIER body ends
+    # with draw_actions(1, true), so in play the picked modifier pulls in
+    # the next card anyway -- confirmed by test_gun_differential.lua running
+    # this against the real gun.lua three times with three different random
+    # picks, all of which chained. Which modifier is picked is random (so
+    # this is not knowable exactly), but "chains" is right in nearly every
+    # case, unlike terminating the chain, which is wrong in nearly every case.
+    "RANDOM_MODIFIER": {"draws": 1, "dynamic": "random", "tier": "approximate"},
+    # ALPHA/GAMMA/TAU copy a card live (position-dependent); OMEGA/PHI/MU/SIGMA
+    # copy a whole class with copies suppressed -- both are "approximate" per
+    # the plan's tier table (Sec.2, D3 classes 1 and 2).
+    "ALPHA": {"tier": "approximate"},
+    "GAMMA": {"tier": "approximate"},
+    "TAU":   {"tier": "approximate"},
+    "OMEGA": {"tier": "approximate"},
+    "PHI":   {"tier": "approximate"},
+    "MU":    {"tier": "approximate"},
+    "SIGMA": {"tier": "approximate"},
+    # ZETA reads the player's OTHER wands and seeds RNG from position + frame
+    # number: unknowable statically (D3 class 3), unlike RANDOM_MODIFIER/
+    # RANDOM_SPELL/etc, which at least pick from this wand's own deck/actions.
+    "ZETA": {"tier": "unknown"},
 }
+
+
+# ACTION_MANA_DRAIN_DEFAULT from gun.lua:5 -- the cost the engine charges any
+# card whose body doesn't set `mana` (see docs/ADVANCED_SCENARIOS_PLAN.md Sec.5).
+DEFAULT_MANA = 10
+
+
+def strip_line_comments(text):
+    # Drop `--` line comments (to end of line) so a commented-out
+    # draw_actions()/add_projectile_trigger_*() call isn't mistaken for a
+    # live one. ALPHA/GAMMA/TAU's bodies end with a commented-out
+    # `--draw_actions( 1, true )` (a leftover from when they used to chain);
+    # without this, the generator read that dead line and wrongly emitted
+    # draws=1, making all three chain onto the next card in the mod when the
+    # game does not (confirmed by tools/test_gun_differential.lua against the
+    # real gun.lua). Naive `--.*$` would also eat a `--` that appears INSIDE a
+    # string literal, but `grep -c '"[^"]*--[^"]*"' .gun_ref/.../gun_actions.lua`
+    # finds zero such strings in the whole file, so a per-line strip after the
+    # first `--` is exact here, not just a heuristic.
+    return re.sub(r'--.*$', '', text, flags=re.M)
 
 
 def parse(src):
@@ -99,6 +145,7 @@ def parse(src):
     for i, (st, aid) in enumerate(marks):
         end = marks[i+1][0] if i+1 < len(marks) else len(src)
         body = src[st:end]
+        code = strip_line_comments(body)
         t = re.search(r'\btype\s*=\s*(ACTION_TYPE_\w+)', body)
         typ = t.group(1).replace("ACTION_TYPE_", "") if t else "OTHER"
         rec = {"type": typ}
@@ -108,14 +155,15 @@ def parse(src):
         # How many extra cards this action force-draws (draw_actions(N, true)).
         # This, not the action type, is what makes a card chain or multicast:
         # all PASSIVEs and almost all MODIFIERs draw 1 (RANDOM_MODIFIER doesn't),
-        # and some OTHER/UTILITY cards (ALPHA, I_SHOT, ...) draw 1 too.
+        # and some OTHER/UTILITY cards (I_SHOT, ...) draw 1 too.
         # BURST_X draws #deck (the whole remaining deck) -> encoded as -1.
-        dm = re.search(r'draw_actions\(\s*(\d+|#deck)', body)
+        # Matched against `code` (comments stripped) -- see strip_line_comments.
+        dm = re.search(r'draw_actions\(\s*(\d+|#deck)', code)
         if dm:
             rec["draws"] = -1 if dm.group(1) == "#deck" else int(dm.group(1))
         if typ == "DRAW_MANY" and rec.get("draws"):
             rec["group"] = rec["draws"]
-        tg = re.search(r'add_projectile_trigger_(timer|hit_world|death)\([^)]*?(\d+)\s*\)', body)
+        tg = re.search(r'add_projectile_trigger_(timer|hit_world|death)\([^)]*?(\d+)\s*\)', code)
         if tg:
             rec["trigger"] = tg.group(1)
             rec["payload"] = int(tg.group(2))
@@ -126,6 +174,15 @@ def parse(src):
         rp = re.search(r'related_projectiles\s*=\s*\{\s*"[^"]*"\s*(?:,\s*(\d+)\s*)?\}', body)
         if rp:
             rec["rp"] = int(rp.group(1)) if rp.group(1) else 1
+        # Mana cost (gun.lua:236: `action.mana or ACTION_MANA_DRAIN_DEFAULT`).
+        # Emitted for EVERY id, defaulting to 10 when the field is absent, so
+        # downstream mana math (Sec.5) never has to special-case a missing field.
+        mn = re.search(r'\bmana\s*=\s*(-?\d+(?:\.\d+)?)', code)
+        if mn:
+            val = float(mn.group(1))
+            rec["mana"] = int(val) if val.is_integer() else val
+        else:
+            rec["mana"] = DEFAULT_MANA
         rec.update(OVERRIDES.get(aid, {}))
         if rec.get("scan"):
             # the trigger call inside the scan body is not this card's payload
@@ -145,6 +202,10 @@ def to_lua(meta):
         if "rp" in rec:      parts.append("rp=%d" % rec["rp"])
         if "chain" in rec:   parts.append("chain=true")
         if "dynamic" in rec: parts.append('dynamic="%s"' % rec["dynamic"])
+        if "tier" in rec:    parts.append('tier="%s"' % rec["tier"])
+        if "mana" in rec:
+            m = rec["mana"]
+            parts.append("mana=%d" % m if isinstance(m, int) else "mana=%s" % m)
         return "{ " + ", ".join(parts) + " }"
     lines = [
         "-- AUTO-GENERATED by tools/gen_structure_meta.py. Do not edit by hand.",
@@ -164,6 +225,12 @@ def to_lua(meta):
         "--        empty deck means it does nothing -- never wraps).",
         '-- dynamic: "conditional" (IF_*: skips deck cards when false at cast time)',
         '--        or "random" (casts extra cards chosen at random at cast time).',
+        '-- tier: "approximate" (position/state-dependent -- Greeks, IF_* branches,',
+        '--        the DRAW_RANDOM/RANDOM_* family) or "unknown" (ZETA: reads other',
+        "--        wands, unknowable statically). Omitted means exact.",
+        "-- mana: this card's mana cost (gun.lua's action.mana), defaulting to 10",
+        "--        (ACTION_MANA_DRAIN_DEFAULT) when the body doesn't set it. Always",
+        "--        present.",
         "return {",
     ]
     for aid in sorted(meta):
@@ -179,8 +246,14 @@ def main():
     n_trig = sum("payload" in r for r in meta.values())
     n_scan = sum("scan" in r for r in meta.values())
     n_rp = sum("rp" in r for r in meta.values())
+    n_approx = sum(r.get("tier") == "approximate" for r in meta.values())
+    n_unknown = sum(r.get("tier") == "unknown" for r in meta.values())
+    n_mana = sum("mana" in r for r in meta.values())
+    n_mana_default = sum(r.get("mana") == DEFAULT_MANA for r in meta.values())
     print(f"wrote structure_meta.lua: {len(meta)} actions "
-          f"({n_group} multicast, {n_trig} trigger, {n_scan} scan, {n_rp} rp)")
+          f"({n_group} multicast, {n_trig} trigger, {n_scan} scan, {n_rp} rp, "
+          f"{n_approx} approximate, {n_unknown} unknown, "
+          f"{n_mana} mana ({n_mana_default} at default {DEFAULT_MANA}))")
 
 
 if __name__ == "__main__":

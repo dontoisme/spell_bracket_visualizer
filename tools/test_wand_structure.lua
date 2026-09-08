@@ -97,13 +97,26 @@ check("multicast wraps for missing child",
 	{ "LIGHT_BULLET", "BURST_2", "SPITTER" }, 1,
 	"{LIGHT_BULLET} | {(BURST_2:x2~WRAP SPITTER LIGHT_BULLET:~WRAP)}W")
 
-check("RANDOM_MODIFIER is terminal",
+-- RANDOM_MODIFIER's body never calls draw_actions() itself (it picks a
+-- random MODIFIER and invokes its action directly), but nearly every
+-- MODIFIER body ends in draw_actions(1, true), so in play it chains onto the
+-- next card almost always -- confirmed by tools/test_gun_differential.lua
+-- running this against the real gun.lua with three different random picks,
+-- all of which chained. structure_meta.lua models this as draws=1,
+-- tier="approximate" (which modifier gets picked, and so the exact chained
+-- spell, is not statically knowable, but "chains" is right far more often
+-- than "terminates").
+check("RANDOM_MODIFIER chains (random pick, nearly all draw 1)",
 	{ "RANDOM_MODIFIER", "LIGHT_BULLET" }, 1,
-	"{RANDOM_MODIFIER} | {LIGHT_BULLET}")
+	"{[RANDOM_MODIFIER]LIGHT_BULLET}")
 
-check("ALPHA chains",
+-- Alpha's body ends with a COMMENTED-OUT `--draw_actions( 1, true )`: it
+-- re-casts a card it already has (discarded[1], else hand[1], else deck[1])
+-- and force-draws NOTHING, so it consumes only its own slot and does not
+-- chain onto the next card. (GAMMA and TAU carry the same dead line.)
+check("ALPHA does not chain (its draw is commented out in the game)",
 	{ "ALPHA", "LIGHT_BULLET" }, 1,
-	"{[ALPHA]LIGHT_BULLET}")
+	"{ALPHA} | {LIGHT_BULLET}")
 
 check("BURST_X takes rest of deck",
 	{ "BURST_X", "LIGHT_BULLET", "SPITTER", "SPITTER" }, 1,
@@ -265,7 +278,8 @@ local function read_deck_keep(cards) -- {id,uses}; mirrors read_deck's Greek gat
 	return out
 end
 -- Same wand WITH a Greek (Tau) in slot 1: the depleted DAMAGE is now kept and
--- chains onto the trailing LIGHT (Tau itself is type OTHER, draws 1 -> chains).
+-- chains onto the trailing LIGHT (Tau itself does not chain: its body's
+-- draw_actions(1, true) is commented out in the game, so it is a leaf).
 local greek_kept = read_deck_keep({
 	{ id = "TAU", uses = -1 },
 	{ id = "LIGHT_BULLET", uses = -1 },
@@ -274,7 +288,7 @@ local greek_kept = read_deck_keep({
 })
 check("greek wand keeps depleted card",
 	greek_kept, 1,
-	"{[TAU]LIGHT_BULLET} | {[DAMAGE]LIGHT_BULLET}")
+	"{TAU} | {LIGHT_BULLET} | {[DAMAGE]LIGHT_BULLET}")
 
 print(string.format("\n%d failure(s)", failures))
 os.exit(failures > 0 and 1 or 0)

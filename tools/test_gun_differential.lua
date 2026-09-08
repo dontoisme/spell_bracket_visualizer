@@ -96,10 +96,14 @@ local CASES = {
 	  tokens = { "DAMAGE" }, spc = 1, casts = 2 },
 	{ name = "multicast wraps for missing child",
 	  tokens = { "LIGHT_BULLET", "BURST_2", "SPITTER" }, spc = 1, casts = 3 },
-	{ name = "RANDOM_MODIFIER is terminal",
+	{ name = "RANDOM_MODIFIER chains (random pick, nearly all draw 1)",
 	  tokens = { "RANDOM_MODIFIER", "LIGHT_BULLET" }, spc = 1, casts = 3 },
-	{ name = "ALPHA chains",
+	{ name = "ALPHA does not chain (its draw is commented out in the game)",
 	  tokens = { "ALPHA", "LIGHT_BULLET" }, spc = 1, casts = 2 },
+	{ name = "GAMMA does not chain (its draw is commented out in the game)",
+	  tokens = { "GAMMA", "LIGHT_BULLET" }, spc = 1, casts = 2 },
+	{ name = "TAU does not chain (its draw is commented out in the game)",
+	  tokens = { "TAU", "LIGHT_BULLET", "BOMB" }, spc = 1, casts = 3 },
 	{ name = "BURST_X takes rest of deck",
 	  tokens = { "BURST_X", "LIGHT_BULLET", "SPITTER", "SPITTER" }, spc = 1, casts = 2 },
 	{ name = "DIVIDE chains to the next card",
@@ -151,31 +155,32 @@ local CASES = {
 
 -- Divergences already understood and traced to the ENGINE, not to a simulator
 -- bug -- keyed by case name, value = why. Reported as KNOWN, still counted in
--- the summary line but not as failures. (Empty: everything currently agrees.)
+-- the summary line but not as failures.
+-- (It used to also carry ALPHA and RANDOM_MODIFIER: tools/gen_structure_meta.py's
+-- draw_actions regex read gun_actions.lua's commented-out
+-- `--draw_actions( 1, true )` in the ALPHA/GAMMA/TAU bodies as live, and
+-- RANDOM_MODIFIER's chaining -- inherited from whichever MODIFIER it
+-- randomly picks -- wasn't modeled at all. Both are fixed at the generator:
+-- comments are stripped before the draws regex runs, and RANDOM_MODIFIER now
+-- carries draws=1, tier="approximate". This test caught both.)
 local KNOWN = {
-	["ALPHA chains"] =
-		"ENGINE, not the simulator. gun_actions.lua's ALPHA body ends with a "
-		.. "COMMENTED-OUT `--draw_actions( 1, true )`: Alpha re-casts a card it "
-		.. "already has (discarded[1], else hand[1], else deck[1] -- here itself) "
-		.. "and force-draws NOTHING, so it consumes only its own slot. "
-		.. "files/structure_meta.lua says ALPHA draws=1, because "
-		.. "tools/gen_structure_meta.py's draw_actions regex does not strip Lua "
-		.. "comments -- so Alpha chains onto the next card in the mod and does "
-		.. "not in the game. GAMMA and TAU carry the same commented-out line and "
-		.. "the same wrong draws=1 (TAU only passes the case below by luck: it "
-		.. "re-casts deck[2], and in that wand deck[2] is a modifier whose own "
-		.. "draw_actions(1) pulls in exactly the card the mod expected). "
-		.. "Fixing it belongs to the generator, not to this task.",
-	["RANDOM_MODIFIER is terminal"] =
-		"ENGINE, not the simulator (but the mod is wrong here too). The body "
-		.. "picks a random card of type MODIFIER and calls its action directly; "
-		.. "essentially every modifier body calls draw_actions(1, true), so "
-		.. "Random Modifier DOES pull in the next card -- three different picks "
-		.. "across three casts all did. structure_meta has no `draws` for it "
-		.. "(its own body never names draw_actions), so the simulator terminates "
-		.. "the chain. Which modifier is picked is random, so the exact effect "
-		.. "is not statically knowable; treating it as chaining would be right "
-		.. "in almost every case. Deferred: changing it is a simulator change.",
+	["greek wand keeps depleted card"] =
+		"ENGINE, not the simulator -- and not a regression from the Alpha/Gamma/"
+		.. "Tau fix, just newly VISIBLE because of it. TAU's body reads deck[1] "
+		.. "and deck[2] and calls BOTH of their `.action()` functions directly, "
+		.. "bypassing draw_action's uses_remaining check entirely -- here deck[2] "
+		.. "is DAMAGE, a MODIFIER whose own body ends in draw_actions(1, true). "
+		.. "That forced draw fires from inside TAU's copy, popping the deck's "
+		.. "front card (LIGHT_BULLET) for real, so the engine consumes {1,2} in "
+		.. "cast 1 where the simulator -- correctly modeling TAU itself as a "
+		.. "leaf now -- only consumes {1}. This is exactly the copy-live "
+		.. "unpredictability docs/ADVANCED_SCENARIOS_PLAN.md Sec.2 calls out for "
+		.. "ALPHA/GAMMA/TAU (D3 class 1, tier=\"approximate\"): what a Greek's "
+		.. "copy indirectly consumes depends on what it happens to copy, which "
+		.. "is state the simulator does not attempt to follow. Previously masked "
+		.. "here by TAU's incorrectly inherited draws=1, which happened to "
+		.. "consume the same second slot by coincidence (per the old version of "
+		.. "this note). Modeling it precisely is Track D work, not this task's.",
 }
 
 -- ---- comparison -------------------------------------------------------------
