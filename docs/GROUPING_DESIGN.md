@@ -4,6 +4,18 @@
 which cards a multicast gathers, and what a trigger's payload is — as nested
 brackets, the way SLIME shows Lisp expression structure.
 
+## What a bracket means (the definition)
+
+> A bracket encloses exactly the cards the engine removed from the deck
+> while executing the bracket's head card. A cast bracket encloses the
+> cards removed from the deck during one cast. A card a spell re-casts by
+> reference (Alpha, Omega, …) is not removed, so it is never inside a
+> bracket — the panel names it as a copy instead.
+
+This is definition #4 of KoObEy's four candidates (drawn / executed / same shot
+state / no longer in deck), and the only one a deck-stream visualizer can honor
+without simulating the engine at runtime.
+
 Status: **shipped on `main` 2026-06-09** (the `grouping-brackets` branch was
 merged and deleted) — companion panel with cast grouping + wrap detection,
 plus the in-UI rainbow slot brackets with the orange wrap carriage-return

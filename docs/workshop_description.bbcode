@@ -4,6 +4,16 @@ It updates live while you rearrange spells, so you can watch a wand reshape itse
 
 [img]REPLACE_URL_1_SIMPLE_WAND[/img]
 
+[h2]What a bracket means[/h2]
+A bracket encloses exactly the spells the game removed from the wand's deck while casting the bracket's first spell. A cast bracket encloses everything removed during one cast. A spell that another spell re-casts by reference (Alpha, Omega, ...) is not removed, so it is never inside a bracket -- the panel names it as a copy instead.
+
+Three things follow from that:
+[list]
+[*]Trigger payloads stay nested inside the trigger, because the trigger pulls them from the deck right away even though they fire later.
+[*]Divide By and Add Trigger are prefixes on the spell after them, not single-card wrappers: both can pull several cards at once, and the bracket shows exactly which.
+[*]Greek spells get no bracket around the spell they copy; the panel names the copy in text instead.
+[/list]
+
 [h2]Reading the brackets[/h2]
 Every group of spells that fires as one unit gets a bracket pair hugging its first and last card, and the colours cycle by nesting depth — the same way nested brackets are coloured in a code editor. Leading modifiers sit [i]outside[/i] the bracket, because they attach to what comes next.
 

@@ -55,6 +55,20 @@ needs; `INSTALL.txt` inside it has the long-form walkthrough and troubleshooting
 
 ## How it works
 
+**What a bracket means**
+
+> A bracket encloses exactly the cards the engine removed from the deck
+> while executing the bracket's head card. A cast bracket encloses the
+> cards removed from the deck during one cast. A card a spell re-casts by
+> reference (Alpha, Omega, …) is not removed, so it is never inside a
+> bracket — the panel names it as a copy instead.
+
+Trigger payloads stay nested because they're consumed by the forced draw
+even though they fire later; Divide By and Add Trigger are prefixes, not
+single-card wrappers, since they consume a variable number of cards; and
+Greek spells get no bracket to the card they copy, since the panel names
+the copy in text instead.
+
 The panel simulates the engine's exact draw rules (verified from `gun.lua` in
 `data.wak`): each cast draws the wand's *spells/cast* expressions; modifiers
 (and every other card that force-draws one replacement, like Alpha)
