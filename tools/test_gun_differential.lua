@@ -68,17 +68,14 @@ local H = dofile(MOD .. "/tools/gun_harness.lua")
 -- for it here. The unit test's expected strings are unaffected; only this file
 -- needs an id the engine can actually load.
 --
--- A note on `uses`: the unit test's last two wands go through read_deck's
--- depleted-card filter, and what the SIMULATOR is handed is the already
--- filtered id list -- files/read_deck does the filtering, the simulator has no
--- uses concept at all. So the filtered list is what is seeded here, and
--- opts.uses stays nil. The one wand where it would matter is the Greek case:
--- read_deck deliberately KEEPS a depleted card on a wand holding a Greek spell
--- (the Greeks re-cast by position, so dropping it would shift what they read),
--- while the engine would discard it unfired. Feeding uses = {[3] = 0} there
--- would diff the mod's deliberate over-approximation against the engine and
--- report a divergence that is a design decision, not a bug. `uses` is wired
--- through to the harness for future cases; none today needs it.
+-- `uses` = { [slot] = uses_remaining } is passed to BOTH sides: the harness
+-- decks the card with that charge count, the simulator gets it as opts.uses.
+-- It is what checks the depleted-card model, which is entirely a claim about
+-- the engine (draw_action discards a 0-use card unplayed and returns false;
+-- draw_actions retries on the next card, under a `#deck > 0` guard that cannot
+-- reload) -- so every one of those cases below has to be confirmed here rather
+-- than reasoned about. There is no longer a pre-simulation filter to model:
+-- the simulator is handed the FULL deck plus the charge counts.
 local CASES = {
 	{ name = "doc example, one cast",
 	  tokens = { "DAMAGE", "BURST_2", "LIGHT_BULLET", "LIGHT_BULLET_TRIGGER", "SPITTER" },
@@ -121,11 +118,26 @@ local CASES = {
 	{ name = "span: wrapped span tracked",
 	  tokens = { "BOUNCY_ORB", "SCATTER_2", "LIGHT", "BOUNCE" }, spc = 1, casts = 3 },
 
-	-- the depleted-card end-to-end wands, post-filter (see the note above)
-	{ name = "depleted modifier filtered before sim",
-	  tokens = { "LIGHT_BULLET", "LIGHT_BULLET" }, spc = 1, casts = 3 },
-	{ name = "greek wand keeps depleted card",
-	  tokens = { "TAU", "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, spc = 1, casts = 3 },
+	-- ---- depleted cards: retried past, and the retry cannot wrap ----
+	{ name = "depleted modifier is retried past, not filtered out",
+	  tokens = { "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, spc = 1, casts = 3,
+	  uses = { [2] = 0 } },
+	{ name = "multicast retries past a depleted card and still gathers 2",
+	  tokens = { "BURST_2", "LIGHT_BULLET", "SPITTER", "SPITTER" }, spc = 1, casts = 3,
+	  uses = { [2] = 0 } },
+	-- The two that pin down "the retry cannot wrap": in both, the LAST card of
+	-- the deck is depleted, so the draw that reaches it is lost and no W appears
+	-- on either side. Contrast "trailing modifier wraps" above, same shape but
+	-- with the first attempt hitting a genuinely empty deck.
+	{ name = "depleted last card: draw is lost, wand does NOT wrap",
+	  tokens = { "LIGHT_BULLET", "LIGHT_BULLET", "DAMAGE" }, spc = 1, casts = 4,
+	  uses = { [3] = 0 } },
+	{ name = "forced draw onto a depleted last card dangles, does NOT wrap",
+	  tokens = { "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, spc = 1, casts = 4,
+	  uses = { [3] = 0 } },
+	{ name = "greek wand: depleted card still retried past",
+	  tokens = { "TAU", "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, spc = 1, casts = 3,
+	  uses = { [3] = 0 } },
 
 	-- ---- the ADD_TRIGGER family: the forward scan ----
 	{ name = "add trigger: target is the scanned projectile",
@@ -164,7 +176,7 @@ local CASES = {
 -- comments are stripped before the draws regex runs, and RANDOM_MODIFIER now
 -- carries draws=1, tier="approximate". This test caught both.)
 local KNOWN = {
-	["greek wand keeps depleted card"] =
+	["greek wand: depleted card still retried past"] =
 		"ENGINE, not the simulator -- and not a regression from the Alpha/Gamma/"
 		.. "Tau fix, just newly VISIBLE because of it. TAU's body reads deck[1] "
 		.. "and deck[2] and calls BOTH of their `.action()` functions directly, "
@@ -180,7 +192,10 @@ local KNOWN = {
 		.. "is state the simulator does not attempt to follow. Previously masked "
 		.. "here by TAU's incorrectly inherited draws=1, which happened to "
 		.. "consume the same second slot by coincidence (per the old version of "
-		.. "this note). Modeling it precisely is Track D work, not this task's.",
+		.. "this note). The case now decks DAMAGE with uses = 0, which makes the "
+		.. "bypass literal rather than argued: the engine fires a card it has "
+		.. "zero charges of, purely because a Greek copied it by position. "
+		.. "Modeling it precisely is Track D work, not this task's.",
 }
 
 -- ---- comparison -------------------------------------------------------------
@@ -208,7 +223,8 @@ local notes = {}
 for _, case in ipairs(CASES) do
 	local run = H.run(case.tokens, case.spc or #case.tokens, case.casts or 3,
 		{ uses = case.uses })
-	local sim = S.simulate(case.tokens, meta, { spells_per_cast = case.spc, trace = true })
+	local sim = S.simulate(case.tokens, meta,
+		{ spells_per_cast = case.spc, trace = true, uses = case.uses })
 
 	if run.unsupported then
 		unsupported_n = unsupported_n + 1

@@ -59,8 +59,10 @@ end
 
 local failures = 0
 
-local function check(name, tokens, spc, expect)
-	local got = show(S.simulate(tokens, meta, { spells_per_cast = spc }))
+-- `uses` (optional) = { [slot] = uses_remaining }, handed straight to the
+-- simulator: 0 = depleted, which the engine retries past (see below).
+local function check(name, tokens, spc, expect, uses)
+	local got = show(S.simulate(tokens, meta, { spells_per_cast = spc, uses = uses }))
 	local ok = got == expect
 	if not ok then failures = failures + 1 end
 	print(string.format("%s %s\n    expect %s\n    got    %s",
@@ -167,34 +169,68 @@ passck("wrapped span tracked",
 	node.head == 2 and node.last == 4 and node.wfirst == 1 and node.wlast == 1 and node.wrap,
 	string.format(" (head=%s last=%s wfirst=%s wlast=%s)", node.head, node.last, node.wfirst, node.wlast))
 
--- Depleted-card rule (read_deck drops uses_remaining == 0 before simulating).
--- The engine test is literally `== 0`: only 0 is depleted.
+-- Depleted-card rule. The engine test is literally `== 0`: only 0 is depleted.
 passck("card_fires: 0 depleted", S.card_fires(0) == false)
 passck("card_fires: -1 unlimited keeps", S.card_fires(-1) == true)
 passck("card_fires: -2 unlimited-unlimited keeps", S.card_fires(-2) == true)
 passck("card_fires: 3 charges keeps", S.card_fires(3) == true)
 passck("card_fires: nil (unreadable) keeps", S.card_fires(nil) == true)
 
--- End-to-end: a depleted MODIFIER drops out, so it no longer chains onto the
--- next projectile. [LIGHT, DAMAGE@0, LIGHT] @1/cast -> filter -> [LIGHT, LIGHT].
-local function keep_fires(cards) -- cards = { {id=, uses=}, ... }, mirrors read_deck
-	local out = {}
-	for _, c in ipairs(cards) do
-		if S.card_fires(c.uses) then out[#out + 1] = c.id end
-	end
-	return out
-end
-local filtered = keep_fires({
-	{ id = "LIGHT_BULLET", uses = -1 },
-	{ id = "DAMAGE", uses = 0 }, -- depleted modifier: must NOT chain
-	{ id = "LIGHT_BULLET", uses = 5 },
-})
-check("depleted modifier filtered before sim",
-	filtered, 1,
-	"{LIGHT_BULLET} | {LIGHT_BULLET}")
+-- End-to-end: a depleted MODIFIER is RETRIED PAST, not filtered out of the deck.
+-- draw_action pops it, discards it unplayed and returns false; draw_actions then
+-- re-draws on the next card. So it does not chain onto the trailing projectile --
+-- but it IS gone from the deck, and cast 2 therefore consumes slots 2 AND 3.
+-- (Confirmed against the real gun.lua: tools/test_gun_differential.lua.)
+check("depleted modifier is retried past, not filtered out",
+	{ "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, 1,
+	"{LIGHT_BULLET} | {LIGHT_BULLET}", { [2] = 0 })
 
--- Greek override: a wand containing a Greek spell KEEPS depleted cards (Greeks
--- re-cast by position). Mirrors read_deck: filter only when no Greek present.
+-- ...and the retry does not count toward the draw: a multicast asked for 2 still
+-- gathers two FIRING cards, stepping over the depleted one on the way.
+check("multicast retries past a depleted card and still gathers 2",
+	{ "BURST_2", "LIGHT_BULLET", "SPITTER", "SPITTER" }, 1,
+	"{(BURST_2:x2 SPITTER SPITTER)}", { [2] = 0 })
+
+-- THE RETRY CANNOT WRAP (gun.lua:305 -- `while #deck > 0`, which never reaches
+-- draw_action's instant_reload_if_empty path). Cast 3's root draw pops the
+-- depleted DAMAGE, retries, finds the deck empty, and the draw is LOST: no wrap,
+-- no recharge-ending W. The cast still happened and still emptied slot 3, so it
+-- is a real cast with nodes = {} and cast.spent = {3}.
+check("depleted last card: draw is lost, wand does NOT wrap",
+	{ "LIGHT_BULLET", "LIGHT_BULLET", "DAMAGE" }, 1,
+	"{LIGHT_BULLET} | {LIGHT_BULLET} | {}", { [3] = 0 })
+
+-- Same rule one level down, and the contrast that makes it visible: in
+-- "trailing modifier wraps" above, DAMAGE's forced draw finds an EMPTY deck on
+-- its FIRST attempt and wraps. Here the deck is not empty -- it holds a depleted
+-- card -- so the first attempt spends it and the RETRY hits the empty deck.
+-- Same wand shape, opposite outcome: the modifier dangles and nothing wraps.
+check("forced draw onto a depleted last card dangles, does NOT wrap",
+	{ "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, 1,
+	"{LIGHT_BULLET} | {[DAMAGE]DAMAGE:dangling}", { [3] = 0 })
+
+-- The consumption bookkeeping behind the three cases above: a depleted card is
+-- in the cast's span and its slot list (it WAS taken out of the deck), reported
+-- separately as cast.spent, and in no node.
+sim = S.simulate({ "LIGHT_BULLET", "LIGHT_BULLET", "DAMAGE" }, meta,
+	{ spells_per_cast = 1, trace = true, uses = { [3] = 0 } })
+local c3 = sim.casts[3]
+passck("depleted-only cast exists with no nodes",
+	#sim.casts == 3 and #c3.nodes == 0 and not c3.wrapped and not sim.wrapped,
+	string.format(" (casts=%d nodes=%d wrapped=%s)", #sim.casts, #c3.nodes,
+		tostring(c3.wrapped)))
+passck("depleted card is consumed: in slots, in the span, in cast.spent",
+	c3.slots[1] == 3 and #c3.slots == 1 and c3.first == 3 and c3.last == 3
+		and c3.spent ~= nil and c3.spent[1] == 3 and #c3.spent == 1,
+	string.format(" (slots=%d first=%s spent=%s)", #c3.slots, tostring(c3.first),
+		tostring(c3.spent and c3.spent[1])))
+passck("a cast with no depleted card reports no spent list",
+	sim.casts[1].spent == nil)
+
+-- The Greek list no longer gates a depleted-card filter (there is no filter) --
+-- it survives because the confidence tiering needs it: a Greek copies a card by
+-- POSITION and invokes its body directly, bypassing the uses_remaining check
+-- entirely, which is exactly what the simulator cannot follow.
 passck("has_greek: TAU present", S.has_greek({ "LIGHT_BULLET", "TAU", "DAMAGE" }) == true)
 passck("has_greek: none", S.has_greek({ "LIGHT_BULLET", "DAMAGE" }) == false)
 passck("has_greek: DIVIDE is not Greek", S.has_greek({ "DIVIDE_10", "LIGHT_BULLET" }) == false)
@@ -267,28 +303,16 @@ check("add trigger: modifier before it keeps its place in the prefix",
 	{ "DAMAGE", "ADD_TRIGGER", "LIGHT_BULLET", "BOMB" }, nil,
 	"{([DAMAGE,ADD_TRIGGER]LIGHT_BULLET:trig1 BOMB)}")
 
-local function read_deck_keep(cards) -- {id,uses}; mirrors read_deck's Greek gate
-	local ids = {}
-	for _, c in ipairs(cards) do ids[#ids + 1] = c.id end
-	local greek = S.has_greek(ids)
-	local out = {}
-	for _, c in ipairs(cards) do
-		if greek or S.card_fires(c.uses) then out[#out + 1] = c.id end
-	end
-	return out
-end
--- Same wand WITH a Greek (Tau) in slot 1: the depleted DAMAGE is now kept and
--- chains onto the trailing LIGHT (Tau itself does not chain: its body's
--- draw_actions(1, true) is commented out in the game, so it is a leaf).
-local greek_kept = read_deck_keep({
-	{ id = "TAU", uses = -1 },
-	{ id = "LIGHT_BULLET", uses = -1 },
-	{ id = "DAMAGE", uses = 0 }, -- depleted but KEPT because the wand has a Greek
-	{ id = "LIGHT_BULLET", uses = 5 },
-})
-check("greek wand keeps depleted card",
-	greek_kept, 1,
-	"{TAU} | {LIGHT_BULLET} | {[DAMAGE]LIGHT_BULLET}")
+-- Same rule on a wand holding a Greek. There is no longer a "keep depleted cards
+-- when a Greek is present" override -- the card is kept in the deck for EVERY
+-- wand now, and retried past when it is drawn -- so the depleted DAMAGE does not
+-- chain onto the trailing LIGHT_BULLET here either. (Tau itself does not chain:
+-- its body's draw_actions(1, true) is commented out in the game, so it is a leaf.
+-- What Tau's copy does to the deck is the one KNOWN engine divergence in
+-- tools/test_gun_differential.lua, and it is unaffected by this.)
+check("greek wand: depleted card still retried past",
+	{ "TAU", "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, 1,
+	"{TAU} | {LIGHT_BULLET} | {LIGHT_BULLET}", { [3] = 0 })
 
 -- ---- tiers (T1.3) ------------
 

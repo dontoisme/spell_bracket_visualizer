@@ -32,21 +32,47 @@
 --     projectile-ish is left in the deck afterwards the body casts the card
 --     plainly and spawns no trigger; if the scan runs off the end of the deck,
 --     or lands on a card with no related projectile, it consumes nothing.
+--   * A DEPLETED card (uses_remaining == 0) is RETRIED PAST, not skipped over
+--     and not filtered out of the deck beforehand. draw_action() pops it,
+--     pushes it to the discard pile and returns false without playing it;
+--     draw_actions() then runs `while #deck > 0 do if draw_action() then
+--     break end end`, so the draw is re-attempted on the next card and the
+--     depleted card does NOT count toward N. Two consequences the simulator
+--     has to carry, and the reason a pre-filter cannot express this:
+--       - the depleted card WAS removed from the deck. It is part of what the
+--         cast consumed (cast span, `slots` trace, and the discard pile a
+--         later wrap pulls back in), it just never fires and never appears in
+--         a node.
+--       - THE RETRY CANNOT WRAP. Its loop is guarded on `#deck > 0` and never
+--         reaches draw_action's instant_reload_if_empty path, so if the deck
+--         empties during the retry that draw is silently LOST and the wand
+--         does NOT wrap for it. Only the FIRST attempt of each draw can wrap.
+--     The same draw_action path handles a card the caster cannot afford, so
+--     mana exhaustion will inherit this model unchanged.
 --
 -- Input : tokens = ordered array of action_id strings (a wand's cards)
 --         meta   = the table from files/structure_meta.lua
 --         opts   = { spells_per_cast = N } (nil -> whole deck as one cast),
 --                  plus { trace = true } to add each cast's raw slot list --
 --                  used only by tools/test_gun_differential.lua, which diffs
---                  it against what Noita's own gun.lua takes out of the deck.
+--                  it against what Noita's own gun.lua takes out of the deck,
+--                  plus { uses = { [slot] = uses_remaining } } -- the live
+--                  charge counts, sparse: an absent slot means "not depleted".
+--                  M.card_fires decides; only 0 is depleted.
 -- Output of M.simulate:
 --   { casts = { { nodes = {...}, wrapped = bool,
 --                 first, last, wfirst, wlast,
 --                 mana = N -- total mana this cast's drawn cards cost (a
 --                          -- negative-mana card, e.g. Add Mana, subtracts),
+--                 spent = { i, ... } -- slots this cast popped that were
+--                                    -- DEPLETED: consumed, never fired, in no
+--                                    -- node. Absent when there are none. A
+--                                    -- cast whose every draw hit a depleted
+--                                    -- card is a real cast with nodes = {}
+--                                    -- and a non-empty spent list.
 --                 slots = { i, ... } -- opts.trace only: every slot the cast
 --                                    -- drew or directly consumed (wrapped-in
---                                    -- cards included), sorted
+--                                    -- AND depleted cards included), sorted
 --               }, ... }, wrapped = bool }
 -- A cast's first/last/wfirst/wlast are its own slot span, split the same way a
 -- node's is (forward run, then the wrapped-in run at the wand's start), so a
@@ -72,14 +98,13 @@
 
 local M = {}
 
--- Will a card with this many uses left actually fire? A depleted (0-use) card is
--- DRAWN but never fires and never wraps: gun.lua draw_action() discards a card
--- whose uses_remaining == 0 and returns false, then draw_actions() skips on to the
--- next card -- so a depleted card behaves exactly as if it weren't in the deck.
--- read_deck() filters these out before simulating. The engine test is literally
--- `== 0`, so only 0 is depleted: -1 = unlimited, -2 = unlimited-unlimited, and any
--- positive count all keep. Pure + exported so the test harnesses cover the rule
--- without game APIs (a nil uses count -- e.g. an unreadable field -- keeps the card).
+-- Will a card with this many uses left actually fire? Used by simulate() via
+-- opts.uses on every pop off the deck: a card that does not fire is discarded
+-- unplayed and the draw is retried on the next card (see the header). The engine
+-- test is literally `== 0`, so only 0 is depleted: -1 = unlimited, -2 =
+-- unlimited-unlimited, and any positive count all keep. Pure + exported so the
+-- test harnesses cover the rule without game APIs (a nil uses count -- an absent
+-- slot, or an unreadable field -- keeps the card).
 function M.card_fires(uses_remaining)
 	return uses_remaining ~= 0
 end
@@ -87,11 +112,13 @@ end
 -- The 8 Greek alphabet spells RE-CAST cards by position from the deck/hand/discard
 -- piles (verified in gun_actions.lua): Alpha/Gamma/Tau copy a neighbour
 -- (deck[1]/deck[#deck]/...), Omega/Mu/Phi/Sigma re-cast the discard pile, Zeta
--- builds its own option set. So in a wand containing ANY Greek, a depleted card is
--- still structurally relevant -- it can be re-cast, and dropping it would shift the
--- positions the Greeks read -- so the depleted-card filter is DISABLED for that wand
--- and the full structure stays bracketed. (The DIVIDE_* spells multicast the NEXT
--- card rather than re-casting by position, so they are deliberately not included.)
+-- builds its own option set -- and a copy invokes the card's action body directly,
+-- bypassing draw_action's uses_remaining check, so a Greek can fire a card that is
+-- depleted. That used to be the reason for a "keep depleted cards on Greek wands"
+-- exception to a pre-simulation filter; the filter is GONE (the simulator keeps
+-- every card and retries past the depleted ones, per the header), so the exception
+-- is obsolete. This list survives only because the confidence tiering needs to know
+-- which wands hold a Greek -- copy-by-position is what it cannot follow.
 M.GREEK_SPELLS = {
 	ALPHA = true, GAMMA = true, TAU = true, OMEGA = true,
 	MU = true, PHI = true, SIGMA = true, ZETA = true,
@@ -189,6 +216,7 @@ function M.simulate(tokens, meta, opts)
 	opts = opts or {}
 	local spc = opts.spells_per_cast
 	if spc ~= nil and spc < 1 then spc = 1 end
+	local uses = opts.uses or {} -- slot -> uses_remaining; absent slot = fires
 
 	local deck, discard, hand = {}, {}, {}
 	for i, id in ipairs(tokens) do deck[#deck + 1] = { i = i, id = id } end
@@ -196,23 +224,36 @@ function M.simulate(tokens, meta, opts)
 	local wrap_count = 0
 	local wrapped_now = false -- this cast has wrapped; later draws are wrapped-in
 
-	-- One draw off the deck. Forced draws (from a card's own draw_actions /
-	-- trigger payload) wrap the discard pile back in when the deck is empty.
+	-- One draw off the deck, modelling draw_actions' retry loop (see the header).
+	-- Forced draws (from a card's own draw_actions / trigger payload) wrap the
+	-- discard pile back in when the deck is empty -- but ONLY on the first
+	-- attempt: once a depleted card has sent us round again we are inside the
+	-- engine's `while #deck > 0` retry, which can never reload, so an empty
+	-- deck there loses the draw outright and the wand does not wrap for it.
 	local function draw(forced)
-		if #deck == 0 then
-			if forced and #discard > 0 then
-				table.sort(discard, function(a, b) return a.i < b.i end)
-				deck, discard = discard, {}
-				wrap_count = wrap_count + 1
-				wrapped_now = true
-			else
-				return nil
+		local first_attempt = true
+		while true do
+			if #deck == 0 then
+				if first_attempt and forced and #discard > 0 then
+					table.sort(discard, function(a, b) return a.i < b.i end)
+					deck, discard = discard, {}
+					wrap_count = wrap_count + 1
+					wrapped_now = true
+				else
+					return nil
+				end
 			end
+			local card = table.remove(deck, 1)
+			-- .w is stamped at POP time, so a depleted card popped after a wrap
+			-- is marked wrapped-in exactly like a firing one: it is in the hand,
+			-- so it is inside the cast's wrapped-in span.
+			if wrapped_now then card.w = true end
+			hand[#hand + 1] = card -- lands in the discard at cast end either way
+			if M.card_fires(uses[card.i]) then return card end
+			-- Depleted: consumed, never played, never note()d into a node span.
+			card.spent = true
+			first_attempt = false
 		end
-		local card = table.remove(deck, 1)
-		if wrapped_now then card.w = true end
-		hand[#hand + 1] = card
-		return card
 	end
 
 	local parse_seq -- forward declaration
@@ -361,12 +402,25 @@ function M.simulate(tokens, meta, opts)
 		local cast = { nodes = nodes, wrapped = wrapped }
 		if opts.trace then
 			-- Every card this cast took out of the deck, by slot: the hand holds
-			-- normal draws AND the Add Trigger scan's direct removals, which is
-			-- exactly the engine's notion of what a cast consumes.
+			-- normal draws, depleted cards retried past, AND the Add Trigger
+			-- scan's direct removals -- exactly the engine's notion of what a
+			-- cast consumes (harness `cast.drawn`).
 			local slots = {}
 			for _, cd in ipairs(hand) do slots[#slots + 1] = cd.i end
 			table.sort(slots)
 			cast.slots = slots
+		end
+		-- Depleted cards this cast popped: consumed, but in no node. Reported so
+		-- a renderer can say why a cast holds slots nothing was built from --
+		-- including the degenerate cast whose every draw hit one, which has
+		-- nodes = {} and is still a real cast that emptied part of the deck.
+		local spent = {}
+		for _, cd in ipairs(hand) do
+			if cd.spent then spent[#spent + 1] = cd.i end
+		end
+		if #spent > 0 then
+			table.sort(spent)
+			cast.spent = spent
 		end
 		for _, cd in ipairs(hand) do
 			if cd.w then
