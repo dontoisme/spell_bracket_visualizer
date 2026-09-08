@@ -22,6 +22,16 @@
 --     their bodies read deck[1] and invoke its action directly, never calling
 --     draw_actions() -- so "Divide By N" prefixes the next card like a
 --     modifier, but an empty deck means it does nothing: no wrap, ever.
+--   * The ADD_TRIGGER family SCANS (meta scan=true). The body steps forward
+--     over MODIFIER/PASSIVE/OTHER/DRAW_MANY cards, running each modifier
+--     inline against the trigger projectile, and lands on the first card that
+--     is none of those. If that card carries related_projectiles (meta rp), the
+--     body removes the WHOLE scan from the deck -- stepped-over cards and
+--     projectile together -- directly, with no draw_actions() call, so it can
+--     never wrap; the projectile then draws rp 1-card payloads. If nothing
+--     projectile-ish is left in the deck afterwards the body casts the card
+--     plainly and spawns no trigger; if the scan runs off the end of the deck,
+--     or lands on a card with no related projectile, it consumes nothing.
 --
 -- Input : tokens = ordered array of action_id strings (a wand's cards)
 --         meta   = the table from files/structure_meta.lua
@@ -104,6 +114,22 @@ local function is_multicast(m)
 	return m.draws ~= nil and (m.draws >= 2 or m.draws == -1)
 end
 
+-- The ADD_TRIGGER family's forward scan (gun_actions.lua): it steps over these
+-- types, counting and ultimately consuming them, until it reaches a card that
+-- is none of them. An unknown (e.g. modded) card falls back to type "OTHER" and
+-- is therefore stepped over, which matches the engine whenever the real type is
+-- one of these four and is the conservative guess otherwise.
+local SCAN_STEP_OVER = {
+	MODIFIER = true, PASSIVE = true, OTHER = true, DRAW_MANY = true,
+}
+
+-- ...and the types the body accepts as a trigger target, which are also the
+-- types it looks for in the remaining deck before deciding to spawn a trigger
+-- at all (its `valid` check).
+local SCAN_TARGET = {
+	PROJECTILE = true, STATIC_PROJECTILE = true, MATERIAL = true, UTILITY = true,
+}
+
 function M.simulate(tokens, meta, opts)
 	opts = opts or {}
 	local spc = opts.spells_per_cast
@@ -174,7 +200,54 @@ function M.simulate(tokens, meta, opts)
 		note(card)
 		local node = { id = card.id, atype = m.type, modifiers = mods, head = card.i }
 
-		if is_multicast(m) then
+		if m.scan then
+			-- Add Trigger / Add Timer / Add Death Trigger. NOT a trigger head
+			-- whose payload is the next card (which is what meta payload=1 used
+			-- to say, and why "ADD_TRIGGER, SPARK, BOMB" mis-grouped as
+			-- "(ADD_TRIGGER SPARK) BOMB"): the head is the projectile the scan
+			-- lands on, and the Add Trigger card plus everything stepped over
+			-- become its modifier prefix, because the engine consumes them all.
+			local n = 1
+			while deck[n] ~= nil and SCAN_STEP_OVER[meta_for(meta, deck[n].id).type] do
+				n = n + 1
+			end
+			local target = deck[n]
+			local tm = (target ~= nil) and meta_for(meta, target.id) or nil
+			if tm ~= nil and tm.rp ~= nil then
+				mods[#mods + 1] = card.id -- the Add Trigger card itself
+				-- Direct removal, not draw(): the scan only ever touches cards
+				-- already in the deck, so it cannot reload and cannot wrap.
+				for _ = 1, n do
+					local c = table.remove(deck, 1)
+					if wrapped_now then c.w = true end
+					hand[#hand + 1] = c
+					note(c)
+					if c ~= target then mods[#mods + 1] = c.id end
+				end
+				local valid = false
+				for _, c in ipairs(deck) do
+					if SCAN_TARGET[meta_for(meta, c.id).type] then
+						valid = true
+						break
+					end
+				end
+				node.id, node.atype, node.head = target.id, tm.type, target.i
+				if valid then
+					node.kind = "trigger"
+					node.trigger = m.trigger
+					node.payload = tm.rp
+					node.children = parse_seq(tm.rp, true)
+				else
+					-- Nothing left to trigger: the body casts the consumed card
+					-- plainly. It still fired, and it was still consumed.
+					node.kind = "leaf"
+				end
+			else
+				-- Scan ran off the deck, or landed on a card that cannot carry a
+				-- trigger: the body consumes nothing and does nothing.
+				node.kind = "leaf"
+			end
+		elseif is_multicast(m) then
 			node.kind = "multicast"
 			node.group = m.draws
 			local count = m.draws

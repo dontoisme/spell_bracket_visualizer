@@ -46,6 +46,7 @@ def meta_for(meta, aid):
 
 
 def card_fires(uses_remaining):
+
     # Mirror of M.card_fires: a 0-use card is depleted (won't fire); -1/-2/>0 keep.
     return uses_remaining != 0
 
@@ -69,6 +70,13 @@ def chains(m):
 def is_multicast(m):
     d = m.get("draws")
     return d is not None and (d >= 2 or d == -1)
+
+
+# Mirror of wand_structure.lua's ADD_TRIGGER scan: the types the body steps
+# over (consuming them) and the types it accepts as a trigger target / looks
+# for in the remaining deck before spawning a trigger at all.
+SCAN_STEP_OVER = {"MODIFIER", "PASSIVE", "OTHER", "DRAW_MANY"}
+SCAN_TARGET = {"PROJECTILE", "STATIC_PROJECTILE", "MATERIAL", "UTILITY"}
 
 
 def simulate(tokens, meta, spells_per_cast=None):
@@ -132,7 +140,37 @@ def simulate(tokens, meta, spells_per_cast=None):
         node = {"id": card["id"], "atype": m["type"], "modifiers": mods,
                 "head": card["i"]}
 
-        if is_multicast(m):
+        if m.get("scan"):
+            # Add Trigger family: scan forward over SCAN_STEP_OVER cards, then
+            # consume the whole scan plus the projectile it lands on -- directly,
+            # so it never wraps. See wand_structure.lua for the full rule.
+            n = 1
+            while len(deck) >= n and meta_for(meta, deck[n - 1]["id"])["type"] in SCAN_STEP_OVER:
+                n += 1
+            target = deck[n - 1] if len(deck) >= n else None
+            tm = meta_for(meta, target["id"]) if target is not None else None
+            if tm is not None and tm.get("rp") is not None:
+                mods.append(card["id"])
+                for _ in range(n):
+                    c = deck.pop(0)
+                    if state["wrapped_now"]:
+                        c["w"] = True
+                    hand.append(c)
+                    note(c)
+                    if c is not target:
+                        mods.append(c["id"])
+                valid = any(meta_for(meta, c["id"])["type"] in SCAN_TARGET for c in deck)
+                node["id"], node["atype"], node["head"] = target["id"], tm["type"], target["i"]
+                if valid:
+                    node["kind"] = "trigger"
+                    node["trigger"] = m.get("trigger")
+                    node["payload"] = tm["rp"]
+                    node["children"] = parse_seq(tm["rp"], True)
+                else:
+                    node["kind"] = "leaf"
+            else:
+                node["kind"] = "leaf"
+        elif is_multicast(m):
             node["kind"] = "multicast"
             node["group"] = m["draws"]
             count = m["draws"]
@@ -364,6 +402,43 @@ def main():
     passck("has_greek: TAU present", has_greek(["LIGHT_BULLET", "TAU", "DAMAGE"]) is True)
     passck("has_greek: none", has_greek(["LIGHT_BULLET", "DAMAGE"]) is False)
     passck("has_greek: DIVIDE is not Greek", has_greek(["DIVIDE_10", "LIGHT_BULLET"]) is False)
+
+    # ---- ADD_TRIGGER family: the forward scan --------------------------------
+    # Mirrors the Lua suite one-for-one; see tools/test_wand_structure.lua for
+    # the engine cross-check notes.
+    check("add trigger: target is the scanned projectile, next card is the payload",
+          ["ADD_TRIGGER", "LIGHT_BULLET", "BOMB"], None,
+          "{([ADD_TRIGGER]LIGHT_BULLET:trig1 BOMB)}")
+    check("add trigger: scan swallows an intervening modifier",
+          ["ADD_TRIGGER", "DAMAGE", "LIGHT_BULLET", "BOMB"], None,
+          "{([ADD_TRIGGER,DAMAGE]LIGHT_BULLET:trig1 BOMB)}")
+    check("add trigger: scan swallows several modifiers",
+          ["ADD_TRIGGER", "DAMAGE", "CRITICAL_HIT", "LIGHT_BULLET", "BOMB"], None,
+          "{([ADD_TRIGGER,DAMAGE,CRITICAL_HIT]LIGHT_BULLET:trig1 BOMB)}")
+    check("add trigger: a second add trigger is consumed by the scan",
+          ["ADD_TRIGGER", "ADD_TRIGGER", "LIGHT_BULLET", "BOMB"], None,
+          "{([ADD_TRIGGER,ADD_TRIGGER]LIGHT_BULLET:trig1 BOMB)}")
+    check("add trigger: payload count comes from the target's rp",
+          ["ADD_TRIGGER", "BALL_LIGHTNING", "LIGHT_BULLET", "LIGHT_BULLET", "LIGHT_BULLET"], None,
+          "{([ADD_TRIGGER]BALL_LIGHTNING:trig3 LIGHT_BULLET LIGHT_BULLET LIGHT_BULLET)}")
+    check("add trigger: no card left to trigger, so it fires plainly",
+          ["ADD_TRIGGER", "LIGHT_BULLET"], None,
+          "{[ADD_TRIGGER]LIGHT_BULLET}")
+    check("add trigger: scan off the end consumes nothing",
+          ["ADD_TRIGGER", "DAMAGE"], None,
+          "{ADD_TRIGGER [DAMAGE]DAMAGE:dangling}")
+    check("add trigger: alone on the wand, does nothing",
+          ["ADD_TRIGGER"], None,
+          "{ADD_TRIGGER}")
+    check("add timer: same scan, timer kind",
+          ["ADD_TIMER", "LIGHT_BULLET", "BOMB"], None,
+          "{([ADD_TIMER]LIGHT_BULLET:trig1 BOMB)}")
+    check("add death trigger: same scan, death kind",
+          ["ADD_DEATH_TRIGGER", "LIGHT_BULLET", "BOMB"], None,
+          "{([ADD_DEATH_TRIGGER]LIGHT_BULLET:trig1 BOMB)}")
+    check("add trigger: modifier before it keeps its place in the prefix",
+          ["DAMAGE", "ADD_TRIGGER", "LIGHT_BULLET", "BOMB"], None,
+          "{([DAMAGE,ADD_TRIGGER]LIGHT_BULLET:trig1 BOMB)}")
 
     def read_deck_keep(cards):  # [(id, uses)]; mirrors read_deck's Greek gate
         greek = has_greek([cid for cid, _ in cards])

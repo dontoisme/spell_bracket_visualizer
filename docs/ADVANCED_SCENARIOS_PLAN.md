@@ -211,13 +211,14 @@ Tiers below are assigned from the bodies as read in `.gun_ref/`, not from type:
 | **approximate** | modeled, but position- or state-dependent: shown with `?` | ALPHA / GAMMA / TAU (copy live, D3 class 1); OMEGA / PHI / MU / SIGMA (copy suppressed, D3 class 2); `IF_ENEMY`, `IF_HP`, `IF_PROJECTILE` (branch on world state); `IF_HALF` (alternates on a persistent global — predictable in *pairs* but not from a single frame, D4) |
 | **unknown** | no usable record | **ZETA** (reads the player's *other* wands and seeds RNG from position + frame number — unknowable statically, D3 class 3); any modded spell the probe could not classify, or a probe error; any vanilla id absent from `structure_meta.lua` (see below) |
 
-**The 422/490 gap.** `gun_actions.lua` defines **490** ids; `structure_meta.lua`
-carries **422**. The generator filters ~68 unobtainable internals (`BAAB_*`,
-`BUILDING_*`, `*_LEGACY`, enemy-only projectiles). Those resolve to
-`{type="OTHER"}` today and would land in *unknown*, blanking the brackets on any
-wand that somehow holds one. A1's runtime read lifts them to *approximate* at
-best, which still hides. Decide explicitly: widen the generator's filter to
-cover them, or accept that these wands go bracket-less.
+**The 422/490 gap is not a gap.** A raw grep of `gun_actions.lua` finds **490**
+ids while `structure_meta.lua` carries **422**, which looks like 68 spells the
+generator drops. It is not: all 68 sit inside `--[[ … ]]` block comments in the
+game's own source (`ACID`, `BEE`, `BAAB_*`, `BUILDING_*`, the `*_LEGACY`
+entries), and `gen_structure_meta.py` strips block comments before parsing. They
+do not exist at runtime, so vanilla coverage is **422 of 422 — complete**, and
+no wand can hold one. Anything the tier logic sees as *unknown* is therefore
+genuinely modded, which is what makes the Hide policy safe to default on.
 
 Policy (new setting, `uncertain_brackets`, enum):
 
@@ -393,8 +394,10 @@ Record produced, superset of today's fields:
 do *not* build the `dump_gun_actions.py` this plan originally proposed);
 `tools/probe_actions.lua` loads it with `action_probe.lua` and prints a record
 per id; `tools/test_probe_vs_meta.lua` diffs that against `structure_meta.lua`.
-Scope the diff to the 422 ids `structure_meta.lua` actually carries, or the
-first run is 68 lines of noise (§2).
+The probe must strip `--[[ … ]]` block comments before walking the file, exactly
+as `gen_structure_meta.py` does: 68 of the 490 `id =` matches in
+`gun_actions.lua` are commented-out actions that do not exist at runtime (§2).
+Skip that and the first diff is 68 lines of phantom spells.
 
 Every disagreement is either a regex miss in the generator (ADD_TRIGGER, §4 D1,
 is the known one) or a probe bug — both worth knowing before the probe is
@@ -424,7 +427,15 @@ to `gun_actions.lua` and `gun.lua` as extracted by `tools/extract_gun.py`. The
 guess is recorded alongside the correction, because the shape of the mistake is
 the reason the harness exists.
 
-### D1 — Add Trigger / Add Timer / Add Death Trigger (confirmed live bug)
+### D1 — Add Trigger / Add Timer / Add Death Trigger (**FIXED**)
+
+> **Status: implemented.** `gen_structure_meta.py` now emits `scan=true` for the
+> three cards and `rp=N` (the `related_projectiles` count) for the 212 cards
+> that can carry a trigger; `wand_structure.lua` grows a scan branch; 11 cases
+> cover it in `tools/test_wand_structure.lua` and the Python mirror. All eleven
+> wands were run through Noita's real `gun.lua` with `tools/gun_harness.lua`
+> and agree with it on what each expression consumes. The rest of this section
+> is the reasoning that produced the fix.
 
 `structure_meta.lua:15-17` records the three as `trigger=…, payload=1` with no
 `draws`, so the simulator makes the Add Trigger card a trigger head whose
@@ -465,12 +476,19 @@ otherwise do nothing. **What it actually does:**
 So `ADD_TRIGGER, DAMAGE, SPARK, BOMB` is `(ADD_TRIGGER→DAMAGE SPARK (BOMB))`:
 Damage and Spark both consumed by the scan, Bomb drawn as the payload.
 
-Metadata: `consumes = "scan"`, `consumes_skip = {MODIFIER, PASSIVE, OTHER,
-DRAW_MANY}`, `trigger = "hit_world" | "timer" | "death"`,
-`payload = "related_projectiles[2] or 1"`, `payload_fallback = "plain_cast"`.
-Simulator: a `"scan"` head walks the token list itself, applying the same type
-predicate, then opens `count` payloads — or, when no projectile-ish card
-remains, emits a plain cast node.
+Metadata, as shipped: the three cards get `trigger="…", scan=true` (and lose the
+bogus `payload=1`); every card with `related_projectiles` gets `rp=N`, which is
+both "can carry a trigger" and the payload count. The simulator's scan branch
+walks the deck with the same type predicate, removes the scan directly (no
+`draw()`, so it can never wrap), makes the target the expression head with the
+whole scan as its modifier prefix, and then either opens `rp` payloads or — when
+the `valid` check finds nothing projectile-ish left — emits a plain leaf.
+
+One engine behavior the model deliberately does not show: when the scan runs off
+the end of the deck it consumes nothing, but the modifiers it stepped over have
+*already had their bodies run*, and they are then drawn and run a second time.
+The harness confirms it (`{ADD_TRIGGER DAMAGE* DAMAGE}`). That is shot state,
+not deck consumption, so under the Track B definition no bracket says it.
 
 Tests: the three-card and four-card cases above; Add Trigger before a lone
 modifier (scan runs off the end, consumes nothing); trailing Add Trigger (the
@@ -723,10 +741,11 @@ throws in 4 and 5:
   projectiles and modded multicasts group correctly. This is Night's fix, and it
   is "some form of" point 2 arriving *in* the gating release rather than after
   it.
-- **D1** — Add Trigger, corrected: forward scan, variable-width consumption,
-  inline modifier application, `payload = related_projectiles[2] or 1`, and the
-  `valid` fallback where it casts the projectile plainly with no trigger at all.
-  Larger than the original estimate; still the clearest live bug in the mod.
+- **D1** — ~~Add Trigger, corrected~~ **done** (see §4 D1): forward scan,
+  variable-width consumption, inline modifier application,
+  `payload = related_projectiles[2] or 1`, and the `valid` fallback where it
+  casts the projectile plainly with no trigger at all. Cross-checked against the
+  real `gun.lua`, which is the first thing the harness has paid for.
 - **D5** — the two 0-charge gaps from §0.3: Greek wands honoring the filter, and
   the lost draw at deck end. *(point 3)*
 - **E1** — per-cast mana total vs. `mana_max`, warning-colored when over.

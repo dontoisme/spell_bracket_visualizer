@@ -188,6 +188,74 @@ passck("has_greek: TAU present", S.has_greek({ "LIGHT_BULLET", "TAU", "DAMAGE" }
 passck("has_greek: none", S.has_greek({ "LIGHT_BULLET", "DAMAGE" }) == false)
 passck("has_greek: DIVIDE is not Greek", S.has_greek({ "DIVIDE_10", "LIGHT_BULLET" }) == false)
 
+-- ---- ADD_TRIGGER family: the forward scan (see wand_structure.lua) ---------
+-- All nine wands below were run through Noita's real gun.lua with
+-- tools/gun_harness.lua and agree with it on which cards each expression
+-- CONSUMES, which is what a bracket means. The engine trace and this tree
+-- differ in what they SHOW: the engine spawns the trigger from the target's
+-- related_projectiles and never calls its action body, so the target never
+-- appears as "played" -- but it is removed from the deck, so it is the head
+-- here.
+
+check("add trigger: target is the scanned projectile, next card is the payload",
+	{ "ADD_TRIGGER", "LIGHT_BULLET", "BOMB" }, nil,
+	"{([ADD_TRIGGER]LIGHT_BULLET:trig1 BOMB)}")
+
+-- The scan steps over modifiers and CONSUMES them (the engine also runs each
+-- one against the trigger projectile), so they join the prefix, not a later cast.
+check("add trigger: scan swallows an intervening modifier",
+	{ "ADD_TRIGGER", "DAMAGE", "LIGHT_BULLET", "BOMB" }, nil,
+	"{([ADD_TRIGGER,DAMAGE]LIGHT_BULLET:trig1 BOMB)}")
+
+check("add trigger: scan swallows several modifiers",
+	{ "ADD_TRIGGER", "DAMAGE", "CRITICAL_HIT", "LIGHT_BULLET", "BOMB" }, nil,
+	"{([ADD_TRIGGER,DAMAGE,CRITICAL_HIT]LIGHT_BULLET:trig1 BOMB)}")
+
+-- A stepped-over Add Trigger is counted and consumed but never executed
+-- (the body excludes its own family from the inline modifier call).
+check("add trigger: a second add trigger is consumed by the scan",
+	{ "ADD_TRIGGER", "ADD_TRIGGER", "LIGHT_BULLET", "BOMB" }, nil,
+	"{([ADD_TRIGGER,ADD_TRIGGER]LIGHT_BULLET:trig1 BOMB)}")
+
+-- payload size is the TARGET's related_projectiles count, not a literal 1:
+-- Ball Lightning declares 3, so the trigger draws three 1-card payloads.
+check("add trigger: payload count comes from the target's rp",
+	{ "ADD_TRIGGER", "BALL_LIGHTNING", "LIGHT_BULLET", "LIGHT_BULLET", "LIGHT_BULLET" }, nil,
+	"{([ADD_TRIGGER]BALL_LIGHTNING:trig3 LIGHT_BULLET LIGHT_BULLET LIGHT_BULLET)}")
+
+-- With nothing projectile-ish left in the deck the body's `valid` check fails:
+-- it casts the consumed card plainly and spawns NO trigger (and draws no payload).
+check("add trigger: no card left to trigger, so it fires plainly",
+	{ "ADD_TRIGGER", "LIGHT_BULLET" }, nil,
+	"{[ADD_TRIGGER]LIGHT_BULLET}")
+
+-- Scan runs off the end of the deck -> the body consumes nothing at all, and
+-- the modifier it stepped over is still in the deck to be drawn normally.
+-- (The engine applies that modifier's body twice -- once in the scan, once when
+-- drawn -- but that is shot state, not deck consumption, so no bracket says it.)
+check("add trigger: scan off the end consumes nothing",
+	{ "ADD_TRIGGER", "DAMAGE" }, nil,
+	"{ADD_TRIGGER [DAMAGE]DAMAGE:dangling}")
+
+check("add trigger: alone on the wand, does nothing",
+	{ "ADD_TRIGGER" }, nil,
+	"{ADD_TRIGGER}")
+
+-- Add Timer / Add Death Trigger share the body; only the trigger kind differs.
+check("add timer: same scan, timer kind",
+	{ "ADD_TIMER", "LIGHT_BULLET", "BOMB" }, nil,
+	"{([ADD_TIMER]LIGHT_BULLET:trig1 BOMB)}")
+
+check("add death trigger: same scan, death kind",
+	{ "ADD_DEATH_TRIGGER", "LIGHT_BULLET", "BOMB" }, nil,
+	"{([ADD_DEATH_TRIGGER]LIGHT_BULLET:trig1 BOMB)}")
+
+-- A modifier BEFORE the add trigger prefixes it as usual, and stays in front
+-- of the scanned cards in the prefix list.
+check("add trigger: modifier before it keeps its place in the prefix",
+	{ "DAMAGE", "ADD_TRIGGER", "LIGHT_BULLET", "BOMB" }, nil,
+	"{([DAMAGE,ADD_TRIGGER]LIGHT_BULLET:trig1 BOMB)}")
+
 local function read_deck_keep(cards) -- {id,uses}; mirrors read_deck's Greek gate
 	local ids = {}
 	for _, c in ipairs(cards) do ids[#ids + 1] = c.id end

@@ -56,6 +56,23 @@ def read_gun_actions():
 # dynamic="random" -- these draw/cast additional cards chosen at random at
 #   cast time; no static structure exists for what they add.
 OVERRIDES = {
+    # scan=True -- the Add Trigger family. The draws/trigger regexes below see
+    # `add_projectile_trigger_hit_world(target, 1)` in these bodies and conclude
+    # "trigger head, 1-card payload drawn from the next slot". That is wrong in
+    # three ways, and produced the mis-grouping this override fixes:
+    #   * the body first scans FORWARD past MODIFIER/PASSIVE/OTHER/DRAW_MANY
+    #     cards (running each modifier inline against the trigger projectile)
+    #     and consumes the WHOLE scan plus the projectile it lands on -- a
+    #     variable number of cards, removed directly with no forced draw;
+    #   * the payload size is the TARGET's related_projectiles[2] (`rp` below),
+    #     not the literal 1 in the trigger call, which is repeated rp times;
+    #   * if no projectile-ish card remains in the deck afterwards, the body
+    #     casts the card plainly and spawns no trigger at all.
+    # `trigger` is kept (the kind); `payload` is dropped, since it comes from
+    # the target card at simulate time. See wand_structure.lua's scan branch.
+    "ADD_TRIGGER":       {"scan": True, "trigger": "hit_world"},
+    "ADD_TIMER":         {"scan": True, "trigger": "timer"},
+    "ADD_DEATH_TRIGGER": {"scan": True, "trigger": "death"},
     "DIVIDE_2":  {"chain": True},
     "DIVIDE_3":  {"chain": True},
     "DIVIDE_4":  {"chain": True},
@@ -102,7 +119,17 @@ def parse(src):
         if tg:
             rec["trigger"] = tg.group(1)
             rec["payload"] = int(tg.group(2))
+        # related_projectiles = {"file.xml"[, N]} -- N is how many trigger
+        # projectiles the Add Trigger family spawns off this card, each drawing
+        # a 1-card payload, so it is also this card's payload size when it is
+        # the scan target. Absent second element means 1.
+        rp = re.search(r'related_projectiles\s*=\s*\{\s*"[^"]*"\s*(?:,\s*(\d+)\s*)?\}', body)
+        if rp:
+            rec["rp"] = int(rp.group(1)) if rp.group(1) else 1
         rec.update(OVERRIDES.get(aid, {}))
+        if rec.get("scan"):
+            # the trigger call inside the scan body is not this card's payload
+            rec.pop("payload", None)
         out[aid] = rec
     return out
 
@@ -114,6 +141,8 @@ def to_lua(meta):
         if "draws" in rec:   parts.append("draws=%d" % rec["draws"])
         if "group" in rec:   parts.append("group=%d" % rec["group"])
         if "payload" in rec: parts.append('trigger="%s", payload=%d' % (rec["trigger"], rec["payload"]))
+        if "scan" in rec:    parts.append('trigger="%s", scan=true' % rec["trigger"])
+        if "rp" in rec:      parts.append("rp=%d" % rec["rp"])
         if "chain" in rec:   parts.append("chain=true")
         if "dynamic" in rec: parts.append('dynamic="%s"' % rec["dynamic"])
         return "{ " + ", ".join(parts) + " }"
@@ -124,6 +153,13 @@ def to_lua(meta):
         "-- draws: how many cards the action force-draws (1 = chains like a",
         "--        modifier; >=2 = multicast; -1 = the whole remaining deck).",
         "-- group: multicast draw count (DRAW_MANY). trigger/payload: nested sub-shot.",
+        "-- scan: the Add Trigger family -- steps forward over MODIFIER/PASSIVE/OTHER/",
+        "--        DRAW_MANY cards, consumes the whole scan plus the projectile it",
+        "--        lands on (directly, no forced draw, so it never wraps), then draws",
+        "--        that card's rp payloads. No trigger at all if no projectile-ish",
+        "--        card is left in the deck.",
+        "-- rp: related_projectiles count -- payload size when this card is the",
+        "--        target of a scan; also marks the card as able to carry a trigger.",
         "-- chain: attaches to the next card with NO forced draw (DIVIDE_*: an",
         "--        empty deck means it does nothing -- never wraps).",
         '-- dynamic: "conditional" (IF_*: skips deck cards when false at cast time)',
@@ -141,8 +177,10 @@ def main():
     open(OUT, "w").write(to_lua(meta))
     n_group = sum("group" in r for r in meta.values())
     n_trig = sum("payload" in r for r in meta.values())
+    n_scan = sum("scan" in r for r in meta.values())
+    n_rp = sum("rp" in r for r in meta.values())
     print(f"wrote structure_meta.lua: {len(meta)} actions "
-          f"({n_group} multicast, {n_trig} trigger)")
+          f"({n_group} multicast, {n_trig} trigger, {n_scan} scan, {n_rp} rp)")
 
 
 if __name__ == "__main__":
