@@ -260,6 +260,14 @@ local function walk(rows, node, ancestor_colors, depth)
 	-- or carried as payload
 	local label = mods .. name
 	if node.dangling then label = label .. "  (no projectile)" end
+	if node.kind == "reset" then
+		local n = node.cleared and #node.cleared or 0
+		if n > 0 then
+			label = label .. "  (clears " .. n .. " spells)"
+		else
+			label = label .. "  (nothing left to clear)"
+		end
+	end
 	if node.wrap then label = "~ " .. label end
 
 	rows[#rows + 1] = { bars = copy_list(ancestor_colors), label = label, color = type_color(node.atype) }
@@ -269,6 +277,23 @@ local function walk(rows, node, ancestor_colors, depth)
 		child_colors[#child_colors + 1] = nest_color(depth) -- rainbow even when wrapped
 		for _, ch in ipairs(node.children) do walk(rows, ch, child_colors, depth + 1) end
 	end
+end
+
+-- True when `nodes` contains a RESET node, at top level or nested inside a
+-- multicast/trigger's children (a RESET can sit anywhere a leaf can). Used by
+-- the cast header to explain WHY a wrapped cast wraps: RESET always wraps
+-- (files/wand_structure.lua's header -- the engine restores the discard pile
+-- to the deck immediately), and that is a different reason than running off
+-- the end of a normal deck, so the header says so instead of the generic
+-- "WRAPS!" line.
+local function has_reset(nodes)
+	for _, node in ipairs(nodes) do
+		if node.kind == "reset" then return true end
+		if node.children and #node.children > 0 and has_reset(node.children) then
+			return true
+		end
+	end
+	return false
 end
 
 -- Rows for the whole simulation: per-cast headers (when there is more than one
@@ -316,7 +341,13 @@ local function sim_rows(sim, cfg, always, tier_ids)
 			end
 			h = h .. "  mana " .. fmt(cast.mana or 0)
 			if over then h = h .. "  > max " .. fmt(cfg.mana_max) end
-			if cast.wrapped then h = h .. "  -- WRAPS! -> recharge" end
+			if cast.wrapped then
+				if has_reset(cast.nodes) then
+					h = h .. "  -- RESET restores the wand -> recharge"
+				else
+					h = h .. "  -- WRAPS! -> recharge"
+				end
+			end
 			rows[#rows + 1] = { bars = {}, label = h,
 				color = (cast.wrapped or over) and WRAP_COLOR or HEADER_COLOR, header = true }
 		end

@@ -296,6 +296,62 @@ do
 		headers[2].label:find("no spells left", 1, true) ~= nil, true)
 end
 
+-- ---- 8. T1.10c -- RESET's panel text: cleared count + the wrap header -------
+--
+-- RESET always wraps (cast.wrapped = true, since the engine restores the
+-- discard pile to the deck right after). The row must say how many spells it
+-- cleared (or that there was nothing left), the cleared slots must NOT appear
+-- as their own rows (they never executed), and the header must explain that
+-- THIS wrap is a RESET, not a normal run-off-the-end wrap.
+
+local function reset_node(cleared)
+	return { kind = "reset", id = "RESET", atype = "UTILITY", modifiers = {},
+		cleared = cleared, first = 2, last = 4, head = 2 }
+end
+
+do
+	local sim = { casts = { { nodes = { reset_node({ 3, 4 }) }, wrapped = true, mana = 20 } },
+		wrapped = true }
+	local cfg = { spells_per_cast = 1 }
+	local rows = T.sim_rows(sim, cfg, {})
+
+	local reset_row
+	for _, r in ipairs(rows) do
+		if r.label:find("Reset", 1, true) and not r.header then reset_row = r end
+	end
+	eq("reset: row present", reset_row ~= nil, true)
+	eq("reset: row says how many it clears",
+		reset_row and reset_row.label:find("(clears 2 spells)", 1, true) ~= nil, true)
+
+	local header = find_header(rows)
+	eq("reset: header shown (single wrapped cast)", header ~= nil, true)
+	eq("reset: header names RESET as the reason for the wrap",
+		header and header.label:find("RESET restores the wand", 1, true) ~= nil, true)
+	eq("reset: header keeps WRAP_COLOR", same_color(header and header.color, T.WRAP_COLOR), true)
+
+	local slot_rows = 0
+	for _, r in ipairs(rows) do
+		if r.label:find("^%s*3%f[%A]") or r.label:find("^%s*4%f[%A]") then slot_rows = slot_rows + 1 end
+	end
+	eq("reset: no child rows for the cleared slots", slot_rows, 0)
+end
+
+do
+	-- cleared = {}: RESET was the last card, nothing left to clear.
+	local sim = { casts = { { nodes = { reset_node({}) }, wrapped = true, mana = 20 } },
+		wrapped = true }
+	local cfg = { spells_per_cast = 1 }
+	local rows = T.sim_rows(sim, cfg, {})
+
+	local reset_row
+	for _, r in ipairs(rows) do
+		if r.label:find("Reset", 1, true) and not r.header then reset_row = r end
+	end
+	eq("reset (empty): row present", reset_row ~= nil, true)
+	eq("reset (empty): row says nothing left to clear",
+		reset_row and reset_row.label:find("(nothing left to clear)", 1, true) ~= nil, true)
+end
+
 print("")
 print(failures .. " failure(s)")
 os.exit(failures == 0 and 0 or 1)
