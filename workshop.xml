@@ -2,7 +2,7 @@
 	name="Spell Bracket Visualizer"
 	description="Draws your wand's cast structure onto the inventory UI: which spells fire together, which modifiers feed which projectile, what a multicast gathers - and when your wand WRAPS.\n\nA structure viewer for learning and building wands, not a damage evaluator.\n\nFull description below."
 	tags="quality of life"
-	dont_upload_folders="tools|docs|.claude|.git|dist"
+	dont_upload_folders="tools|docs|.claude|.git|dist|.gun_ref"
 	dont_upload_files=".gitignore|CLAUDE.md|NEXT_UPDATE_PLAN.md|INSTALL.txt"
 >
 </Mod>
