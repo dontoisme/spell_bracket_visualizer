@@ -1,48 +1,54 @@
 // Steam discussion post for v1.4.0 -- paste everything below the rule into a
 // new Workshop discussion thread. Goes up BEFORE the Workshop upload (promised
-// in the Sep 3 reply). Written for a player who knows wands, not the engine.
+// in the Sep 3 reply). Release-notes voice: what changed, by the point it
+// answers. No first person, no notes about what was left alone.
 //
 // Suggested title:
 //   1.4.0 before it hits the Workshop: what a bracket means now
 //
 // One line per paragraph on purpose: Steam preserves newlines, so hard-wrapped
-// text breaks mid-sentence. Longer form lives in ADVANCED_SCENARIOS_PLAN.md 8.
+// text breaks mid-sentence. Long form with the reasoning is in
+// ADVANCED_SCENARIOS_PLAN.md section 8.
 // -------------------------------------------------------------------------
 
-[b]Re: running the game's code[/b]
+[b]Running the game's code (UserK, KoObEy)[/b]
 
-UserK and KoObEy were right and I was wrong to push back. The mod's test suite now runs Noita's own cast code alongside mine and compares what each one pulls out of the wand, spell by spell. I'm still not hooking the live gun system while you cast -- that's Wand DBG's job -- but "does my answer match the game's" is something I check now instead of assume.
-
-It found three things I had wrong, all fixed:
+The test suite now runs Noita's own cast code alongside the mod and compares what each one pulls out of the wand, spell by spell. Three bugs it found, all fixed:
 
 [list]
-[*]Alpha, Gamma and Tau were merged into the cast after them, which pushed every later cast boundary one spell down the wand -- and on a wand ending in a Greek, tagged it "wraps to front" when it doesn't wrap. "Spark Bolt, Alpha" was drawn as one wrapping cast; it's two casts and no wrap. Wrong in every release so far.
-[*]Add Trigger now scans past the modifiers in front of the projectile and brackets the whole group. "Add Trigger, Damage Plus, Spark Bolt, Bomb" was drawn as two casts; it's one.
-[*]A spell with 0 charges at the end of a wand no longer reports a wrap. The game skips it and draws the next spell instead, and if there isn't one, nothing wraps.
+[*]Alpha, Gamma and Tau no longer merge into the cast after them. Every cast boundary past a Greek was one spell too far down the wand, and a wand ending in a Greek was tagged "wraps to front" when it does not wrap.
+[*]Add Trigger, Add Timer and Add Death Trigger now scan past the modifiers in front of the projectile and bracket the whole group. "Add Trigger, Damage Plus, Spark Bolt, Bomb" was drawn as two casts; it is one.
+[*]A spell with 0 charges at the end of a wand no longer reports a wrap.
 [/list]
 
-[b]Re: what a bracket means[/b]
+[b]What a bracket means (KoObEy #4)[/b]
 
-This is the one I'd like argued with before it reaches the Workshop. A bracket now means exactly one thing:
+A bracket now means exactly one thing:
 
 [quote]A bracket holds exactly the spells the game took out of the wand while casting the first spell in the bracket. A spell that gets re-cast by reference (Alpha, Omega, ...) was never taken out, so it is never inside a bracket -- the panel names it as a copy instead.[/quote]
 
-What follows from that: a trigger's payload sits inside it, because the trigger pulls it out of the wand even though it fires later. Divide By and Add Trigger sit in front of what they pull. Greeks get no bracket around the spell they copy. Reset's bracket is the whole rest of the wand. If one of the other readings teaches better, now is the time.
+What follows from it: a trigger's payload sits inside the trigger, because the trigger pulls it out of the wand even though it fires later. Divide By and Add Trigger sit in front of what they pull. Greeks get no bracket around the spell they copy. Reset's bracket is the whole rest of the wand.
 
-[b]Re: wands the mod can't read[/b]
+Open for argument before it reaches the Workshop, since everything else hangs off it.
 
-Every spell now carries a confidence rating. A wand holding something I can't follow exactly -- a Greek, a Requirement spell, a random draw, an unknown modded spell -- draws no brackets at all, tags itself "? uncertain", and names the culprit in the panel. A blank row beats a confident wrong one.
+[b]Wands the mod can't read (KoObEy #1)[/b]
 
-Two exceptions I'll defend: Add Trigger keeps its brackets, because I can follow it exactly now. Divide By keeps them in front of a plain projectile and drops them in front of a multicast, trigger or modifier -- there the game re-runs the divided spell and pulls fresh spells each time, which I can't draw yet.
+Every spell now carries a confidence rating. A wand holding something the mod cannot follow exactly -- a Greek, a Requirement spell, a random draw, an unknown modded spell -- draws no brackets at all, tags itself "? uncertain", and names the spell responsible in the panel. A blank row beats a confident wrong one. A setting draws them anyway for anyone who wants the approximation.
 
-[b]Re: modded spells[/b]
+Two exceptions. Add Trigger keeps its brackets, now that it can be followed exactly. Divide By keeps them in front of a plain projectile, and drops them in front of a multicast, trigger or modifier, where the game re-runs the divided spell and pulls fresh spells each time.
 
-Night, you were exactly right. The mod had no idea what modded spells were and treated them as projectiles, which is why one cast drew as several. It now reads the game's live spell list, which includes everything other mods add, so modded modifiers and multicasts group properly. How many spells a modded spell pulls still isn't known, so those wands go uncertain rather than guess. Tell me which spell mods you play with and I'll test against them.
+[b]0 charges (KoObEy #3)[/b]
 
-[b]Re: mana[/b]
+Depleted spells are handled the way the game handles them: skipped, with the next spell drawn in their place. If the wand runs out during that skip the draw is lost and nothing wraps. "Greek Wands: Keep Depleted Spells" no longer does anything and will be removed next release.
 
-Each cast's cost is now shown and compared against the wand's max mana, with a warning when a cast can never afford itself. Not your current mana -- that moves while you play, and I'd rather show something always true.
+[b]Modded spells (Night, KoObEy #2)[/b]
+
+Modded spells were being treated as projectiles, which is why one cast could draw as several on a modded wand. The mod now reads the game's live spell list, which includes everything other mods add, so modded modifiers and multicasts group properly. How many spells a modded spell pulls is still unknown, so those wands are marked uncertain rather than guessed at.
+
+[b]Mana (KoObEy #5)[/b]
+
+Each cast's cost is shown and compared against the wand's max mana, with a warning on a cast that can never afford itself.
 
 [b]Where it is[/b]
 
-1.4.0 is on GitHub now if you want to try it before the Workshop update. Happy to argue about any of it first, especially the bracket definition, since everything else hangs off it.
+1.4.0 is on GitHub now, ahead of the Workshop update. Reports of spell mods to test against are welcome.
