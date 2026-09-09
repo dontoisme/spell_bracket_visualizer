@@ -954,6 +954,24 @@ so a reported wand can be reproduced from its spell list without the game.
 
 ## 7. Verification list
 
+> **In-game results, 2026-09-08 (first 1.4.0 run, vanilla + Tinker With Wands
+> Everywhere).** Confirmed: `runtime actions: 422 loaded (ok)` — the live
+> `actions` read works in the mod's VM; `mana_max=2221 charge=1104` readable
+> off `AbilityComponent`; Add Trigger wand groups as one cast with the prefix
+> outside (`Add Trigger, Damage Plus, Spark Bolt, Bomb`); a 0-charge Bomb as
+> that trigger's payload loses the draw and does **not** wrap — matches the
+> real gun.lua, now pinned as a case; `Double Spell, Thunder Charge ×2` shows
+> `mana 240 > max 212` in orange with the mana footnote. Two in-game bugs found
+> and fixed the same session: the footnote naming the uncertain spell was gated
+> on `any_dynamic` (Alpha never triggered it), and the `?` marker sat on top of
+> the last card (now a `? uncertain` tag in the box header band).
+> **Not yet seen in-game:** RESET (not offered by the spell-lab picker), the
+> relocated `? uncertain` tag, a modded spell (needs a Workshop spell mod), and
+> the Better Font pass on the new panel rows. **Open call:** whether a trigger
+> whose payload draw hit a depleted card should still bracket the spent slot
+> (today it draws nothing; a `(payload depleted)` panel note is the cheap
+> alternative).
+
 Most of what this section originally listed is done. `tools/extract_gun.py`
 already puts `gun.lua` and `gun_actions.lua` in `.gun_ref/` (§0.1), and every
 question under the old item 1 has been answered and folded into §2, §4 and §5:
