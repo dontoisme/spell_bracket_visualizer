@@ -363,6 +363,39 @@ Two consequences worth recording:
   copies that idiom has the same blind spot. Record it as
   `dynamic = "reflect-blind"` rather than pretending the record is complete.
 
+**Another mod may already have wrapped every `action` function.** Spell Lab
+(Workshop 2297568811) appends this to `gun_actions.lua`:
+
+```lua
+for k,v in pairs( actions ) do
+    local original_function = v.action
+    v.action = function(...)
+        if not reflecting then action_called( v ) end
+        current_draw_depth = ( current_draw_depth or 0 ) + 1
+        local result = original_function(...)
+        current_draw_depth = current_draw_depth - 1
+        return result
+    end
+end
+```
+
+So `actions[i].action` is not necessarily the body the game shipped — the probe
+may be calling a chain of other mods' wrappers, and A1's runtime read sees the
+wrapped table too. Spell Lab's wrapper is benign (it honors `reflecting`, and
+`action_called` is a no-op unless Spell Lab's UI is open), and it is a useful
+existence proof that this pattern is in the wild. But the probe must not assume
+it holds the vanilla body: `current_draw_depth` is a global another mod expects
+to balance, and a wrapper that does not honor `reflecting` would fire real side
+effects during a probe. Sandbox the globals a wrapper might touch, and record
+in the probe result whether the body was wrapped (compare `#actions` against the
+vanilla 422 and, where cheap, check whether the function is the one loaded from
+`.gun_ref/`).
+
+Also confirms the A1 load timing is standard practice: Advanced Spell Inventory
+(3267869519) does `dofile_once("data/scripts/gun/gun_actions.lua")` with the
+comment *"Do this here so mods have enough time to do their gun_actions.lua mod
+appends"* — the same reason `runtime_meta.load()` waits for the first update.
+
 The sandbox (`files/action_probe.lua`, pure Lua, no game API so it runs under
 `lua5.1`/`5.4` in the tools):
 
