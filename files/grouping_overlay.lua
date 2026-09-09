@@ -941,7 +941,7 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 		local tier_ids_input = {}
 		for _, id in ipairs(wd.tokens) do tier_ids_input[#tier_ids_input + 1] = id end
 		for _, id in ipairs(wd.always) do tier_ids_input[#tier_ids_input + 1] = id end
-		wd.tier, wd.tier_ids = wand_structure.wand_tier(tier_ids_input, emeta)
+		wd.tier, wd.tier_ids = wand_structure.wand_tier(tier_ids_input, emeta, #wd.tokens)
 		wd.cfg = read_config(wd.e)
 		wd.h, wd.sprite = wand_art_wh(gui, wd.e)
 		-- ignore_depleted (default on) is the "model the engine" setting: ON

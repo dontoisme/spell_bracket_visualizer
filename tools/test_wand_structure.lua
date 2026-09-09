@@ -415,12 +415,37 @@ local function eq(name, got, expect)
 		ok and "PASS" or "FAIL", name, tostring(expect), tostring(got)))
 end
 
-local function check_tier(name, ids, m, expect_tier, expect_offenders)
-	local t, off = S.wand_tier(ids, m or meta)
+local function check_tier(name, ids, m, expect_tier, expect_offenders, deck_len)
+	local t, off = S.wand_tier(ids, m or meta, deck_len)
 	local got = t .. " {" .. table.concat(off, ",") .. "}"
 	local expect = expect_tier .. " {" .. table.concat(expect_offenders, ",") .. "}"
 	eq(name, got, expect)
 end
+
+-- A DIVIDE_* prefixes the next card in the model, but the engine re-invokes
+-- that card's body, drawing fresh cards each time. Verified against the real
+-- gun.lua: the model holds only when the next card draws nothing itself, so a
+-- Divide standing before anything that draws/triggers/scans/clears makes the
+-- wand approximate and its brackets hide. See wand_structure's
+-- divide_diverges_before and the KNOWN notes in test_gun_differential.lua.
+check_tier("divide before a plain projectile stays exact",
+	{ "DIVIDE_2", "LIGHT_BULLET" }, nil, "exact", {})
+check_tier("divide before a multicast is approximate",
+	{ "DIVIDE_2", "BURST_2", "LIGHT_BULLET", "SPITTER" }, nil, "approximate", { "DIVIDE_2" })
+check_tier("divide before a trigger is approximate",
+	{ "DIVIDE_2", "LIGHT_BULLET_TRIGGER", "SPITTER" }, nil, "approximate", { "DIVIDE_2" })
+check_tier("divide before an add trigger is approximate",
+	{ "DIVIDE_2", "ADD_TRIGGER", "LIGHT_BULLET", "BOMB" }, nil, "approximate", { "DIVIDE_2" })
+check_tier("divide before a modifier is approximate",
+	{ "DIVIDE_2", "DAMAGE", "LIGHT_BULLET" }, nil, "approximate", { "DIVIDE_2" })
+check_tier("divide before another divide stays exact",
+	{ "DIVIDE_2", "DIVIDE_2", "LIGHT_BULLET" }, nil, "exact", {})
+check_tier("a trailing divide stays exact",
+	{ "LIGHT_BULLET", "DIVIDE_2" }, nil, "exact", {})
+-- deck_len bounds the neighbour check: an always-cast card appended after the
+-- deck is not adjacent to the deck's last card.
+check_tier("divide last in deck does not pair with an always-cast card",
+	{ "DIVIDE_2", "BURST_2" }, nil, "exact", {}, 1)
 
 eq("tier: nil record is unknown", S.tier(nil), "unknown")
 eq("tier: no tier field is exact", S.tier(meta["LIGHT_BULLET"]), "exact")

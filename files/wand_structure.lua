@@ -207,14 +207,38 @@ function M.tier(rec)
 	return t
 end
 
+-- A DIVIDE_* is modeled as a plain prefix on the next card (meta chain=true),
+-- but the engine re-invokes that card's BODY several times, drawing fresh
+-- cards on every invocation after the first. Checked against the real gun.lua
+-- (tools/test_gun_differential.lua): the prefix model matches only when the
+-- next card draws nothing of its own. DIVIDE -> plain projectile agrees, and
+-- so does DIVIDE -> DIVIDE; DIVIDE followed by anything that draws, triggers,
+-- scans or clears the deck does not. Until the real repeat model lands
+-- (docs/ADVANCED_SCENARIOS_PLAN.md Sec.4 D2) such a wand is only approximate,
+-- so its slot brackets hide themselves rather than assert a grouping the
+-- engine won't honor.
+local function divide_diverges_before(m)
+	return m ~= nil and (m.draws ~= nil or m.payload ~= nil
+		or m.scan ~= nil or m.consumes ~= nil)
+end
+
 -- The tier of a whole wand: the worst tier among its ids, plus the ids that
 -- are responsible (worse than exact), de-duplicated in order of first
 -- appearance so the panel footnote can name them. `meta` is indexed directly,
 -- so the runtime_meta merged table's __index fallback participates.
-function M.wand_tier(ids, meta)
+-- `deck_len` bounds the neighbour check above to the real deck: callers append
+-- the always-cast ids, which are not adjacent to the last deck card.
+function M.wand_tier(ids, meta, deck_len)
 	local worst, offenders, seen = "exact", {}, {}
-	for _, id in ipairs(ids) do
+	local n = deck_len or #ids
+	for i, id in ipairs(ids) do
 		local t = M.tier(meta[id])
+		if t == "exact" then
+			local m = meta[id]
+			if m and m.chain and i < n and divide_diverges_before(meta[ids[i + 1]]) then
+				t = "approximate"
+			end
+		end
 		if t ~= "exact" then
 			if not seen[id] then
 				seen[id] = true

@@ -201,9 +201,12 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
   modifiers and multicasts group the way vanilla ones do -- but how many cards a
   modded spell really draws isn't known yet, so a wand holding one is marked
   uncertain and hides its slot brackets by default (see the setting above).
-- A Divide By followed by a multicast or trigger is approximated: the game
-  re-invokes the divided card, drawing *fresh* cards on each invocation; the
-  panel shows the first invocation's grouping.
+- A Divide By standing before a spell that draws anything itself (a multicast,
+  a trigger, an Add Trigger, a modifier) is only approximated: the game
+  re-invokes the divided spell, drawing *fresh* cards on each invocation, and
+  the panel shows the first invocation's grouping. Those wands are marked
+  uncertain, so their slot brackets hide by default. A Divide By in front of a
+  plain projectile is exact and keeps its brackets.
 - The panel can't know your mana, so a cast that fizzles mid-way on mana may
   differ from the simulation. (Depleted 0-charge spells *are* handled — see
   the settings above.)

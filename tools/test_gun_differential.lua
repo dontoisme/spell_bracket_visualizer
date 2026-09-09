@@ -107,6 +107,16 @@ local CASES = {
 	  tokens = { "DIVIDE_2", "LIGHT_BULLET" }, spc = 1, casts = 2 },
 	{ name = "DIVIDE inside a multicast",
 	  tokens = { "BURST_2", "DIVIDE_2", "LIGHT_BULLET", "SPITTER" }, spc = 1, casts = 2 },
+	-- These two are the reason DIVIDE-before-a-drawing-card is tiered
+	-- approximate. They FAIL on purpose and are listed in KNOWN: the harness is
+	-- what proves the prefix model breaks here, so the tier rule is evidence
+	-- rather than assertion.
+	{ name = "DIVIDE before a multicast: engine re-invokes and draws fresh cards",
+	  tokens = { "DIVIDE_2", "BURST_2", "LIGHT_BULLET", "SPITTER", "LIGHT_BULLET", "SPITTER" },
+	  spc = 1, casts = 1 },
+	{ name = "DIVIDE before a trigger: same, the payload draw is re-run",
+	  tokens = { "DIVIDE_2", "LIGHT_BULLET_TRIGGER", "SPITTER", "LIGHT_BULLET" },
+	  spc = 1, casts = 1 },
 	{ name = "trailing DIVIDE does not wrap",
 	  tokens = { "LIGHT_BULLET", "DIVIDE_2" }, spc = 1, casts = 3 },
 	{ name = "wrap restores slot order",
@@ -249,6 +259,20 @@ local MANA_CASES = {
 -- comments are stripped before the draws regex runs, and RANDOM_MODIFIER now
 -- carries draws=1, tier="approximate". This test caught both.)
 local KNOWN = {
+	["DIVIDE before a multicast: engine re-invokes and draws fresh cards"] =
+		"SIMULATOR, and known: DIVIDE_* is modeled as a plain prefix on the next "
+		.. "card, but the engine invokes that card's body `count` times (the first "
+		.. "invocation silent, under dont_draw_actions) and every later invocation "
+		.. "draws FRESH cards -- so a multicast after a divide gathers a second "
+		.. "full group the prefix model never sees. The real repeat model is "
+		.. "docs/ADVANCED_SCENARIOS_PLAN.md Sec.4 D2, v1.5.0. Until then "
+		.. "wand_structure.wand_tier marks any wand whose divide stands before a "
+		.. "card that draws/triggers/scans/clears as approximate, so the mod hides "
+		.. "its slot brackets rather than drawing this grouping.",
+	["DIVIDE before a trigger: same, the payload draw is re-run"] =
+		"SIMULATOR, same cause as the multicast case above -- the trigger's "
+		.. "payload draw fires again on the divide's second invocation. Covered by "
+		.. "the same approximate tier; see Sec.4 D2.",
 	["greek wand: depleted card still retried past"] =
 		"ENGINE, not the simulator -- and not a regression from the Alpha/Gamma/"
 		.. "Tau fix, just newly VISIBLE because of it. TAU's body reads deck[1] "
