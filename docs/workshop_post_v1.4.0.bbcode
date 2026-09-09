@@ -1,51 +1,48 @@
 // Steam discussion post for v1.4.0 -- paste everything below the rule into a
-// new Workshop discussion thread. Answers the Sep 2-3 feedback thread and goes
-// up BEFORE the Workshop upload (promised in the Sep 3 reply).
+// new Workshop discussion thread. Goes up BEFORE the Workshop upload (promised
+// in the Sep 3 reply). Written for a player who knows wands, not the engine.
 //
 // Suggested title:
-//   1.4.0 before it hits the Workshop: what a bracket means, and what running
-//   your code found
+//   1.4.0 before it hits the Workshop: what a bracket means now
 //
 // One line per paragraph on purpose: Steam preserves newlines, so hard-wrapped
-// text breaks mid-sentence. Source of truth is ADVANCED_SCENARIOS_PLAN.md 8.
+// text breaks mid-sentence. Longer form lives in ADVANCED_SCENARIOS_PLAN.md 8.
 // -------------------------------------------------------------------------
 
-Alright — I dove in, and I owe a couple of you a correction before anything else.
+[b]Re: running the game's code[/b]
 
-[b]On running the game's code (UserK, and KoObEy agreeing)[/b]
+UserK and KoObEy were right and I was wrong to push back. The mod's test suite now runs Noita's own cast code alongside mine and compares what each one pulls out of the wand, spell by spell. I'm still not hooking the live gun system while you cast -- that's Wand DBG's job -- but "does my answer match the game's" is something I check now instead of assume.
 
-The mod's test suite now pulls Noita's own gun.lua and gun_actions.lua out of data.wak and runs the real cast code outside the game and will get deprecated in a future release.
+It found three things I had wrong, all fixed:
 
 [list]
-[*]Alpha, Gamma and Tau were being merged into the cast after them, which shoved every cast boundary further down the wand -- and on a wand ending in a Greek it put a "wraps to front" tag on a wand that doesn't wrap. "Spark Bolt, Alpha" was drawn as one cast that wraps; it is two casts and no wrap. The cause: those three don't draw a spell of their own, because that call is commented out in the game's source, and the script that builds my spell table was reading the commented-out line. Wrong in every release so far.
-[*]Add Trigger now scans over the modifiers to wrap the group correctly.
-[*]A spell with 0 charges at the end of the deck doesn't wrap the wand. The retry that skips past it can't reload.
+[*]Alpha, Gamma and Tau were merged into the cast after them, which pushed every later cast boundary one spell down the wand -- and on a wand ending in a Greek, tagged it "wraps to front" when it doesn't wrap. "Spark Bolt, Alpha" was drawn as one wrapping cast; it's two casts and no wrap. Wrong in every release so far.
+[*]Add Trigger now scans past the modifiers in front of the projectile and brackets the whole group. "Add Trigger, Damage Plus, Spark Bolt, Bomb" was drawn as two casts; it's one.
+[*]A spell with 0 charges at the end of a wand no longer reports a wrap. The game skips it and draws the next spell instead, and if there isn't one, nothing wraps.
 [/list]
 
-[b]What a bracket means (KoObEy #4)[/b]
+[b]Re: what a bracket means[/b]
 
-This is the important one, and I'd like you to argue with the answer before it reaches the Workshop. Of your four readings I'm taking the fourth — no longer in the deck after the first spell executed — because this mod is a deck-stream visualizer and consumption is the only one of the four it can honestly claim to track.
+This is the one I'd like argued with before it reaches the Workshop. A bracket now means exactly one thing:
 
-[quote]A bracket encloses exactly the cards the engine removed from the deck while executing the bracket's head card. A card a spell re-casts by reference (Alpha, Omega, ...) is never inside a bracket — the panel names it as a copy instead.[/quote]
+[quote]A bracket holds exactly the spells the game took out of the wand while casting the first spell in the bracket. A spell that gets re-cast by reference (Alpha, Omega, ...) was never taken out, so it is never inside a bracket -- the panel names it as a copy instead.[/quote]
 
-The consequences are load-bearing, so worth saying out loud: trigger payloads stay nested, because they're consumed by the forced draw even though they fire later; Divide By and Add Trigger are prefixes; Greeks get no bracket at all around the spell they copy. Reset's bracket is the entire rest of the wand, because that is exactly what it removes. If you think a different one of the four is the better teaching choice, now is the time to say so.
+What follows from that: a trigger's payload sits inside it, because the trigger pulls it out of the wand even though it fires later. Divide By and Add Trigger sit in front of what they pull. Greeks get no bracket around the spell they copy. Reset's bracket is the whole rest of the wand. If one of the other readings teaches better, now is the time.
 
-[b]0 charges (KoObEy #3)[/b]
+[b]Re: wands the mod can't read[/b]
 
-You were right, and my first pass at this concluded it was already handled. It wasn't, in two places: on any wand carrying a Greek the depleted-spell handling silently switched itself off, and a depleted spell at the very end of the deck ate a draw instead of wrapping. The mod now does what the engine does — skip it, draw the next one, and don't wrap if the deck runs out mid-retry.
+Every spell now carries a confidence rating. A wand holding something I can't follow exactly -- a Greek, a Requirement spell, a random draw, an unknown modded spell -- draws no brackets at all, tags itself "? uncertain", and names the culprit in the panel. A blank row beats a confident wrong one.
 
-[b]No brackets on OTHER-type spells (KoObEy #1)[/b]
+Two exceptions I'll defend: Add Trigger keeps its brackets, because I can follow it exactly now. Divide By keeps them in front of a plain projectile and drops them in front of a multicast, trigger or modifier -- there the game re-runs the divided spell and pulls fresh spells each time, which I can't draw yet.
 
-Adopting it. Every spell carries a confidence tier now, and a wand holding anything the mod can't follow exactly draws no slot brackets at all — with a small "? uncertain" tag saying the row is blank because it's uncertain, not broken, and a footnote in the panel naming the spells responsible.
+[b]Re: modded spells[/b]
 
-Where I differ from you is Add Trigger, and half of Divide By. Having actually read both bodies I can follow Add Trigger exactly, so it keeps its brackets. Divide splits: in front of a plain projectile the model matches the engine, so those keep their brackets; in front of a multicast, a trigger or a modifier it doesn't — the game re-invokes the divided spell and draws fresh cards each time — so those wands hide. I only found that boundary by testing it against the real code, which is the point. The exemption has to keep earning itself, and where it stopped earning it, the brackets went away.
+Night, you were exactly right. The mod had no idea what modded spells were and treated them as projectiles, which is why one cast drew as several. It now reads the game's live spell list, which includes everything other mods add, so modded modifiers and multicasts group properly. How many spells a modded spell pulls still isn't known, so those wands go uncertain rather than guess. Tell me which spell mods you play with and I'll test against them.
 
-[b]Modded spells (Night, KoObEy #2)[/b]
+[b]Re: mana[/b]
 
-Night, your diagnosis was exact: the mod had no idea what modded spells were and defaulted them to projectiles, which is why one cast rendered as several. The first half ships now — the mod reads the game's live spell table, which includes everything other mods appended, so modded modifiers and multicasts get their real types. How many cards a modded spell actually draws still isn't known, so those wands are marked uncertain and hide their brackets rather than guess. Next release does KoObEy's tooltip trick properly: running an unknown spell in an empty shot state and recording what it does to the deck. If you tell me which spell mods you play with, I'll test against those specifically.
+Each cast's cost is now shown and compared against the wand's max mana, with a warning when a cast can never afford itself. Not your current mana -- that moves while you play, and I'd rather show something always true.
 
-[b]Mana (KoObEy #5)[/b]
+[b]Where it is[/b]
 
-Taking the middle ground you suggested — each cast's cost summed and compared against the wand's max mana, with the cast highlighted when it can never afford itself. Not simulating the live pool; it flickers as it regenerates, and I'd rather show something always-true than something usually-true.
-
-That covers 1-3, plus 4 and 5. The build is on GitHub now if you want to try it before it goes to the Workshop -- the releases page on the repo linked from the mod page. I'd rather argue about any of this first, particularly the bracket definition, since everything else hangs off it.
+1.4.0 is on GitHub now if you want to try it before the Workshop update. Happy to argue about any of it first, especially the bracket definition, since everything else hangs off it.
