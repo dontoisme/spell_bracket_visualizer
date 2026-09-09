@@ -75,7 +75,7 @@ All settings are in the mod settings menu and apply immediately, no restart:
 
 [b]Add Trigger, Add Timer, Add Death Trigger grouped correctly.[/b] They scan forward over modifiers, consume the whole scan plus the projectile as their target, and nest correctly. Fixed cases where the next card was treated as the payload and the following one fell into a new cast.
 
-[b]Greek chaining corrected.[/b] Alpha, Gamma, Tau no longer chain onto the next spell (their draw was removed from the game's source). Random Modifier now chains correctly (it runs a random modifier, which nearly all draw one card).
+[b]Greek spells no longer swallow the spell after them.[/b] Alpha, Gamma and Tau were shown merging into the next spell's cast, which moved every cast boundary after them and could put a "wraps to front" tag on a wand that never wraps. They fire as their own cast. Random Modifier had the opposite problem and now correctly joins the next spell.
 
 [b]Reset shows brackets over all remaining spells, and the panel says it restored the wand.[/b]
 

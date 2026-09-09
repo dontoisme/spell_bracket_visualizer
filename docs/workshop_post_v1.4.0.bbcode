@@ -14,13 +14,11 @@ Alright — I dove in, and I owe a couple of you a correction before anything el
 
 [b]On running the game's code (UserK, and KoObEy agreeing)[/b]
 
-I said I wasn't going to do this. I was wrong to bundle two separate things together: keeping this mod a lightweight panel, and guessing at the draw rules myself. I kept the first and dropped the second. The mod's test suite now pulls Noita's own gun.lua and gun_actions.lua out of data.wak and runs the real cast code outside the game, so my simulator gets diffed against the actual engine, deck by deck, every time I change it. I'm still not hooking the live gun system while you're casting — that's Wand DBG's job and I don't want to touch real cast state — but "does my answer match the game's answer" is something I check now instead of assert.
-
-It immediately turned up things I had flat wrong. Three, all fixed in this release:
+The mod's test suite now pulls Noita's own gun.lua and gun_actions.lua out of data.wak and runs the real cast code outside the game and will get deprecated in a future release.
 
 [list]
-[*]Alpha, Gamma and Tau were chaining onto the next spell. They don't. Their own draw call is commented out in the game's source, and the script that builds my spell table was reading the commented-out line. That bug has been in every release so far.
-[*]Add Trigger doesn't take the next card as its payload. It scans forward over modifiers, consumes that whole run plus the projectile, and the payload size comes from the projectile itself. "Add Trigger, Damage Plus, Spark Bolt, Bomb" was drawing as two casts. It's one.
+[*]Alpha, Gamma and Tau were being merged into the cast after them, which shoved every cast boundary further down the wand -- and on a wand ending in a Greek it put a "wraps to front" tag on a wand that doesn't wrap. "Spark Bolt, Alpha" was drawn as one cast that wraps; it is two casts and no wrap. The cause: those three don't draw a spell of their own, because that call is commented out in the game's source, and the script that builds my spell table was reading the commented-out line. Wrong in every release so far.
+[*]Add Trigger now scans over the modifiers to wrap the group correctly.
 [*]A spell with 0 charges at the end of the deck doesn't wrap the wand. The retry that skips past it can't reload.
 [/list]
 
