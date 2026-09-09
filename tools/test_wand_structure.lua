@@ -272,6 +272,13 @@ check("add trigger: a second add trigger is consumed by the scan",
 
 -- payload size is the TARGET's related_projectiles count, not a literal 1:
 -- Ball Lightning declares 3, so the trigger draws three 1-card payloads.
+-- Found in-game: the payload draw pops a 0-charge Bomb, the retry finds the
+-- deck empty, the payload is lost and the wand does NOT wrap. The trigger still
+-- fires (with nothing under it); the spent slot is consumed, not bracketed.
+check("add trigger: payload onto a depleted card is lost, no wrap",
+	{ "ADD_TRIGGER", "DAMAGE", "LIGHT_BULLET", "BOMB" }, 1,
+	"{[ADD_TRIGGER,DAMAGE]LIGHT_BULLET:trig1}", { [4] = 0 })
+
 check("add trigger: payload count comes from the target's rp",
 	{ "ADD_TRIGGER", "BALL_LIGHTNING", "LIGHT_BULLET", "LIGHT_BULLET", "LIGHT_BULLET" }, nil,
 	"{([ADD_TRIGGER]BALL_LIGHTNING:trig3 LIGHT_BULLET LIGHT_BULLET LIGHT_BULLET)}")

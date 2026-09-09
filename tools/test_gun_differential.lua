@@ -135,6 +135,13 @@ local CASES = {
 	{ name = "forced draw onto a depleted last card dangles, does NOT wrap",
 	  tokens = { "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, spc = 1, casts = 4,
 	  uses = { [3] = 0 } },
+	-- Found in-game (1.4.0 first run): the trigger's payload draw is the forced
+	-- draw that pops the spent Bomb; the retry finds the deck empty and the
+	-- payload is simply lost. All four slots leave the deck, nothing wraps, and
+	-- only Add Trigger is charged (the scan removed Damage and Spark Bolt).
+	{ name = "add trigger payload onto a depleted card: lost, does NOT wrap",
+	  tokens = { "ADD_TRIGGER", "DAMAGE", "LIGHT_BULLET", "BOMB" }, spc = 1, casts = 3,
+	  uses = { [4] = 0 } },
 	{ name = "greek wand: depleted card still retried past",
 	  tokens = { "TAU", "LIGHT_BULLET", "DAMAGE", "LIGHT_BULLET" }, spc = 1, casts = 3,
 	  uses = { [3] = 0 } },
