@@ -1012,74 +1012,102 @@ v1.5.0 — not anything in v1.4.0:
 
 Per the Sep 3 reply (*"I'll make a post after I have a sense of things but
 before releasing anything to have a discussion"*), this goes up **before** 1.4.0
-ships, and asks for disagreement rather than announcing a changelog. Draft:
+ships and asks for disagreement rather than announcing a changelog. Light BBCode
+so it renders in a Steam discussion. Text below the rule is the post itself.
 
 ---
 
-Alright — I dove in. Thanks again for this thread; a couple of you were right
-about something I pushed back on, so let me start there.
+Alright — I dove in, and I owe a couple of you a correction before anything else.
 
-**On running the game's code (UserK, and KoObEy agreeing).** I said I wasn't
-going to do this. I was wrong to bundle two separate things together: keeping
-this mod a lightweight panel, and guessing at the draw rules myself. I've kept
-the first and dropped the second. The mod now extracts Noita's own `gun.lua` and
-`gun_actions.lua` from `data.wak` and runs the real cast code outside the game,
-so my simulator gets diffed against the actual engine, deck by deck, as a test.
-I'm still not hooking the live gun system while you're casting — that's Wand
-DBG's job and I don't want to touch real cast state — but "does my answer match
-the game's answer" is now something I check instead of assert. Doing that
-immediately turned up several things I had flat wrong, including a real Add
-Trigger bug.
+[b]On running the game's code (UserK, and KoObEy agreeing)[/b]
 
-**What a bracket means (KoObEy #4).** This is the important one, and I'd like
-you to poke at the answer before I ship it. Of your four readings I'm taking the
-fourth — *no longer in the deck after the first spell executed* — because this
-mod is a deck-stream visualizer and consumption is the only one of the four it
-can honestly claim to track:
+I said I wasn't going to do this. I was wrong to bundle two separate things
+together: keeping this mod a lightweight panel, and guessing at the draw rules
+myself. I kept the first and dropped the second. The mod's test suite now pulls
+Noita's own gun.lua and gun_actions.lua out of data.wak and runs the real cast
+code outside the game, so my simulator gets diffed against the actual engine,
+deck by deck, every time I change it. I'm still not hooking the live gun system
+while you're casting — that's Wand DBG's job and I don't want to touch real cast
+state — but "does my answer match the game's answer" is something I check now
+instead of assert.
 
-> A bracket encloses exactly the cards the engine removed from the deck while
-> executing the bracket's head card. A card a spell re-casts *by reference*
-> (Alpha, Omega, ...) is never inside a bracket — the panel names it as a copy
-> instead.
+It immediately turned up things I had flat wrong. Three, all fixed in this
+release:
 
-The consequences are load-bearing, so worth stating: trigger payloads stay
-nested, because they're consumed by the forced draw, even though they fire
-later; Divide and Add Trigger become prefixes; Greeks get no bracket at all to
-the card they copy. If you think a different one of the four is the better
-teaching choice, now is the time to say so.
+[list]
+[*]Alpha, Gamma and Tau were chaining onto the next spell. They don't. Their own
+draw call is commented out in the game's source, and the script that builds my
+spell table was reading the commented-out line. That bug has been in every
+release so far.
+[*]Add Trigger doesn't take the next card as its payload. It scans forward over
+modifiers, consumes that whole run plus the projectile, and the payload size
+comes from the projectile itself. "Add Trigger, Damage Plus, Spark Bolt, Bomb"
+was drawing as two casts. It's one.
+[*]A spell with 0 charges at the end of the deck doesn't wrap the wand. The
+retry that skips past it can't reload.
+[/list]
 
-**0 charges (KoObEy #3).** You were right, and my first pass at this concluded
-it was already handled. It isn't, in two places: on any wand carrying a Greek
-spell the depleted-spell filter silently switches itself off, and a depleted card
-at the very end of the deck eats a draw instead of wrapping the wand. Both fixed
-next release. (For the record, the engine does *retry* past a depleted card
-rather than counting it toward a multicast — that part the mod had right.)
+[b]What a bracket means (KoObEy #4)[/b]
 
-**No brackets on OTHER-type spells (KoObEy #1).** Adopting this, with one
-disagreement I'd rather flag than sneak past. Every card gets a confidence tier,
-and a wand containing any spell the mod can't follow draws no brackets at all —
-with a small `?` saying the row is blank because it's *uncertain*, not broken.
-That covers Greeks, modded unknowns, and whatever comes later. But I'm **not**
-hiding Divides and Add Triggers: having now actually read both bodies, they're
-fully deterministic, and I'd rather show them correctly than hide them. The
-safeguard is that they keep their brackets only while the differential harness
-agrees with me — if it stops agreeing, they drop to "uncertain" and hide
-themselves automatically. So it's your rule, with an exemption that has to keep
-earning itself.
+This is the important one, and I'd like you to argue with the answer before I
+ship it. Of your four readings I'm taking the fourth — no longer in the deck
+after the first spell executed — because this mod is a deck-stream visualizer
+and consumption is the only one of the four it can honestly claim to track.
 
-**Modded spells (Night, KoObEy #2).** Night, your diagnosis was exact: the mod
-had no idea what modded spells were and defaulted them to projectiles, which is
-why one cast rendered as several. First fix ships next release — the mod reads
-the game's live `actions` table, which includes everything other mods appended,
-so modded modifiers and multicasts get their real types. After that I'm doing
-KoObEy's tooltip trick properly: executing unknown spells in a stub shot state
-and recording what they actually do to the deck. If you can tell me which spell
-mods you play with, I'll test against those specifically.
+[quote]A bracket encloses exactly the cards the engine removed from the deck
+while executing the bracket's head card. A card a spell re-casts by reference
+(Alpha, Omega, ...) is never inside a bracket — the panel names it as a copy
+instead.[/quote]
 
-**Mana (KoObEy #5).** Taking the middle ground you suggested — per-cast cost
-summed and compared against the wand's max mana, with a warning when a cast can
-never afford itself. Not simulating the live pool; it flickers as it regenerates
-and I'd rather show something always-true than something usually-true.
+The consequences are load-bearing, so worth saying out loud: trigger payloads
+stay nested, because they're consumed by the forced draw even though they fire
+later; Divide By and Add Trigger are prefixes; Greeks get no bracket at all
+around the spell they copy. Reset's bracket is the entire rest of the wand,
+because that is exactly what it removes. If you think a different one of the
+four is the better teaching choice, now is the time to say so.
 
-1.4.0 covers your 1-3 plus 4 and 5. Happy to argue about any of it first,
-particularly the bracket definition, since everything else hangs off it.
+[b]0 charges (KoObEy #3)[/b]
+
+You were right, and my first pass at this concluded it was already handled. It
+wasn't, in two places: on any wand carrying a Greek the depleted-spell handling
+silently switched itself off, and a depleted spell at the very end of the deck
+ate a draw instead of wrapping. The mod now does what the engine does — skip it,
+draw the next one, and don't wrap if the deck runs out mid-retry.
+
+[b]No brackets on OTHER-type spells (KoObEy #1)[/b]
+
+Adopting it. Every spell carries a confidence tier now, and a wand holding
+anything the mod can't follow exactly draws no slot brackets at all — with a
+small "? uncertain" tag saying the row is blank because it's uncertain, not
+broken, and a footnote in the panel naming the spells responsible.
+
+Where I differ from you is Add Trigger, and half of Divide By. Having actually
+read both bodies I can follow Add Trigger exactly, so it keeps its brackets.
+Divide splits: in front of a plain projectile the model matches the engine, so
+those keep their brackets; in front of a multicast, a trigger or a modifier it
+doesn't — the game re-invokes the divided spell and draws fresh cards each time
+— so those wands hide. I only found that boundary by testing it against the real
+code, which is the point. The exemption has to keep earning itself, and where it
+stopped earning it, the brackets went away.
+
+[b]Modded spells (Night, KoObEy #2)[/b]
+
+Night, your diagnosis was exact: the mod had no idea what modded spells were and
+defaulted them to projectiles, which is why one cast rendered as several. The
+first half ships now — the mod reads the game's live spell table, which includes
+everything other mods appended, so modded modifiers and multicasts get their
+real types. How many cards a modded spell actually draws still isn't known, so
+those wands are marked uncertain and hide their brackets rather than guess. Next
+release does KoObEy's tooltip trick properly: running an unknown spell in an
+empty shot state and recording what it does to the deck. If you tell me which
+spell mods you play with, I'll test against those specifically.
+
+[b]Mana (KoObEy #5)[/b]
+
+Taking the middle ground you suggested — each cast's cost summed and compared
+against the wand's max mana, with the cast highlighted when it can never afford
+itself. Not simulating the live pool; it flickers as it regenerates, and I'd
+rather show something always-true than something usually-true.
+
+That covers 1-3, plus 4 and 5. Happy to argue about any of it before it goes
+out, particularly the bracket definition, since everything else hangs off it.
