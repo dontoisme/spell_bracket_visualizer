@@ -924,7 +924,13 @@ list remains unimplemented.
   even after they are modeled.
 - Ask Night for their mod list and test against those spells specifically.
 
-**Later**: E2, D4.
+**Later**: E2, D4, and the prefix-vs-definition question raised on the first
+1.4.0 run — `Divide By 2, Spark Bolt` draws no bracket at all, because
+"modifiers sit outside the parens" and "a one-node cast gets no cast
+bracket" both fire, yet the definition in §1 says Divide consumed the card
+next to it and so has something to enclose. Options and the affected docs
+are written up in `docs/GROUPING_DESIGN.md` under "Open question: prefixes
+vs. the definition". Not decided; deliberately not touched before release.
 
 Two scope changes that fall out of the engine reading:
 
