@@ -22,6 +22,11 @@
 --                  (default: card i sits in column i-1)
 --   --plain        no ANSI colour
 --   --glyphs       also dump the raw glyph list (side, column, stack level)
+--   --tier         wand structure confidence tier (exact/approximate/unknown) and
+--                  which cards caused uncertainty, if any
+--   --mana         mana cost per cast
+--   --uses=SLOT:N,SLOT:N
+--                  charge counts (uses_remaining) for depleted-spell tracking
 
 local here = arg[0]:match("^(.*)[/\\]") or "."
 local MOD = here .. "/.."
@@ -47,18 +52,22 @@ local T = assert(dofile(MOD .. "/files/grouping_overlay.lua")._test,
 -- ---- args ------------------------------------------------------------------
 
 local spells, per_cast, cols_arg, plain, show_glyphs = nil, 1, nil, false, false
+local show_tier, show_mana, uses_arg = false, false, nil
 for _, a in ipairs(arg) do
 	if a == "--plain" then plain = true
 	elseif a == "--glyphs" then show_glyphs = true
+	elseif a == "--tier" then show_tier = true
+	elseif a == "--mana" then show_mana = true
 	elseif a:match("^%-%-per%-cast=") then per_cast = tonumber(a:match("=(.+)")) or 1
 	elseif a:match("^%-%-cols=") then cols_arg = a:match("=(.+)")
+	elseif a:match("^%-%-uses=") then uses_arg = a:match("=(.+)")
 	elseif a:match("^%-%-") then
 		io.stderr:write("unknown option: " .. a .. "\n"); os.exit(2)
 	else spells = a end
 end
 if not spells then
 	io.stderr:write("usage: lua tools/preview_wand.lua SPELL,SPELL,... " ..
-		"[--per-cast=N] [--cols=A,B,...] [--plain] [--glyphs]\n")
+		"[--per-cast=N] [--cols=A,B,...] [--plain] [--glyphs] [--tier] [--mana] [--uses=SLOT:N,SLOT:N]\n")
 	os.exit(2)
 end
 
@@ -88,6 +97,22 @@ for i = 1, #tokens do
 	rows[i] = 0
 end
 
+local uses = {}
+if uses_arg then
+	for pair in uses_arg:gmatch("[^,%s]+") do
+		local slot, n = pair:match("^([^:]+):(.+)$")
+		if not slot or not n then
+			io.stderr:write("malformed --uses value: " .. pair .. "\n"); os.exit(2)
+		end
+		slot = tonumber(slot)
+		n = tonumber(n)
+		if not slot or not n then
+			io.stderr:write("malformed --uses value: " .. pair .. "\n"); os.exit(2)
+		end
+		uses[slot] = n
+	end
+end
+
 -- ---- colour ----------------------------------------------------------------
 
 local function paint(text, c)
@@ -103,7 +128,9 @@ end
 
 -- ---- build ------------------------------------------------------------------
 
-local sim = S.simulate(tokens, meta, { spells_per_cast = per_cast })
+local opts = { spells_per_cast = per_cast }
+if next(uses) then opts.uses = uses end
+local sim = S.simulate(tokens, meta, opts)
 local groups = T.collect_wand_delims(sim, cols, rows)
 local glyphs = T.plan_delims(groups)
 
@@ -148,6 +175,15 @@ print()
 print(string.format("%d spells, %d per cast, %d cast%s%s",
 	#tokens, per_cast, #sim.casts, #sim.casts == 1 and "" or "s",
 	sim.wrapped and "  -- WRAPS" or ""))
+
+if show_tier then
+	local tier, offenders = S.wand_tier(tokens, meta)
+	print("tier: " .. tier)
+	if #offenders > 0 then
+		print("  uncertain: " .. table.concat(offenders, ", "))
+	end
+end
+
 print()
 print("  " .. table.concat(out, ", "))
 print()
@@ -155,10 +191,23 @@ print()
 for ci, cast in ipairs(sim.casts) do
 	local names = {}
 	for _, n in ipairs(cast.nodes) do names[#names + 1] = pretty(n.id) end
-	print(string.format("  cast %d: slots %s..%s%s   (%d spell%s: %s)",
+	local suffix = ""
+	if show_mana then
+		local mana_str
+		if cast.mana == math.floor(cast.mana) then
+			mana_str = string.format("%d", cast.mana)
+		else
+			mana_str = string.format("%g", cast.mana)
+		end
+		suffix = suffix .. "  mana=" .. mana_str
+	end
+	if cast.spent and #cast.spent > 0 then
+		suffix = suffix .. "  spent: " .. table.concat(cast.spent, ", ")
+	end
+	print(string.format("  cast %d: slots %s..%s%s   (%d spell%s: %s)%s",
 		ci, tostring(cast.first), tostring(cast.last),
 		cast.wfirst and ("  WRAPS in " .. cast.wfirst .. ".." .. cast.wlast) or "",
-		#cast.nodes, #cast.nodes == 1 and "" or "s", table.concat(names, ", ")))
+		#cast.nodes, #cast.nodes == 1 and "" or "s", table.concat(names, ", "), suffix))
 end
 print()
 print(string.format("  %d delimiter%s:", #groups, #groups == 1 and "" or "s"))

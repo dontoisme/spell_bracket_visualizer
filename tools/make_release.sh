@@ -28,6 +28,7 @@ payload=(
 	files/grouping_overlay.lua
 	files/wand_structure.lua
 	files/structure_meta.lua
+	files/runtime_meta.lua
 	files/wand_sprite_meta.lua
 	files/ui/pixel.png
 	LICENSE

@@ -4,6 +4,18 @@
 which cards a multicast gathers, and what a trigger's payload is — as nested
 brackets, the way SLIME shows Lisp expression structure.
 
+## What a bracket means (the definition)
+
+> A bracket encloses exactly the cards the engine removed from the deck
+> while executing the bracket's head card. A cast bracket encloses the
+> cards removed from the deck during one cast. A card a spell re-casts by
+> reference (Alpha, Omega, …) is not removed, so it is never inside a
+> bracket — the panel names it as a copy instead.
+
+This is definition #4 of KoObEy's four candidates (drawn / executed / same shot
+state / no longer in deck), and the only one a deck-stream visualizer can honor
+without simulating the engine at runtime.
+
 Status: **shipped on `main` 2026-06-09** (the `grouping-brackets` branch was
 merged and deleted) — companion panel with cast grouping + wrap detection,
 plus the in-UI rainbow slot brackets with the orange wrap carriage-return
@@ -164,6 +176,57 @@ Example — deck `[DAMAGE, BURST_2, LIGHT_BULLET, LIGHT_BULLET_TRIGGER, MAGIC_BO
 
 So both inputs the renderer needs — *is the inventory open* and *the ordered
 card list* — are readily available from Lua.
+
+## Open question: prefixes vs. the definition (raised 2026-09-09, not decided)
+
+`Divide By 2, Spark Bolt` at 1/cast draws **no slot bracket at all**. Two rules
+combine to produce that, and each was reasonable on its own:
+
+1. **Modifiers sit outside the parens** (`f8e9f75`, 2026-06-09, user feedback
+   round 2). The open bracket moved from `node.first` to `node.head` so a
+   leading modifier stays outside, matching the panel's `[Light] Double
+   scatter x2` notation and Lisp intuition.
+2. **A single-node cast draws no cast bracket** (`grouping_overlay.lua`, the
+   `#cast.nodes <= 1` drop, user call 2026-08-07). A bracket around one spell
+   that is not itself a group is pure ink.
+
+Together they mean a wand whose whole cast is "one prefix + one projectile" has
+its bracket eliminated from both directions: the node is a leaf so it gets none
+of its own, and the cast has one node so the cast bracket is dropped.
+
+**Why this is now worth revisiting.** v1.4.0 published a definition (§1): *a
+bracket encloses exactly the cards the engine removed from the deck while
+executing the bracket's head card*. Divide By 2 **does** remove Spark Bolt from
+the deck — that is precisely why it is a prefix and not a wrapper. So the
+definition says there is something to enclose here, and the display says there
+isn't. The two rules predate the definition and were never checked against it.
+
+Note the tension is not academic for Divide specifically: Divide is the one
+"modifier-like" card whose consumption of the next card is the whole point, and
+it is the card KoObEy asked to have hidden. Drawing nothing at all says less
+than either alternative.
+
+**Options, none costed yet:**
+
+- *Leave it.* Prefix + one spell is legible without a bracket, and the panel row
+  already shows `[Divide by 2] Spark Bolt`. Cheapest; the definition then has a
+  stated display exception.
+- *Bracket the head alone* (`[Spark Bolt]` with Divide outside). Honours both
+  existing rules but puts a bracket around a single card, which rule 2 called
+  pure ink.
+- *Bracket the consumption span* (`[Divide by 2, Spark Bolt]`). Matches the
+  definition literally, and contradicts rule 1 for exactly the cards whose
+  prefix-ness comes from consuming.
+- *Split the rule by cause*: modifiers that merely mutate shot state stay
+  outside (rule 1 intact); cards that CONSUME the next card — `chain=true`
+  Divides, and the Add Trigger scan — bracket what they consumed. This is the
+  only option where the drawn bracket and the published definition agree for
+  every card, and it is a small change to `collect_delims`.
+
+Whatever is chosen, `README.md` (":23"), `docs/workshop_description.bbcode`
+("Reading the brackets") and §1 of the plan all state the convention and would
+need to move together. Decide after v1.4.0 ships; changing it now would
+invalidate the screenshots 1.4.0 was verified against.
 
 ## Open decision: rendering
 

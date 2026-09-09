@@ -314,5 +314,207 @@ do
 		(flat and flat.y or 0) > BOX_TOP and (flat and flat.y or 0) < rows_geo[1].top)
 end
 
+-- ---- 8. T1.4 -- uncertain-tier wands hide brackets, draw one "?" instead ----
+--
+-- Suppression lives in draw_box_brackets (the planner never sees tier), so
+-- this drives the REAL draw_box_brackets through the same kind of recording
+-- Gui stubs case 7 uses. A wand whose tier is worse than "exact" (ALPHA is
+-- "approximate" in structure_meta.lua) draws no bracket glyphs and exactly
+-- one dim "? uncertain" tag in the box header band under "hide"; "show" draws the brackets
+-- as before and no "?".
+do
+	local drawn
+	function GuiColorSetForNextWidget() end
+	function GuiImage(gui, id, x, y, path, a, w, h) drawn.images = drawn.images + 1 end
+	function GuiText(gui, x, y, text) drawn.texts[#drawn.texts + 1] = text end
+	function GuiGetTextDimensions(gui, text) return 6 * #text, 9 end
+
+	-- Reuses case 2's ("plain") tokens, which reliably draw two nested bracket
+	-- pairs at spc=4 -- so "show" has something to show. The tier/tier_ids are
+	-- stamped independently here (as collect_wand_boxes would from wand_tier),
+	-- standing in for a wand that also holds an ALPHA somewhere.
+	local UNCERTAIN_TOKENS = { "BURST_3", "LIGHT_BULLET", "BULLET_TIMER", "LIGHT_BULLET" }
+	local function make_wd()
+		return {
+			tokens = UNCERTAIN_TOKENS,
+			xs = { 0, 1, 2, 3 },
+			per_row = 99,
+			cfg = { shuffle = false },
+			tier = "approximate",
+			tier_ids = { "ALPHA" },
+			sim = S.simulate(UNCERTAIN_TOKENS, meta, { spells_per_cast = 4 }),
+			rows_geo = { { top = 100, bot = 112 } },
+			right = 500,
+			top = 80,
+		}
+	end
+
+	drawn = { images = 0, texts = {} }
+	T.draw_box_brackets(nil, 640, { make_wd() }, false, "hide")
+	local qmarks = 0
+	for _, t in ipairs(drawn.texts) do if t == "? uncertain" then qmarks = qmarks + 1 end end
+	eq("tier/hide: exactly one '?' glyph", qmarks, 1)
+	eq("tier/hide: no bracket glyphs drawn", drawn.images, 0)
+
+	drawn = { images = 0, texts = {} }
+	T.draw_box_brackets(nil, 640, { make_wd() }, false, "show")
+	qmarks = 0
+	for _, t in ipairs(drawn.texts) do if t == "? uncertain" then qmarks = qmarks + 1 end end
+	eq("tier/show: no '?' glyph", qmarks, 0)
+	passck("tier/show: brackets drawn (bracket() draws 3 GuiImage per glyph)", drawn.images > 0)
+end
+
+-- ---- 9. T1.7 -- read_deck stops filtering, hands back `uses` -----------------
+--
+-- read_deck used to drop a depleted card out of the deck entirely (and remap
+-- the survivors' columns through `xs`, gated by a Greek-wand exception). The
+-- simulator now models depleted cards itself (a retried-past pop, see
+-- files/wand_structure.lua's header), so read_deck's only job is to report
+-- every non-permanent card AS-IS -- id, real column, and its uses_remaining
+-- where readable -- and let the caller decide whether to hand `uses` to
+-- simulate() at all (collect_wand_boxes). This drives the REAL read_deck
+-- through stubs of the three game APIs it calls, a 3-card wand with slot 2
+-- depleted (uses_remaining == 0).
+do
+	local WAND = "WAND"
+	local CARDS = {
+		{ id = "LIGHT_BULLET", x = 0, uses = -1 }, -- unlimited use: -1
+		{ id = "HEAVY_SPREAD", x = 1, uses = 0 },  -- depleted
+		{ id = "DAMAGE",       x = 2, uses = 5 },
+	}
+
+	function EntityGetAllChildren(e)
+		if e ~= WAND then return {} end
+		local out = {}
+		for i = 1, #CARDS do out[i] = i end
+		return out
+	end
+	function EntityGetFirstComponentIncludingDisabled(child, name)
+		if name == "ItemActionComponent" then return "IAC" .. child end
+		if name == "ItemComponent" then return "IC" .. child end
+		return nil
+	end
+	function ComponentGetValue2(comp, field)
+		local kind, idx = comp:match("^(%a+)(%d+)$")
+		local card = CARDS[tonumber(idx)]
+		if kind == "IAC" then
+			if field == "action_id" then return card.id end
+		elseif kind == "IC" then
+			if field == "inventory_slot" then return card.x, 0 end
+			if field == "permanently_attached" then return false end
+			if field == "uses_remaining" then return card.uses end
+		end
+		return nil
+	end
+
+	local tokens, always, xs, uses = T.read_deck(WAND, true)
+	eq("read_deck/three tokens", #tokens, 3)
+	eq("read_deck/no always-cast cards", #always, 0)
+	eq("read_deck/slot 2 is depleted", uses[2], 0)
+	passck("read_deck/nothing pre-filtered -- HEAVY_SPREAD stays in tokens",
+		tokens[2] == "HEAVY_SPREAD")
+	passck("read_deck/xs is the identity (real column per token, nothing dropped)",
+		xs[1] == 0 and xs[2] == 1 and xs[3] == 2)
+
+	-- Clean up the stubs so they don't leak into later runs of this file (none
+	-- follow today, but the plan() helper above never expected these globals).
+	EntityGetAllChildren = nil
+	EntityGetFirstComponentIncludingDisabled = nil
+	ComponentGetValue2 = nil
+end
+
+-- ---- 10. T1.7 -- a depleted card inside a multicast's gather ----------------
+--
+-- BURST_2 (draws=2) gathers the next two CARDS THAT FIRE, not the next two
+-- slots: with slot 2 depleted, drawing retries past it (files/wand_structure.lua
+-- M.simulate's `draw()`), so the group's children are the cards at slots 3 and
+-- 4 -- but the group's span is still 1..4, because the span is [head .. last
+-- child], and slot 2 sits inside that range even though no node covers it.
+-- That is the definition working as designed (§ T1.7 point 4): a bracket
+-- spanning across a spent slot visually includes it, and this is the one test
+-- that pins the behavior down instead of just asserting it in a comment.
+do
+	local glyphs, groups, sim = plan(
+		{ "BURST_2", "X", "A", "B" }, 1, nil, nil)
+	-- plan() doesn't thread `uses` through simulate, so drive M.simulate
+	-- directly here the same way plan() does internally.
+	sim = S.simulate({ "BURST_2", "X", "A", "B" }, meta,
+		{ spells_per_cast = 1, uses = { [2] = 0 } })
+	local cols, rows = {}, {}
+	for i = 1, 4 do cols[i] = i - 1; rows[i] = 0 end
+	groups = T.collect_wand_delims(sim, cols, rows)
+	glyphs = T.plan_delims(groups)
+
+	eq("spent-span/one cast", #sim.casts, 1)
+	local node = sim.casts[1].nodes[1]
+	eq("spent-span/BURST_2 head at slot 1", node.first, 1)
+	eq("spent-span/gather reaches slot 4 (B), past the depleted slot 2", node.last, 4)
+	eq("spent-span/cast consumed slot 2 as spent, not in a node",
+		sim.casts[1].spent and sim.casts[1].spent[1], 2)
+	eq("spent-span/the multicast bracket spans columns 0..3 (slots 1..4)",
+		show(glyphs), "L0 R3")
+end
+
+-- ---- 11. T1.10d -- RESET's cleared cards get their own bracket -------------
+--
+-- LIGHT_BULLET, RESET, SPITTER, BOMB at 1 spell/cast. Cast 1 fires the single
+-- Light bullet -- no bracket (one spell, nothing simultaneous). Cast 2 draws
+-- RESET (slot 2), which clears the rest of the deck (Spitter/Bomb, slots 3-4)
+-- and then restores it, wrapping the wand. RESET's own bracket must enclose
+-- exactly what it cleared -- head (its own slot) through the last cleared
+-- card -- even though the node has no children: nothing about the cleared
+-- cards ran, so collect_delims can't recurse into them, but the bracket
+-- definition (README "What a bracket means") still owes them a pair.
+do
+	local glyphs, groups, sim = plan(
+		{ "LIGHT_BULLET", "RESET", "SPITTER", "BOMB" }, 1)
+	passck("reset/cast 2 wraps", sim.casts[2].wrapped == true)
+	local node = sim.casts[2].nodes[1]
+	eq("reset/RESET node kind", node.kind, "reset")
+	eq("reset/RESET clears slots 3-4", table.concat(node.cleared, ","), "3,4")
+	eq("reset/cast 1 draws no bracket, RESET gets exactly one", #groups, 1)
+	-- slots 2..4 -> columns 1..3
+	eq("reset/bracket spans RESET's slot through the last cleared card",
+		show(glyphs), "L1 R3")
+	passck("reset/nothing is orange (no group actually wrapped)",
+		orange_is_wrap_only(glyphs))
+end
+
+-- ---- 12. T1.10d -- a bare RESET clears nothing, so it draws no bracket -----
+--
+-- RESET alone: the deck is empty by the time it fires, so node.cleared is
+-- empty and there is nothing to enclose. Still wraps (the one-shot restore
+-- always fires), but a wrap with nothing inside it draws no enclosure either
+-- (case 6's rule) since no node has a nonempty span to wrap around.
+do
+	local glyphs, groups, sim = plan({ "RESET" }, 1)
+	passck("bare-reset/wraps", sim.casts[1].wrapped == true)
+	local node = sim.casts[1].nodes[1]
+	eq("bare-reset/kind", node.kind, "reset")
+	eq("bare-reset/clears nothing", #node.cleared, 0)
+	eq("bare-reset/no delimiters at all", #groups, 0)
+	eq("bare-reset/no glyphs", show(glyphs), "")
+end
+
+-- ---- 13. T1.10d -- a chained modifier sits outside RESET's bracket ---------
+--
+-- DAMAGE, RESET, SPITTER at 1 spell/cast. DAMAGE chains onto RESET as its
+-- modifier prefix (meta: draws=1, no payload -> chains()), so RESET's node
+-- spans first=1 (DAMAGE's slot) .. last=3, but its BRACKET uses head (its
+-- own slot, 2), not first -- same as every other bracket-worthy node -- so
+-- the modifier prints outside the bracket, matching the "[mods] name" panel
+-- convention.
+do
+	local glyphs, groups, sim = plan({ "DAMAGE", "RESET", "SPITTER" }, 1)
+	local node = sim.casts[1].nodes[1]
+	eq("reset-mod/RESET's span includes the modifier's slot", node.first, 1)
+	eq("reset-mod/RESET's own slot is 2", node.head, 2)
+	eq("reset-mod/RESET clears slot 3", table.concat(node.cleared, ","), "3")
+	eq("reset-mod/one bracket, from RESET's slot (not the modifier's)", #groups, 1)
+	-- slots 2..3 -> columns 1..2; DAMAGE (slot 1 / column 0) sits outside
+	eq("reset-mod/bracket runs head..last, modifier excluded",
+		show(glyphs), "L1 R2")
+end
+
 print(failures == 0 and "\nALL PASS" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)

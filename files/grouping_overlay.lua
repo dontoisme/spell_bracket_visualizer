@@ -15,13 +15,32 @@
 local meta = dofile_once("mods/spell_bracket_visualizer/files/structure_meta.lua") or {}
 local sprite_wh_meta = dofile_once("mods/spell_bracket_visualizer/files/wand_sprite_meta.lua") or {}
 local wand_structure = dofile_once("mods/spell_bracket_visualizer/files/wand_structure.lua")
+local runtime_meta = dofile_once("mods/spell_bracket_visualizer/files/runtime_meta.lua")
+
+-- The EFFECTIVE metadata table: structure_meta.lua with the game's live
+-- `actions` table underneath it (files/runtime_meta.lua), so spells appended by
+-- other mods stop reading as cast-ending OTHER leaves. Starts as plain
+-- structure_meta and is upgraded once, on the first update() -- by then every
+-- mod has finished its ModLuaFileAppend. If anything about the runtime read
+-- fails, `emeta` simply stays `meta` and the mod behaves exactly as before.
+local emeta = meta
+local runtime_tried = false
+local function ensure_runtime_meta()
+	if runtime_tried or not runtime_meta then return end
+	runtime_tried = true
+	local ok, merged = pcall(function()
+		runtime_meta.load()
+		return runtime_meta.merged(meta)
+	end)
+	if ok and merged then emeta = merged end
+end
 
 local M = {}
 local gui = nil
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
-local VERSION = "v1.3.3"
+local VERSION = "v1.4.0"
 
 -- Panel text size, chosen by the panel_text_size mod setting (enum ids).
 -- "large" (1.0) exists for non-pixel fonts: fractional scales only render
@@ -77,7 +96,7 @@ end
 
 -- Localized spell name ($action_*) if available, else a prettified id.
 local function display_name(id)
-	local m = meta[id]
+	local m = emeta[id]
 	if m and m.name and type(GameTextGet) == "function" then
 		local t = GameTextGet(m.name)
 		if t and t ~= "" then return t end
@@ -107,7 +126,7 @@ end
 -- disable the whole panel (init.lua kills it on first error), so a future
 -- game update changing these fields degrades to 1/cast, no shuffle.
 local function read_config(wand)
-	local cfg = { spells_per_cast = 1, shuffle = false, capacity = 0 }
+	local cfg = { spells_per_cast = 1, shuffle = false, capacity = 0, mana_max = 0 }
 	if type(ComponentObjectGetValue2) ~= "function" then return cfg end
 	local ab = EntityGetFirstComponentIncludingDisabled(wand, "AbilityComponent")
 	if not ab then return cfg end
@@ -117,17 +136,34 @@ local function read_config(wand)
 	cfg.shuffle = ok2 and sh == true
 	local ok3, cap = pcall(ComponentObjectGetValue2, ab, "gun_config", "deck_capacity")
 	if ok3 and tonumber(cap) and tonumber(cap) > 0 then cfg.capacity = tonumber(cap) end
+	-- mana_max / mana_charge_speed sit on the AbilityComponent directly (NOT
+	-- inside gun_config, next to it) -- Track E1. mana_max defaults to 0
+	-- (unreadable / no mana system on this wand), which reads as "no warning
+	-- threshold" everywhere it's checked (cfg.mana_max > 0).
+	local ok4, mm = pcall(ComponentGetValue2, ab, "mana_max")
+	if ok4 and tonumber(mm) then cfg.mana_max = tonumber(mm) end
+	local ok5, mcs = pcall(ComponentGetValue2, ab, "mana_charge_speed")
+	if ok5 and tonumber(mcs) then cfg.mana_charge_speed = tonumber(mcs) end
 	return cfg
 end
 
 -- Returns the deck tokens (slot order) and the always-cast ids separately:
 -- always-cast cards never sit in the deck -- the engine plays them at the
 -- start of every cast -- so they must not take part in the deck simulation.
-local function read_deck(wand, ignore_depleted, greek_keeps)
-	-- First pass: gather every card (id, slot, always-cast flag, uses). We need
-	-- the whole id list before filtering, because a Greek spell anywhere on the
-	-- wand disables the depleted-card filter (see wand_structure.has_greek).
-	local raw, ids = {}, {}
+--
+-- T1.7: the simulator now models depleted cards itself (a retried-past pop
+-- that lands in cast.spent, per files/wand_structure.lua's header), so this
+-- no longer pre-filters anything. ALL non-permanent cards go into `tokens` in
+-- slot order, depleted or not, and `uses` carries every reading of
+-- uses_remaining this pass could take, keyed by the card's position in
+-- `tokens` (the same index simulate() calls `card.i`) -- ignore_depleted just
+-- decides, at the call site (collect_wand_boxes), whether that table is
+-- handed to simulate() at all. `xs` used to remap surviving cards past the
+-- ones the old filter dropped; with nothing dropped that remap is the
+-- identity, but the return shape stays so callers (collect_wand_boxes,
+-- draw_box_brackets) don't have to change.
+local function read_deck(wand, ignore_depleted)
+	local raw = {}
 	local children = EntityGetAllChildren(wand) or {}
 	for _, child in ipairs(children) do
 		local iac = EntityGetFirstComponentIncludingDisabled(child, "ItemActionComponent")
@@ -146,44 +182,32 @@ local function read_deck(wand, ignore_depleted, greek_keeps)
 					oku, uses = pcall(ComponentGetValue2, ic, "uses_remaining")
 				end
 				raw[#raw + 1] = { id = aid, x = sx, y = sy, perm = perm, uses = uses, oku = oku }
-				ids[#ids + 1] = aid
 			end
 		end
 	end
 
-	-- A limited-charge spell at 0 uses won't fire (gun.lua skips it), so drop it
-	-- from the deck -- the wand brackets/wraps as though the slot were empty; xs
-	-- maps survivors to their real columns so the depleted card renders bracket-
-	-- less. Gated by the Ignore Depleted Spells setting (ignore_depleted), with a
-	-- Greek exception: on a Greek wand the Greeks re-cast cards by position so a
-	-- depleted card still matters -- keep the full structure when greek_keeps is on.
 	local cards, always = {}, {}
-	local greek = wand_structure.has_greek(ids)
-	local apply_filter = ignore_depleted and not (greek and greek_keeps)
 	for _, r in ipairs(raw) do
-		local depleted = apply_filter and r.oku and not wand_structure.card_fires(r.uses)
-		if not depleted then
-			if r.perm then
-				always[#always + 1] = r.id
-			else
-				cards[#cards + 1] = { id = r.id, x = r.x, y = r.y }
-			end
+		if r.perm then
+			always[#always + 1] = r.id
+		else
+			cards[#cards + 1] = r
 		end
 	end
 	table.sort(cards, function(a, b)
 		if a.y ~= b.y then return a.y < b.y end
 		return a.x < b.x
 	end)
-	-- tokens = deck order; xs[i] = that card's real slot column, so brackets
-	-- land right even when the wand has leading/interior empty slots.
-	local tokens, xs = {}, {}
-	for _, c in ipairs(cards) do
-		tokens[#tokens + 1] = c.id
-		xs[#xs + 1] = c.x
+	-- tokens = deck order; xs[i] = that card's real slot column (identity now
+	-- that nothing is dropped, but see the comment above); uses[i] = the live
+	-- charge count for every card whose read succeeded.
+	local tokens, xs, uses = {}, {}, {}
+	for i, c in ipairs(cards) do
+		tokens[i] = c.id
+		xs[i] = c.x
+		if c.oku then uses[i] = c.uses end
 	end
-	-- greek = the wand has a Greek spell, so the depleted-card filter was off
-	-- (surfaced in the debug readout).
-	return tokens, always, xs, greek
+	return tokens, always, xs, uses
 end
 
 -- ---- flatten the simulation into colored, indented display lines -------------
@@ -203,14 +227,26 @@ end
 -- the deck when their condition is false, and the random-draw spells cast
 -- extra cards no static view can show. The structure drawn is the
 -- condition-true / no-extras path; the "?" says so instead of pretending.
+-- A card whose tier is not "exact" (Greeks, IF_*, random draws, unknown
+-- modded spells) gets the same "?": it is why the wand's slot brackets are
+-- hidden, and the footnote below names it.
 local function dyn_name(id, rows)
 	local name = display_name(id)
-	local m = meta[id]
-	if m and m.dynamic then
+	local m = emeta[id]
+	if (m and m.dynamic) or wand_structure.tier(m) ~= "exact" then
 		rows.any_dynamic = true
 		return name .. "?"
 	end
 	return name
+end
+
+-- Print a mana amount without a trailing ".0" (mana is normally integral, but
+-- a modded spell could carry a fractional cost). Shared by sim_rows' cast
+-- headers/footnote, the panel title (M.update) and the debug box.
+local function fmt(n)
+	n = tonumber(n) or 0
+	if n == math.floor(n) then return tostring(math.floor(n)) end
+	return tostring(n)
 end
 
 local function walk(rows, node, ancestor_colors, depth)
@@ -227,6 +263,14 @@ local function walk(rows, node, ancestor_colors, depth)
 	-- or carried as payload
 	local label = mods .. name
 	if node.dangling then label = label .. "  (no projectile)" end
+	if node.kind == "reset" then
+		local n = node.cleared and #node.cleared or 0
+		if n > 0 then
+			label = label .. "  (clears " .. n .. " spells)"
+		else
+			label = label .. "  (nothing left to clear)"
+		end
+	end
 	if node.wrap then label = "~ " .. label end
 
 	rows[#rows + 1] = { bars = copy_list(ancestor_colors), label = label, color = type_color(node.atype) }
@@ -238,9 +282,30 @@ local function walk(rows, node, ancestor_colors, depth)
 	end
 end
 
+-- True when `nodes` contains a RESET node, at top level or nested inside a
+-- multicast/trigger's children (a RESET can sit anywhere a leaf can). Used by
+-- the cast header to explain WHY a wrapped cast wraps: RESET always wraps
+-- (files/wand_structure.lua's header -- the engine restores the discard pile
+-- to the deck immediately), and that is a different reason than running off
+-- the end of a normal deck, so the header says so instead of the generic
+-- "WRAPS!" line.
+local function has_reset(nodes)
+	for _, node in ipairs(nodes) do
+		if node.kind == "reset" then return true end
+		if node.children and #node.children > 0 and has_reset(node.children) then
+			return true
+		end
+	end
+	return false
+end
+
 -- Rows for the whole simulation: per-cast headers (when there is more than one
--- cast or a wrap), the trees, and a loud wrap/recharge banner.
-local function sim_rows(sim, cfg, always)
+-- cast, a wrap, or a cast that can never afford itself), the trees, a loud
+-- wrap/recharge banner, and the sticky footnotes ("?" tiers, mana overflow,
+-- the bracket-definition legend). `tier_ids` (Track C) are the wand's
+-- confidence-tier offenders (files/wand_structure.lua M.wand_tier); nil is
+-- fine, old callers keep the generic "?" footnote.
+local function sim_rows(sim, cfg, always, tier_ids)
 	local rows = {}
 	if #always > 0 then
 		local names = {}
@@ -250,21 +315,72 @@ local function sim_rows(sim, cfg, always)
 		rows[#rows + 1] = { bars = {}, label = "always: " .. table.concat(names, ", "),
 			color = COLOR.PASSIVE }
 	end
-	local show_headers = (#sim.casts > 1) or sim.wrapped
+	-- Track E1: a cast costing more than the wand can ever hold has to be
+	-- visible even when it's the only cast (mana_max > 0 and it's readable).
+	local any_over = false
+	if cfg.mana_max and cfg.mana_max > 0 then
+		for _, cast in ipairs(sim.casts) do
+			if cast.mana and cast.mana > cfg.mana_max then any_over = true end
+		end
+	end
+	-- T1.7: a cast whose every draw hit a depleted card has nodes = {} and a
+	-- non-empty `spent` (files/wand_structure.lua) -- a real cast that emptied
+	-- part of the deck without firing anything. That needs a header even on a
+	-- wand with exactly one cast, or the panel would say nothing happened at
+	-- all.
+	local any_empty_spent = false
+	for _, cast in ipairs(sim.casts) do
+		if #cast.nodes == 0 and cast.spent and #cast.spent > 0 then any_empty_spent = true end
+	end
+	local show_headers = (#sim.casts > 1) or sim.wrapped or any_over or any_empty_spent
 	for ci, cast in ipairs(sim.casts) do
+		local over = cfg.mana_max and cfg.mana_max > 0
+			and cast.mana and cast.mana > cfg.mana_max
+		local empty_spent = #cast.nodes == 0 and cast.spent and #cast.spent > 0
 		if show_headers then
 			local h = "cast " .. ci
-			if cast.wrapped then h = h .. "  -- WRAPS! -> recharge" end
+			if empty_spent then
+				h = h .. "  -- no spells left (depleted)"
+			end
+			h = h .. "  mana " .. fmt(cast.mana or 0)
+			if over then h = h .. "  > max " .. fmt(cfg.mana_max) end
+			if cast.wrapped then
+				if has_reset(cast.nodes) then
+					h = h .. "  -- RESET restores the wand -> recharge"
+				else
+					h = h .. "  -- WRAPS! -> recharge"
+				end
+			end
 			rows[#rows + 1] = { bars = {}, label = h,
-				color = cast.wrapped and WRAP_COLOR or HEADER_COLOR, header = true }
+				color = (cast.wrapped or over) and WRAP_COLOR or HEADER_COLOR, header = true }
 		end
 		local spine = show_headers and { HEADER_COLOR } or {}
 		for _, node in ipairs(cast.nodes) do walk(rows, node, spine, 0) end
 	end
-	-- sticky: it explains "?" marks that survive the row clamp, so it must
-	-- outlive the "... +N more" cut rather than being the first line dropped.
-	if rows.any_dynamic then
-		rows[#rows + 1] = { bars = {}, label = "? = depends on game state when cast",
+	-- sticky: these explain marks/warnings that survive the row clamp, so they
+	-- must outlive the "... +N more" cut rather than being the first lines
+	-- dropped. draw_panel holds back every trailing sticky row, in order.
+	if rows.any_dynamic or (tier_ids and #tier_ids > 0) then
+		if tier_ids and #tier_ids > 0 then
+			local names = {}
+			for _, id in ipairs(tier_ids) do names[#names + 1] = display_name(id) end
+			rows[#rows + 1] = { bars = {},
+				label = "? = " .. table.concat(names, ", ") .. ": structure uncertain",
+				color = COLOR.OTHER, sticky = true }
+		else
+			rows[#rows + 1] = { bars = {}, label = "? = depends on game state when cast",
+				color = COLOR.OTHER, sticky = true }
+		end
+	end
+	if any_over then
+		rows[#rows + 1] = { bars = {},
+			label = "mana = cost of this cast; > max means part of it is discarded",
+			color = COLOR.OTHER, sticky = true }
+	end
+	-- the bracket-definition legend (Track B, docs/ADVANCED_SCENARIOS_PLAN.md
+	-- 1): always present whenever there's at least one cast to explain.
+	if #sim.casts > 0 then
+		rows[#rows + 1] = { bars = {}, label = "[ ] = spells this card pulls from the wand",
 			color = COLOR.OTHER, sticky = true }
 	end
 	return rows
@@ -455,13 +571,26 @@ end
 -- enclosing the whole looping structure -- see wrap_delims.
 local function collect_delims(nodes, depth, cols, rows, out)
 	for _, node in ipairs(nodes) do
-		if node.children and #node.children > 0 and node.last then
+		-- A RESET node has no children -- nothing about the cards it cleared
+		-- ran -- but under the mod's bracket definition its bracket must still
+		-- enclose exactly what it removed (node.cleared), so it is
+		-- bracket-worthy on that alone, same as a node with children.
+		local worthy = (node.children and #node.children > 0)
+			or (node.kind == "reset" and node.cleared and #node.cleared > 0)
+		if worthy and node.last then
 			local head = node.head or node.first
 			-- flast, not last: on a group that wrapped, last reaches back into
 			-- the wrapped-in segment at the wand's start, and a wrap can pull in
 			-- MORE cards than precede the head -- so last is not even an upper
 			-- bound on the forward run. flast is the last card drawn before the
-			-- wrap; it equals last on every group that didn't wrap.
+			-- wrap; it equals last on every group that didn't wrap. Same rule
+			-- for a RESET node: its own wrap (the one-shot restore) always
+			-- happens AFTER it finishes clearing, so a RESET that causes the
+			-- wrap still has flast == last (nothing it cleared was wrapped-in);
+			-- a RESET that clears cards already in a wrapped-in segment (a
+			-- second RESET in an already-wrapped cast) instead gets flast <
+			-- last, and those wrapped-in cleared cards are left to the wrap's
+			-- own enclosure (wrap_delims) rather than double-bracketed here.
 			local tail = node.flast or node.last
 			-- Brackets carry NO text labels (user calls, 2026-06-11): the
 			-- card art already says x2/x3, a trigger's payload shows as the
@@ -474,7 +603,9 @@ local function collect_delims(nodes, depth, cols, rows, out)
 				rb = rows[tail] or 0,
 				c = nest_color(depth),
 			}
-			collect_delims(node.children, depth + 1, cols, rows, out)
+			if node.children and #node.children > 0 then
+				collect_delims(node.children, depth + 1, cols, rows, out)
+			end
 		end
 	end
 end
@@ -551,6 +682,11 @@ local function collect_wand_delims(sim, cols, rows)
 		-- so its bracket is pure ink -- drop it (user call 2026-08-07). This is
 		-- also what kills the redundant pair on a cast whose single spell IS a
 		-- group: the two spans were identical, drawn twice in two colors.
+		-- `#cast.nodes <= 1` also catches `#cast.nodes == 0`: a cast whose every
+		-- draw hit a depleted card (T1.6/T1.7's `spent`-only cast) still has a
+		-- real cast.first/last span -- it popped cards -- but no node built from
+		-- it, so there is nothing to bracket either. Intentional, not an
+		-- accident of the `<= 1`: an empty cast draws no cast bracket.
 		if rec and #cast.nodes <= 1 then
 			table.remove(out, cast_rec)
 		end
@@ -779,7 +915,7 @@ end
 
 -- sw param is the GEOMETRY reference width (refw = sh*CAL_ASPECT), not live
 -- screen width -- everything here is layout. See draw_delims / update().
-local function collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_keeps)
+local function collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 	local players = EntityGetWithTag("player_unit")
 	if not players or #players == 0 then return {}, BOX.top0 * U * refw, 0 end
 	local items = GameGetAllInventoryItems(players[1]) or {}
@@ -797,11 +933,25 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_kee
 
 	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
 	for _, wd in ipairs(wands) do
-		wd.tokens, wd.always, wd.xs, wd.greek = read_deck(wd.e, ignore_depleted, greek_keeps)
+		wd.tokens, wd.always, wd.xs, wd.uses = read_deck(wd.e, ignore_depleted)
+		-- Track C confidence tier: the worst of every card on the wand (deck
+		-- AND always-cast -- an always-cast Greek/random spell is just as
+		-- unfollowable as one in the deck). tier_ids are the offenders, named
+		-- in the panel footnote (sim_rows) and the debug box.
+		local tier_ids_input = {}
+		for _, id in ipairs(wd.tokens) do tier_ids_input[#tier_ids_input + 1] = id end
+		for _, id in ipairs(wd.always) do tier_ids_input[#tier_ids_input + 1] = id end
+		wd.tier, wd.tier_ids = wand_structure.wand_tier(tier_ids_input, emeta, #wd.tokens)
 		wd.cfg = read_config(wd.e)
 		wd.h, wd.sprite = wand_art_wh(gui, wd.e)
-		wd.sim = wand_structure.simulate(wd.tokens, meta,
-			{ spells_per_cast = wd.cfg.spells_per_cast })
+		-- ignore_depleted (default on) is the "model the engine" setting: ON
+		-- hands the live charge counts to the simulator, which retries past a
+		-- depleted card exactly as gun.lua does (no bracket on it, per
+		-- wand_structure.lua's header); OFF omits `uses` entirely and every
+		-- card is simulated as though it fires.
+		wd.sim = wand_structure.simulate(wd.tokens, emeta,
+			{ spells_per_cast = wd.cfg.spells_per_cast,
+			  uses = ignore_depleted and wd.uses or nil })
 
 		-- displayed slot rows: capacity wraps every per_row slots (fall back
 		-- to the highest occupied slot if the capacity read failed). per_row is
@@ -886,7 +1036,31 @@ local function draw_row_probe(gui, refw, wands)
 	end
 end
 
-local function draw_box_brackets(gui, refw, wands, show_probe)
+-- Track C's "no brackets" policy, drawn: a single dim "?" at the right end of
+-- the slot row, in place of the (withheld) brackets, so a blank row reads as
+-- "uncertain", not "broken". Same raw GuiText primitive draw_delims already
+-- uses for its "wraps to front" tag text -- no new drawing path -- dimmed
+-- with COLOR.OTHER, the same grey the panel's tier footnote uses.
+-- Placed like the "wraps to front" tag: right-aligned in the box's header band
+-- beside "Shuffle / Spells per cast", NOT on the slot row -- at the row's
+-- right end it sat on top of the last card (first in-game run of 1.4.0).
+local UNCERTAIN_TAG = "? uncertain"
+local function draw_uncertain_glyph(gui, wd, refw)
+	if not wd.rows_geo[1] then return end
+	local ok, tw = pcall(GuiGetTextDimensions, gui, UNCERTAIN_TAG, 1)
+	tw = (ok and tonumber(tw)) or 0
+	if tw <= 0 then tw = 5 * #UNCERTAIN_TAG end
+	local lx = wd.right - tw - 2
+	if lx < 2 then lx = 2 end
+	local ly = wd.top * U * refw + WRAP_TAG_INSET
+	GuiColorSetForNextWidget(gui, COLOR.OTHER[1], COLOR.OTHER[2], COLOR.OTHER[3], 1)
+	GuiText(gui, lx, ly, UNCERTAIN_TAG)
+end
+
+-- `uncertain` is the uncertain_brackets setting ("hide"/"show"). Brackets are
+-- withheld from a wand whose tier is worse than "exact" unless the setting is
+-- "show" -- Track C, docs/ADVANCED_SCENARIOS_PLAN.md 2.
+local function draw_box_brackets(gui, refw, wands, show_probe, uncertain)
 	local idc = { n = 0 }
 	if show_probe then draw_row_probe(gui, refw, wands) end
 	for _, wd in ipairs(wands) do
@@ -896,14 +1070,18 @@ local function draw_box_brackets(gui, refw, wands, show_probe)
 		-- panel still shows the slot-order tree WITH its "order varies!"
 		-- warning -- text can hedge, brackets can't.
 		if #wd.tokens > 0 and not wd.cfg.shuffle then
-			-- displayed position of each card: wraps every per_row slots
-			local cols, rows = {}, {}
-			for k, x in ipairs(wd.xs) do
-				cols[k] = x % wd.per_row
-				rows[k] = math.floor(x / wd.per_row)
+			if wd.tier == "exact" or uncertain == "show" then
+				-- displayed position of each card: wraps every per_row slots
+				local cols, rows = {}, {}
+				for k, x in ipairs(wd.xs) do
+					cols[k] = x % wd.per_row
+					rows[k] = math.floor(x / wd.per_row)
+				end
+				draw_delims(gui, collect_wand_delims(wd.sim, cols, rows),
+					refw, wd.rows_geo, idc, wd.right, wd.top * U * refw)
+			else
+				draw_uncertain_glyph(gui, wd, refw)
 			end
-			draw_delims(gui, collect_wand_delims(wd.sim, cols, rows),
-				refw, wd.rows_geo, idc, wd.right, wd.top * U * refw)
 		end
 	end
 end
@@ -1120,19 +1298,23 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	local max_rows = math.floor((bot_limit - y0 - pad - 2 - line_h) / line_h)
 	if max_rows < 2 then max_rows = 2 end
 	if #rows > max_rows then
-		-- A sticky trailing row (the "?" footnote) is held back from the cut and
-		-- re-appended after it: dropping the legend while its "?" marks stay
-		-- visible above would leave them unexplained. It costs one line of the
-		-- budget, so the "+N more" count is over the CONTENT rows only.
-		local sticky = rows[#rows].sticky and rows[#rows] or nil
-		local budget = max_rows - (sticky and 1 or 0)
-		local content = #rows - (sticky and 1 or 0)
+		-- Every trailing sticky row (the "?" tier/mana footnotes, the bracket
+		-- legend) is held back from the cut and re-appended after it, in order:
+		-- dropping one while the marks/warnings it explains stay visible above
+		-- would leave them unexplained. They cost one line of the budget each,
+		-- so the "+N more" count is over the CONTENT rows only.
+		local n_sticky = 0
+		while rows[#rows - n_sticky] and rows[#rows - n_sticky].sticky do
+			n_sticky = n_sticky + 1
+		end
+		local budget = math.max(1, max_rows - n_sticky)
+		local content = #rows - n_sticky
 		local kept = {}
 		for i = 1, budget - 1 do kept[i] = rows[i] end
 		kept[budget] = { bars = {},
 			label = "... +" .. (content - budget + 1) .. " more",
 			color = HEADER_COLOR }
-		if sticky then kept[#kept + 1] = sticky end
+		for i = content + 1, #rows do kept[#kept + 1] = rows[i] end
 		rows = kept
 	end
 
@@ -1187,13 +1369,42 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 			wd.cfg.capacity, #wd.tokens, wd.cfg.spells_per_cast,
 			wd.cfg.shuffle and "yes" or "no")
 		lines[#lines + 1] = string.format(
-			"rows modeled=%d   cast-wraps=%s   greek=%s",
-			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no",
-			wd.greek and "yes (keeping depleted)" or "no")
+			"rows modeled=%d   cast-wraps=%s",
+			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no")
+		-- T1.7: depleted cards the simulator retried past this cast, per cast
+		-- (replaces the old "greek=" line -- the simulator models depleted
+		-- cards itself now, so there's nothing Greek-specific left to report).
+		do
+			local spents = {}
+			if wd.sim then
+				for _, cast in ipairs(wd.sim.casts) do
+					spents[#spents + 1] = (cast.spent and #cast.spent > 0)
+						and table.concat(cast.spent, ", ") or "none"
+				end
+			end
+			lines[#lines + 1] = "spent slots: " .. table.concat(spents, " | ")
+		end
+		-- Track C: the wand's confidence tier and the ids responsible.
+		lines[#lines + 1] = string.format(
+			"tier=%s (%s)", wd.tier or "exact", table.concat(wd.tier_ids or {}, ", "))
+		-- Track E1: the wand's mana ceiling/regen and what each cast costs.
+		lines[#lines + 1] = string.format(
+			"mana_max=%s charge=%s",
+			tostring(wd.cfg.mana_max or 0), tostring(wd.cfg.mana_charge_speed or "?"))
+		local manas = {}
+		if wd.sim then
+			for _, cast in ipairs(wd.sim.casts) do manas[#manas + 1] = fmt(cast.mana or 0) end
+		end
+		lines[#lines + 1] = "cast mana: " .. table.concat(manas, ", ")
 		-- exact SPRITE_OVERRIDES key for the held wand (copy if it sits wrong)
 		lines[#lines + 1] = "sprite: " .. (wd.sprite or "(unknown)")
 	else
 		lines[#lines + 1] = "wand:  (none held -- select/hold a wand)"
+	end
+	-- Modded-spell fallback layer (3 A1): how many spells the live `actions`
+	-- table yielded, or why the read failed.
+	if runtime_meta then
+		lines[#lines + 1] = runtime_meta.status_line()
 	end
 	-- Font probe: RAW engine readings, no floors. The width ratio is the whole
 	-- diagnosis (docs/FONT_COMPAT.md) -- with the vanilla pixel font it equals
@@ -1327,12 +1538,17 @@ function M.update()
 	local show_slots = get("spell_bracket_visualizer.show_slot_brackets") ~= false
 	local show_debug = get("spell_bracket_visualizer.show_debug") == true
 	if not show_panel and not show_slots and not show_debug then return end
-	-- Ignore depleted (0-use) spells in the structure (default on), unless the wand
-	-- has a Greek spell and the Greek exception is on (default on). Both gate the
-	-- filter in read_deck. See settings.lua / wand_structure.has_greek.
+	-- Model depleted (0-use) spells the way gun.lua does: ON (default) hands the
+	-- simulator the live charge counts, so a depleted card is retried past (no
+	-- bracket on it, per wand_structure.lua's header); OFF pretends every card
+	-- fires. greek_keeps_depleted no longer does anything -- the simulator now
+	-- models depleted cards itself, so Greek spells see the right positions
+	-- automatically; see settings.lua.
 	local ignore_depleted = get("spell_bracket_visualizer.ignore_depleted_spells") ~= false
-	local greek_keeps = get("spell_bracket_visualizer.greek_keeps_depleted") ~= false
 	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
+	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
+	-- is worse than exact; "show" draws them anyway. See draw_box_brackets.
+	local uncertain_brackets = get("spell_bracket_visualizer.uncertain_brackets") or "hide"
 
 	local sw, sh = GuiGetScreenDimensions(gui)
 	-- refw: the GEOMETRY reference width. The engine draws the inventory in fixed
@@ -1348,13 +1564,16 @@ function M.update()
 	-- one measure/read pass shared by the brackets and the panel's dock anchor.
 	-- per_row is the aspect-calibrated wrap column (99 = no wrap at >= 16:9)
 	local per_row = wrap_columns(sw, sh)
-	local boxes = collect_wand_boxes(gui, refw, per_row, ignore_depleted, greek_keeps)
+	-- First frame only: fold the game's live `actions` table in under
+	-- structure_meta so modded spells simulate (and get named) correctly.
+	ensure_runtime_meta()
+	local boxes = collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
 		-- strongly negative z = "bring to front": lower z draws on top, and
 		-- this must beat the engine's spell-frame layer, not just our own gui
 		GuiZSet(gui, -10)
-		draw_box_brackets(gui, refw, boxes, show_debug)
+		draw_box_brackets(gui, refw, boxes, show_debug, uncertain_brackets)
 		GuiZSet(gui, 1)
 	end
 
@@ -1368,7 +1587,20 @@ function M.update()
 		-- order randomizes at cast time, so even the panel's slot-order tree
 		-- is just one arrangement of many -- not worth showing.
 		if wd and not wd.cfg.shuffle and (#wd.tokens > 0 or #wd.always > 0) then
-			local title = "Wand structure  (" .. wd.cfg.spells_per_cast .. "/cast)"
+			-- When there's only one cast and it doesn't overflow mana_max, the
+			-- cast header is never shown (sim_rows), so the mana number has
+			-- nowhere to appear -- put it in the title instead, so it's always
+			-- visible somewhere (Track E1).
+			local mana_suffix = ""
+			if wd.sim and #wd.sim.casts == 1 and not wd.sim.wrapped then
+				local c1 = wd.sim.casts[1]
+				local over1 = wd.cfg.mana_max and wd.cfg.mana_max > 0
+					and c1.mana and c1.mana > wd.cfg.mana_max
+				if not over1 and c1.mana ~= nil then
+					mana_suffix = ", mana " .. fmt(c1.mana)
+				end
+			end
+			local title = "Wand structure  (" .. wd.cfg.spells_per_cast .. "/cast" .. mana_suffix .. ")"
 			local geo = {} -- per-box GUI geometry: top edge (vertical anchor) + right edge (width clamp)
 			for i, b in ipairs(boxes) do
 				geo[i] = { top = b.top * U * refw, right = b.right }
@@ -1377,7 +1609,7 @@ function M.update()
 				boxes = geo,
 				sel   = sel,
 			}
-			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always), title, sw, sh, anchor, panel_scale)
+			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.tier_ids), title, sw, sh, anchor, panel_scale)
 		end
 	end
 
@@ -1412,9 +1644,18 @@ M._test = {
 	collect_wand_delims  = collect_wand_delims,
 	plan_delims     = plan_delims,
 	draw_delims     = draw_delims, -- pixel-level check with a recording Gui stub
+	draw_box_brackets = draw_box_brackets, -- Track C tier suppression, at the draw level
 
 	nest_color      = nest_color,
 	WRAP_COLOR      = WRAP_COLOR,
+
+	sim_rows        = sim_rows,
+	read_deck       = read_deck,
+	read_config     = read_config,
+
+	-- runtime (modded-spell) metadata layer, 3 A1
+	ensure_runtime_meta = ensure_runtime_meta,
+	effective_meta      = function() return emeta end,
 }
 
 return M

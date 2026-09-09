@@ -1,72 +1,95 @@
-Ever stared at a rapid-fire wand and wondered what actually fires together each cast? This mod draws your wand's cast structure right onto the inventory UI, Lisp/SLIME style, so the grouping is visible instead of guessed.
+Trying to work out why your wand fires the way it does? This mod draws your wand's [b]cast structure[/b] straight onto the inventory UI — which spells fire together, which modifiers feed which projectile, what a multicast gathers, and when your wand [b]wraps[/b]. No guessing, no counting slots on your fingers.
 
-[h2]Two views[/h2]
+It updates live while you rearrange spells, so you can watch a wand reshape itself as you build it.
+
+[img]REPLACE_URL_1_SIMPLE_WAND[/img]
+
+[h2]What a bracket means[/h2]
+A bracket encloses exactly the spells the game removed from the wand's deck while casting the bracket's first spell. A cast bracket encloses everything removed during one cast. A spell that another spell re-casts by reference (Alpha, Omega, ...) is not removed, so it is never inside a bracket -- the panel names it as a copy instead.
+
+Three things follow from that:
 [list]
-[*][b]Slot brackets[/b] — rainbow nesting brackets on the spell cards themselves, hugging each group's first and last card. Colors cycle by nesting depth, like nested code brackets: you can see what a multicast gathers, which modifiers feed which projectile, what payload a trigger opens, and — one bracket further out — exactly which spells fire together in each cast.
-[*][b]Wand structure panel[/b] — an indented text tree of the selected wand, one section per cast, spell names colored by type. Always-cast spells are listed separately.
+[*]Trigger payloads stay nested inside the trigger, because the trigger pulls them from the deck right away even though they fire later.
+[*]Divide By and Add Trigger are prefixes on the spell after them, not single-card wrappers: both can pull several cards at once, and the bracket shows exactly which.
+[*]Greek spells get no bracket around the spell they copy; the panel names the copy in text instead.
 [/list]
-Both update live as you drag spells around, so you can see a wand reshape itself while you build it.
+
+[h2]Reading the brackets[/h2]
+Every group of spells that fires as one unit gets a bracket pair hugging its first and last card, and the colours cycle by nesting depth — the same way nested brackets are coloured in a code editor. Leading modifiers sit [i]outside[/i] the bracket, because they attach to what comes next.
+
+[code][ Chainsaw, Chainsaw, [Double Spell, Spitter [Double Spell, Spitter]] ][/code]
+
+One bracket further out, each [b]cast[/b] is bracketed too — so what fires [i]together[/i] on a single click is visible at a glance. A cast that fires one spell isn't bracketed; there's no simultaneity to show.
 
 [h2]It shows you the WRAP[/h2]
 The one that actually costs you damage: when a cast runs past the last spell in the wand, the draw wraps back to the front and forces the recharge. That cast fires a mix you probably didn't intend, and nothing in the vanilla UI tells you it's happening.
 
-The wrap gets marked in orange — one bracket enclosing the whole looping structure, from the first card the wrap pulled back in to where the cast ran out of deck, tagged [i]wraps to front[/i] at its closing end. The panel gets a loud [b]WRAPS! -> recharge[/b] banner on that cast.
+The wrap is marked in orange — one bracket enclosing the whole looping structure, from the first card the wrap pulled back in to where the cast ran out of deck, tagged [i]wraps to front[/i]. The structure panel gets a loud [b]WRAPS! -> recharge[/b] banner on that cast.
 
-[h2]New in v1.3.3 — Divide By fixed, and honest question marks[/h2]
-[b]Divide By spells now group correctly.[/b] Divide By 2/3/4/10 skip the engine's normal draw call and invoke the next card directly, which the mod's spell data missed — so it drew a cast boundary between a divide and its target. In the game they fire [i]together[/i]: [code]Divide By 2, Light Bullet[/code] is one cast, and a multicast that gathers a divide spans the divide [i]and[/i] what it divides. The mod now attaches a Divide By to the next spell exactly like a modifier prefix — with the one real difference kept: a Divide By at the end of the wand does nothing at all, so it never causes a wrap (a trailing modifier does).
+[img]REPLACE_URL_2_WRAP[/img]
 
-[b]Spells the mod can't predict now say so.[/b] The Requirement ("If") spells skip part of the wand when their condition is false at cast time, and the random-draw spells (Random Spell, Draw Random, …) add cards chosen at cast time. No fixed display can show those truthfully, so instead of silently drawing one possibility as if it were certain, the panel marks them with a [b]?[/b] and a footnote. What's drawn is the condition-true / no-extras path.
-
-If you hit a wand whose brackets don't match what it actually does, please post the spell list (or a screenshot) — every confirmed mismatch so far has been fixable, and this update exists because people reported them.
-
-[h2]v1.3.2 — casts, and a rebuilt wrap[/h2]
-[b]Casts are bracketed now.[/b] Which spells fire [i]together[/i] is the thing the mod exists to show, and until now you had to read it off the panel. Each cast gets its own bracket, one level outside the spell groups it contains, and the rainbow runs as a single progression across both axes — advancing per cast and per nesting level — so the colors keep telling you where you are. A cast that fires a single spell isn't bracketed: there's no simultaneity to show, and the pair would just be ink.
-
-[b]The wrap reads as a loop.[/b] It used to be drawn as two separate orange bracket pairs joined by a line under the row, which looked like two unrelated groups rather than one structure continuing around. It's now a single enclosing bracket around everything the wrap touches:
-
-[code][ chainsaw, chainsaw, [Double spell, Spitter [Double spell, Spitter]] ][/code]
-
-Also fixed: brackets sharing a card edge used to blur into plain vertical bars, because an outer bracket's hooks were drawn underneath the one nested inside it. And a bare modifier chain that wrapped off the end of the deck drew no wrap marking at all — that case is covered now.
-
-[h2]v1.3.1 — font compatibility[/h2]
-If you use a font mod (such as [i]Better Font (English)[/i]) or play in a language with a smooth, non-pixelated font (Chinese, Japanese, …), the wand structure panel used to render squished against the right edge of the screen with its text running off it. That's fixed.
-
-The cause: with those fonts Noita ignores the smaller text sizes when [i]drawing[/i], while still applying them when [i]measuring[/i] — so the panel was built around three times too small for the text that landed in it. The panel now detects this and sizes itself to the one setting those fonts render faithfully.
-
-[b]With one of those fonts, Text Size will stay on Large and won't change.[/b] That's deliberate, not a broken setting — it's the only size that renders correctly. On the default pixel font nothing changes at all and every size works exactly as before.
-
-Also in this update:
+[h2]Two views[/h2]
 [list]
-[*]A new [b]Large[/b] text size for the structure panel.
-[*]Fixed truncation of non-English spell names, which could cut a character in half and leave a garbled glyph behind.
-[*]The Debug Info box now reports what your font is doing, so one screenshot is enough to pin down a font problem.
+[*][b]Slot brackets[/b] — the rainbow nesting brackets on the spell cards themselves, described above. On by default.
+[*][b]Wand structure panel[/b] — an indented text tree of the selected wand, one section per cast, spell names coloured by type. Always-cast spells are listed separately. It docks beside the wand you're editing.
 [/list]
-Thanks to [b]BourbonCrow[/b] and [b]shinylavawarrior[/b] for reporting this — and to BourbonCrow for spotting that a font mod was the trigger, which is what made it findable at all.
 
-[h2]v1.3.0 — depleted spells[/h2]
-A spell with 0 charges left can't fire: the engine discards it and draws the next card instead. So the mod now leaves depleted spells out of the structure entirely, and your wand groups — and [b]wraps[/b] — as if that slot were empty. A single spent spell can move the wrap point, which is exactly the kind of thing that's invisible mid-run.
+[img]REPLACE_URL_3_PANEL[/img]
 
-One exception, on by default: the Greek spells (Alpha, Gamma, Tau, Omega, Mu, Phi, Sigma, Zeta) re-cast spells by their [i]position[/i] in the wand, so a depleted spell still changes what they pick up. On a wand holding a Greek spell, everything is kept. Both behaviors are toggleable.
+[h2]What this is, and what it isn't[/h2]
+This is a [b]structure[/b] viewer, built to make wand mechanics legible while you're learning them and while you're building. It shows you how the game will draw and group your spells.
+
+It is [b]not[/b] an evaluator. It doesn't compute damage, mana cost, spread, crit or DPS, and it doesn't simulate a shot's outcome. If you want the exact numbers a wand produces, [b]WandDBG[/b] runs the game's own cast code and reports the evaluation — the two mods answer different questions and sit happily side by side.
+
+How it works: the mod reads Noita's real draw rules out of the game's own [i]gun.lua[/i] — each cast draws the wand's spells-per-cast expressions, modifiers prefix-attach, multicasts gather N cards, triggers open nested payloads, and a forced draw on an empty deck wraps the discard back in and ends the recharge cycle. Where the engine's behaviour can't be known ahead of a cast, the mod says so rather than guessing (see below).
+
+[h2]Known limits — read before reporting a bug[/h2]
+[list]
+[*][b]Shuffle wands show nothing at all[/b], on purpose. Their draw order re-randomises every cycle, so any structure drawn would be one arrangement out of many — a confident-looking lie.
+[*][b]Spells that depend on game state at cast time are marked ?[/b] — the Requirement ("If") spells skip part of the wand when their condition is false, and the random-draw spells add cards chosen at cast time. What's drawn is the condition-true / no-extras path.
+[*][b]It can't know your mana[/b], so a cast that fizzles part-way through may differ from what's shown.
+[*][b]Mod-added spells aren't modelled[/b] structurally; they appear as plain leaves.
+[*]Purely visual. It reads your wands and draws on top of the UI — it changes no spells, wands or world generation, and requests no unsafe Lua APIs. Safe to add to a run in progress, and safe to remove again.
+[/list]
+
+If you hit a wand whose brackets don't match what it actually does, please post the spell list or a screenshot. Every confirmed mismatch so far has been fixable, and the last update exists because people reported them.
 
 [h2]Settings[/h2]
 All settings are in the mod settings menu and apply immediately, no restart:
 [list]
 [*][b]Wand Structure Panel[/b] — the text tree on/off
-[*][b]Wand Structure Panel: Text Size[/b] — Tiny / Small / Medium / Large (forced to Large with a font mod or a non-pixel-font language, see above)
+[*][b]Wand Structure Panel: Text Size[/b] — Tiny / Small / Medium / Large (forced to Large with a font mod or a non-pixel-font language, see below)
 [*][b]Slot Brackets[/b] — the in-UI rainbow brackets on/off
-[*][b]Ignore Depleted Spells[/b] — leave 0-charge spells out of the structure
-[*][b]Greek Wands: Keep Depleted Spells[/b] — the exception described above
+[*][b]Ignore Depleted Spells[/b] — model spells with 0 charges the way the game does it (skipped, drawn past for the next card); uncheck to pretend every card fires
+[*][b]Greek Wands: Keep Depleted Spells[/b] — no longer does anything; the mod now models depleted spells correctly for all wands (will be removed next release)
+[*][b]Uncertain Wands: Slot Brackets[/b] — spells the mod can't predict (Greek spells, IF spells, random draws, modded spells) trigger no brackets and show a small ? mark; Hide keeps that rule, Show draws brackets anyway
 [*][b]Debug Info (for bug reports)[/b] — resolution/GUI readout plus per-box guide lines
 [/list]
 
-[h2]Good to know[/h2]
-[list]
-[*]Purely visual. It reads your wands and draws on top of the UI — it changes no spells, wands, or world generation, and requests no unsafe Lua APIs. Safe to add to a run in progress, and safe to remove again.
-[*][b]Shuffle wands show nothing at all[/b], on purpose. Their draw order re-randomizes every cycle, so any structure drawn would be one arrangement out of many — a confident-looking lie.
-[*]The panel simulates the engine's real draw rules, read out of the game's own gun.lua. It can't know your mana, though, so a cast that fizzles part-way through may differ from what's shown.
-[*]Spells whose effect depends on the game state at cast time — the Requirement ("If") spells and the random-draw spells — are marked [b]?[/b]; the structure shown is the condition-true / no-extras path.
-[*]Mod-added spells aren't modeled structurally; they appear in the panel as plain leaves.
-[/list]
+[h2]Latest update — v1.4.0[/h2]
+[b]Confidence tiers.[/b] Every spell now has a confidence tier: the mod either knows exactly what it does (exact), shows a reasonable approximation (approximate), or marks it with a small ? because the real effect depends on game state or it's an unknown modded spell. Wands with uncertain spells draw no slot brackets by default (shown as a row with ? at the end), so you don't get a confident-looking false structure. The new setting [b]Uncertain Wands: Slot Brackets[/b] lets you override that and see the brackets anyway if you know what they mean.
+
+[b]Modded spells now get their real types.[/b] The mod reads the game's live spell table, so modifiers and multicasts added by other mods are displayed with their actual structure instead of as unknowns.
+
+[b]Depleted spells are modeled correctly.[/b] A spell with 0 charges can't fire; the engine discards it and draws the next card instead. Now your wand groups exactly as it really does, and the wrap point reflects that skipping. A depleted spell at the very end of the deck doesn't cause the wand to wrap (there's no draw to lose). The setting [b]Ignore Depleted Spells[/b] now means "model this" (on, default) vs "pretend every spell fires" (off). [b]Greek Wands: Keep Depleted Spells[/b] no longer does anything and will be removed next release.
+
+[b]Add Trigger, Add Timer, Add Death Trigger grouped correctly.[/b] They scan forward over modifiers, consume the whole scan plus the projectile as their target, and nest correctly. Fixed cases where the next card was treated as the payload and the following one fell into a new cast.
+
+[b]Greek chaining corrected.[/b] Alpha, Gamma, Tau no longer chain onto the next spell (their draw was removed from the game's source). Random Modifier now chains correctly (it runs a random modifier, which nearly all draw one card).
+
+[b]Reset shows brackets over all remaining spells, and the panel says it restored the wand.[/b]
+
+[b]Mana cost tracking.[/b] Each cast's mana cost is shown in the panel (in the title for a single cast). A cast costing more than the wand's max mana is highlighted with [code]> max[/code].
+
+[b]Verified against the game's own gun.lua.[/b] Every simulator rule is now checked against Noita's draw engine, so the brackets and panel are as accurate as the game itself.
+
+[h2]Earlier updates[/h2]
+[b]v1.3.3 — Divide By and uncertainty marks.[/b] Divide By spells now group correctly, and spells the mod can't predict are marked ? in the panel instead of guessing silently. Fixed the ? legend being dropped on very long wands and the wrap tag drifting off-screen.
+[b]v1.3.2 — casts, and a rebuilt wrap.[/b] Casts got their own brackets, one level outside the spell groups they contain, with the rainbow running as a single progression across both axes. The wrap was rebuilt as one enclosing bracket instead of two separate pairs joined by a line, which had read as two unrelated groups rather than one structure continuing around. Brackets sharing a card edge no longer blur into plain vertical bars, and a bare modifier chain that wrapped off the end of the deck now gets marked.
+
+[b]v1.3.1 — font compatibility.[/b] With a font mod (such as [i]Better Font (English)[/i]) or a language with a smooth, non-pixelated font (Chinese, Japanese, …), the structure panel rendered squished against the right screen edge with its text running off it. Noita ignores fractional text scales when [i]drawing[/i] those fonts while still applying them when [i]measuring[/i], so the panel was built around three times too small for the text that landed in it. It now detects this and pins itself to the one size those fonts render faithfully — which is why [b]Text Size stays on Large[/b] with such a font. On the default pixel font nothing changes. Also added the Large text size, fixed truncation of non-English spell names, and made the Debug Info box report what your font is doing. Thanks to [b]BourbonCrow[/b] and [b]shinylavawarrior[/b] for reporting this — and to BourbonCrow for spotting that a font mod was the trigger, which is what made it findable at all.
+
+[b]v1.3.0 — depleted spells.[/b] A spell with 0 charges can't fire: the engine discards it and draws the next card instead. Depleted spells are now left out of the structure, so your wand groups — and [b]wraps[/b] — as if that slot were empty. A single spent spell can move the wrap point, which is exactly the kind of thing that's invisible mid-run. The Greek spells are the exception, since they re-cast by position; both behaviours are toggleable.
 
 [h2]Bugs, source, non-Steam installs[/h2]
 If the brackets ever look misaligned, turn on [b]Debug Info (for bug reports)[/b], open your wand, and send the screenshot — it captures your resolution and the wand's measurements, which is exactly what's needed to fix it.

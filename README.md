@@ -55,6 +55,20 @@ needs; `INSTALL.txt` inside it has the long-form walkthrough and troubleshooting
 
 ## How it works
 
+**What a bracket means**
+
+> A bracket encloses exactly the cards the engine removed from the deck
+> while executing the bracket's head card. A cast bracket encloses the
+> cards removed from the deck during one cast. A card a spell re-casts by
+> reference (Alpha, Omega, …) is not removed, so it is never inside a
+> bracket — the panel names it as a copy instead.
+
+Trigger payloads stay nested because they're consumed by the forced draw
+even though they fire later; Divide By and Add Trigger are prefixes, not
+single-card wrappers, since they consume a variable number of cards; and
+Greek spells get no bracket to the card they copy, since the panel names
+the copy in text instead.
+
 The panel simulates the engine's exact draw rules (verified from `gun.lua` in
 `data.wak`): each cast draws the wand's *spells/cast* expressions; modifiers
 (and every other card that force-draws one replacement, like Alpha)
@@ -84,11 +98,18 @@ All settings are runtime-scoped and apply immediately.
   (Japanese, …) the game ignores the smaller sizes; the panel detects that and
   switches itself to **Large** automatically (see `docs/FONT_COMPAT.md`).
 - **Slot Brackets** — the in-UI rainbow brackets (on by default).
-- **Ignore Depleted Spells** — leave 0-charge spells out of the structure,
-  since they can't fire (on by default).
-- **Greek Wands: Keep Depleted Spells** — Greek spells (Alpha, Tau, Omega…)
-  re-cast by slot *position*, so a depleted spell still shifts what they read;
-  on those wands keep everything (on by default).
+- **Ignore Depleted Spells** — model spells with 0 charges the way the game
+  does it (they're skipped and the next card drawn instead), giving the right
+  wand structure and wrap points. Turn off to pretend every card fires,
+  depleted or not (on by default).
+- **Greek Wands: Keep Depleted Spells** — no longer does anything; the mod now
+  models depleted spells correctly for all wands. This option will be removed
+  in the next release.
+- **Uncertain Wands: Slot Brackets** — a wand holding a spell whose deck effect
+  the mod can't follow exactly (Greek spells, IF spells, random draws, unknown
+  modded spells) draws no slot brackets by default and shows a small `?` at the
+  end of the row; Hide keeps that rule, Show draws the brackets anyway for
+  players who want the approximation (Hide by default).
 - **Debug Info (for bug reports)** — resolution/GUI readout plus per-box guide
   lines; screenshot this if the brackets ever misalign.
 
@@ -103,7 +124,9 @@ files/grouping_overlay.lua   # reads the live wand + draws the panel / slot brac
 tools/gen_structure_meta.py  # regenerates structure_meta.lua from data.wak
 tools/preview_wand.lua       # prints any wand's brackets as a Lisp line, no game needed
 tools/test_wand_structure.lua # runs the real wand_structure.lua + tests (primary)
-tools/test_wand_structure.py # Python cross-check mirror of wand_structure.lua
+tools/test_gun_differential.lua # differential check against Noita's own gun.lua (via .gun_ref/)
+tools/gun_harness.lua        # runs the extracted gun.lua from .gun_ref/ over test wands
+tools/extract_gun.py         # extracts gun.lua, gun_actions.lua from data.wak into .gun_ref/
 tools/test_slot_delims.lua   # runs the real slot-bracket planner (nesting, casts, wrap)
 tools/test_panel_rows.lua    # runs the real panel row clamp (+N more fold, sticky legend)
 tools/gen_icons.py           # (retired icon-recolor feature; see below)
@@ -127,15 +150,17 @@ python3 tools/gen_structure_meta.py
 2. Hold a wand and open the inventory: the panel docks beside its box; with
    Slot Brackets enabled, rainbow strips mark each group in the wand boxes.
 3. `lua tools/test_wand_structure.lua` runs the simulator's test suite against
-   the real `wand_structure.lua`; `python3 tools/test_wand_structure.py` runs the
-   Python cross-check mirror (kept in sync; slated for retirement once the Lua
-   harness is fully trusted).
-4. `lua tools/test_slot_delims.lua` runs the real slot-bracket planner —
+   the real `wand_structure.lua`.
+4. `lua tools/test_gun_differential.lua` runs a differential check against
+   Noita's own `gun.lua`, verifying the simulator on every test wand. Requires
+   `python3 tools/extract_gun.py` first (writes gitignored `.gun_ref/`);
+   therefore local-only.
+5. `lua tools/test_slot_delims.lua` runs the real slot-bracket planner —
    nesting depth, cast brackets, the wrap enclosure, stacking on a shared card
    edge, wands with empty slots.
-5. `lua tools/test_panel_rows.lua` runs the real panel row clamp — the
+6. `lua tools/test_panel_rows.lua` runs the real panel row clamp — the
    `... +N more` fold and the sticky `?` legend that has to survive it.
-6. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
+7. `lua tools/test_font_compat.lua` validates the non-pixel-font fixes
    (`docs/FONT_COMPAT.md`) by driving the real panel layout with stubbed
    pixel-like / zero-measuring / nil-returning fonts, then prints the in-game
    checklist for verifying against the Better Font mod or a TTF language.
@@ -155,6 +180,10 @@ structure is exactly what would land on the slot row. It says nothing about the
 *geometry* — where the wand box sits, how the glyphs meet the card art — which
 is calibrated from screenshots and still needs the game.
 
+Pass `--tier` to check the wand's structure confidence (exact/approximate/unknown) and name any cards that block a fully determined simulation, e.g. `lua tools/preview_wand.lua ADD_TRIGGER,DAMAGE,LIGHT_BULLET,BOMB --tier --mana`.
+Pass `--mana` to print the mana cost of each cast alongside the spells it contains.
+Pass `--uses=SLOT:N,SLOT:N` to mark depleted spells (0 charges) for the simulator to track through wraps, e.g. `lua tools/preview_wand.lua LIGHT_BULLET,LIGHT_BULLET,DAMAGE --per-cast=1 --uses=3:0 --mana`.
+
 Unsafe Lua APIs are not requested (`request_no_api_restrictions="0"` in `mod.xml`).
 
 ## Retired: icon recolor
@@ -168,8 +197,16 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
 
 ## Known limitations
 
-- Only the standard spell set (`gun_actions.lua`) is modeled; mod-added spells
-  appear in the panel as plain leaves.
+- Mod-added spells get their *type* from the game's live spell table, so modded
+  modifiers and multicasts group the way vanilla ones do -- but how many cards a
+  modded spell really draws isn't known yet, so a wand holding one is marked
+  uncertain and hides its slot brackets by default (see the setting above).
+- A Divide By standing before a spell that draws anything itself (a multicast,
+  a trigger, an Add Trigger, a modifier) is only approximated: the game
+  re-invokes the divided spell, drawing *fresh* cards on each invocation, and
+  the panel shows the first invocation's grouping. Those wands are marked
+  uncertain, so their slot brackets hide by default. A Divide By in front of a
+  plain projectile is exact and keeps its brackets.
 - The panel can't know your mana, so a cast that fizzles mid-way on mana may
   differ from the simulation. (Depleted 0-charge spells *are* handled — see
   the settings above.)
@@ -178,9 +215,6 @@ and the `OnModInit` hook in `init.lua`, and regenerate the icons with
   condition is false, and the random-draw spells (Random Spell, Draw
   Random, …) cast extra cards chosen at cast time. The structure shown is the
   condition-true / no-extras path.
-- A Divide By followed by a multicast or trigger is approximated: the game
-  re-invokes the divided card, drawing *fresh* cards on each invocation; the
-  panel shows the first invocation's grouping.
 - Shuffle wands get **no panel and no brackets** — the real draw order
   randomizes each cycle, so any displayed structure would be just one
   arrangement of many.
