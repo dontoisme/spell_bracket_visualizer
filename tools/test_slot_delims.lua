@@ -320,7 +320,7 @@ end
 -- this drives the REAL draw_box_brackets through the same kind of recording
 -- Gui stubs case 7 uses. A wand whose tier is worse than "exact" (ALPHA is
 -- "approximate" in structure_meta.lua) draws no bracket glyphs and exactly
--- one dim "?" at the row's right end under "hide"; "show" draws the brackets
+-- one dim "? uncertain" tag in the box header band under "hide"; "show" draws the brackets
 -- as before and no "?".
 do
 	local drawn
@@ -352,14 +352,14 @@ do
 	drawn = { images = 0, texts = {} }
 	T.draw_box_brackets(nil, 640, { make_wd() }, false, "hide")
 	local qmarks = 0
-	for _, t in ipairs(drawn.texts) do if t == "?" then qmarks = qmarks + 1 end end
+	for _, t in ipairs(drawn.texts) do if t == "? uncertain" then qmarks = qmarks + 1 end end
 	eq("tier/hide: exactly one '?' glyph", qmarks, 1)
 	eq("tier/hide: no bracket glyphs drawn", drawn.images, 0)
 
 	drawn = { images = 0, texts = {} }
 	T.draw_box_brackets(nil, 640, { make_wd() }, false, "show")
 	qmarks = 0
-	for _, t in ipairs(drawn.texts) do if t == "?" then qmarks = qmarks + 1 end end
+	for _, t in ipairs(drawn.texts) do if t == "? uncertain" then qmarks = qmarks + 1 end end
 	eq("tier/show: no '?' glyph", qmarks, 0)
 	passck("tier/show: brackets drawn (bracket() draws 3 GuiImage per glyph)", drawn.images > 0)
 end

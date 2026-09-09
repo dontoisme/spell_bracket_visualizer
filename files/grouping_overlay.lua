@@ -1041,11 +1041,20 @@ end
 -- "uncertain", not "broken". Same raw GuiText primitive draw_delims already
 -- uses for its "wraps to front" tag text -- no new drawing path -- dimmed
 -- with COLOR.OTHER, the same grey the panel's tier footnote uses.
-local function draw_uncertain_glyph(gui, wd)
-	local r = wd.rows_geo[1]
-	if not r then return end
+-- Placed like the "wraps to front" tag: right-aligned in the box's header band
+-- beside "Shuffle / Spells per cast", NOT on the slot row -- at the row's
+-- right end it sat on top of the last card (first in-game run of 1.4.0).
+local UNCERTAIN_TAG = "? uncertain"
+local function draw_uncertain_glyph(gui, wd, refw)
+	if not wd.rows_geo[1] then return end
+	local ok, tw = pcall(GuiGetTextDimensions, gui, UNCERTAIN_TAG, 1)
+	tw = (ok and tonumber(tw)) or 0
+	if tw <= 0 then tw = 5 * #UNCERTAIN_TAG end
+	local lx = wd.right - tw - 2
+	if lx < 2 then lx = 2 end
+	local ly = wd.top * U * refw + WRAP_TAG_INSET
 	GuiColorSetForNextWidget(gui, COLOR.OTHER[1], COLOR.OTHER[2], COLOR.OTHER[3], 1)
-	GuiText(gui, wd.right - 8, r.top, "?")
+	GuiText(gui, lx, ly, UNCERTAIN_TAG)
 end
 
 -- `uncertain` is the uncertain_brackets setting ("hide"/"show"). Brackets are
@@ -1071,7 +1080,7 @@ local function draw_box_brackets(gui, refw, wands, show_probe, uncertain)
 				draw_delims(gui, collect_wand_delims(wd.sim, cols, rows),
 					refw, wd.rows_geo, idc, wd.right, wd.top * U * refw)
 			else
-				draw_uncertain_glyph(gui, wd)
+				draw_uncertain_glyph(gui, wd, refw)
 			end
 		end
 	end
