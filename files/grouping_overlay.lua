@@ -12,31 +12,66 @@
 -- OnWorldPostUpdate. All drawing uses our own Gui at coordinates we control, so
 -- it never depends on the engine's (unexposed) spell-slot positions.
 
-local meta = dofile_once("mods/spell_bracket_visualizer/files/structure_meta.lua") or {}
 local sprite_wh_meta = dofile_once("mods/spell_bracket_visualizer/files/wand_sprite_meta.lua") or {}
 local wand_structure = dofile_once("mods/spell_bracket_visualizer/files/wand_structure.lua")
-local runtime_meta = dofile_once("mods/spell_bracket_visualizer/files/runtime_meta.lua")
+local wand_sim_cache = dofile_once("mods/spell_bracket_visualizer/files/wand_sim_cache.lua")
+local slot_marks = dofile_once("mods/spell_bracket_visualizer/files/slot_marks.lua")
+local engine_module = dofile_once("mods/spell_bracket_visualizer/files/engine/engine.lua")
+local live_world = dofile_once("mods/spell_bracket_visualizer/files/engine/live_world.lua")
 
--- The EFFECTIVE metadata table: structure_meta.lua with the game's live
--- `actions` table underneath it (files/runtime_meta.lua), so spells appended by
--- other mods stop reading as cast-ending OTHER leaves. Starts as plain
--- structure_meta and is upgraded once, on the first update() -- by then every
--- mod has finished its ModLuaFileAppend. If anything about the runtime read
--- fails, `emeta` simply stays `meta` and the mod behaves exactly as before.
-local emeta = meta
-local runtime_tried = false
-local function ensure_runtime_meta()
-	if runtime_tried or not runtime_meta then return end
-	runtime_tried = true
-	local ok, merged = pcall(function()
-		runtime_meta.load()
-		return runtime_meta.merged(meta)
-	end)
-	if ok and merged then emeta = merged end
+-- The cast engine (files/engine/): the game's own gun.lua, run in a sandbox.
+-- Built on the first update() rather than at load time, because it snapshots
+-- every spell definition and by then every mod has finished appending its own
+-- spells to gun_actions.lua.  If it cannot be built the panel says why instead
+-- of guessing -- there is no second, hand-written simulator to fall back on.
+local engine, engine_error, sim_cache = nil, nil, nil
+local engine_tried = false
+local function ensure_engine()
+	if engine_tried then return end
+	engine_tried = true
+	local ok, built, err = pcall(engine_module.new_in_game)
+	if ok and built then
+		engine = built
+		engine.set_setting_reader(live_world.setting)
+		sim_cache = wand_sim_cache.new(function(wand)
+			return wand_structure.simulate(engine, wand)
+		end, nil, function(sim) return engine.deps_hold(sim.deps) end)
+	else
+		engine_error = tostring(ok and err or built)
+	end
 end
 
 local M = {}
 local gui = nil
+
+-- Reading a structure too long for the screen: PageUp / PageDown scroll the
+-- panel, Home hides / shows it (SDL scancodes, which is what the game's Input API
+-- takes).  The panel's gui is non-interactive on purpose, so the mouse wheel is
+-- not used; clicks come from the raw pointer.
+local KEY_PAGEUP, KEY_PAGEDOWN, KEY_HOME = 75, 78, 74
+local SCROLL_STEP = 5
+local panel_view = { scroll = 0 }
+
+-- The raw pointer in GUI coordinates (the engine reports it on a 1280x720
+-- screen, twice the 640x360 GUI -- the same conversion the measure tool uses),
+-- plus whether the left button went down this frame.  nil when unavailable.
+local function read_pointer(sw, sh)
+	if type(InputGetMousePosOnScreen) ~= "function" then return nil end
+	local ok, mx, my = pcall(InputGetMousePosOnScreen)
+	if not ok or not mx or not my then return nil end
+	local clicked = false
+	if type(InputIsMouseButtonJustDown) == "function" then
+		local okc, down = pcall(InputIsMouseButtonJustDown, 1)
+		clicked = okc and down == true
+	end
+	return { x = mx * sw / 1280, y = my * sh / 720, click = clicked }
+end
+
+local function key_pressed(code)
+	if type(InputIsKeyJustDown) ~= "function" then return false end
+	local ok, down = pcall(InputIsKeyJustDown, code)
+	return ok and down == true
+end
 
 -- Shown in the debug info box so a bug-report screenshot self-identifies the
 -- build. Bump on each Workshop release.
@@ -70,6 +105,7 @@ local COLOR = {
 	OTHER             = { 0.78, 0.78, 0.78 },
 }
 local HEADER_COLOR = { 0.85, 0.85, 0.85 }
+local INFO_COLOR   = { 0.62, 0.65, 0.70 } -- quiet notes under a row (what was swept, why it failed)
 local WRAP_COLOR   = { 1.00, 0.45, 0.15 } -- loud: wrapping is the headline info
 
 -- SLIME-style rainbow: nesting color cycles by depth (panel spines and slot
@@ -96,9 +132,9 @@ end
 
 -- Localized spell name ($action_*) if available, else a prettified id.
 local function display_name(id)
-	local m = emeta[id]
-	if m and m.name and type(GameTextGet) == "function" then
-		local t = GameTextGet(m.name)
+	local key = engine and engine.name_key(id)
+	if key and type(GameTextGet) == "function" then
+		local t = GameTextGet(key)
 		if t and t ~= "" then return t end
 	end
 	return pretty(id)
@@ -151,7 +187,7 @@ end
 -- always-cast cards never sit in the deck -- the engine plays them at the
 -- start of every cast -- so they must not take part in the deck simulation.
 --
--- T1.7: the simulator now models depleted cards itself (a retried-past pop
+-- T1.7: depleted cards are modelled by the engine itself (a retried-past pop
 -- that lands in cast.spent, per files/wand_structure.lua's header), so this
 -- no longer pre-filters anything. ALL non-permanent cards go into `tokens` in
 -- slot order, depleted or not, and `uses` carries every reading of
@@ -222,18 +258,19 @@ end
 -- enclosing group -- SLIME rainbow by nesting depth (wrap groups in
 -- WRAP_COLOR) -- plus its own label + type color.
 -- Nodes parsed across a wand wrap get a "~" prefix (the card came around).
--- Spells whose real effect depends on the game state at cast time get a "?"
--- after their name (meta dynamic=): the IF_* requirement spells skip part of
--- the deck when their condition is false, and the random-draw spells cast
--- extra cards no static view can show. The structure drawn is the
--- condition-true / no-extras path; the "?" says so instead of pretending.
--- A card whose tier is not "exact" (Greeks, IF_*, random draws, unknown
--- modded spells) gets the same "?": it is why the wand's slot brackets are
--- hidden, and the footnote below names it.
-local function dyn_name(id, rows)
-	local name = display_name(id)
-	local m = emeta[id]
-	if (m and m.dynamic) or wand_structure.tier(m) ~= "exact" then
+-- Spells whose real effect depended on the game state at cast time get a "?"
+-- after their name: the IF_* requirement spells skip part of the deck when
+-- their condition is false, and the random-draw spells cast extra cards no
+-- static view can show. The structure drawn is what the engine did in the
+-- sandbox's fake world; the "?" says so instead of pretending.
+-- A card whose behaviour depended on a guess -- it read game state the sandbox
+-- can only fake (an "If ..." spell, a nearby-enemy count), drew a random number,
+-- or called an engine function the sandbox does not model -- gets the same "?".
+-- `uncertain` is the set of such ids the engine reported for this expression
+-- (wand_structure.lua: uncertain_ids); nil means nothing was uncertain.
+local function dyn_name(id, rows, uncertain, name_of)
+	local name = (name_of or display_name)(id)
+	if uncertain and uncertain[id] then
 		rows.any_dynamic = true
 		return name .. "?"
 	end
@@ -249,36 +286,238 @@ local function fmt(n)
 	return tostring(n)
 end
 
-local function walk(rows, node, ancestor_colors, depth)
-	local mods = ""
-	if node.modifiers and #node.modifiers > 0 then
-		local names = {}
-		for _, m in ipairs(node.modifiers) do names[#names + 1] = dyn_name(m, rows) end
-		mods = "[" .. table.concat(names, ", ") .. "] "
-	end
+-- ---- wording: full sentences, or a compact shorthand -------------------------
+--
+-- Every phrase the panel adds around a spell name lives here, in two sets: the
+-- default reads as English, the compact set (setting "Compact Panel Text") says
+-- the same in a few characters, for a narrow panel or a long wand.  Nothing
+-- outside this table knows which one is in use -- walk() is handed one.
+-- ASCII only: the game's pixel font has no glyphs for anything fancier.
 
-	local name = dyn_name(node.id, rows)
+-- Shorter names for the spells the panel mentions most.  Anything not listed
+-- keeps its in-game name.
+local COMPACT_NAMES = {
+	ADD_TRIGGER = "+Trig", ADD_TIMER = "+Timer", ADD_DEATH_TRIGGER = "+Exp",
+}
+local function compact_name(id)
+	local n = id:match("^DIVIDE_(%d+)$")
+	if n then return "D" .. n end
+	n = id:match("^BURST_(%d+)$")
+	if n then return "draw " .. n end
+	return COMPACT_NAMES[id] or display_name(id)
+end
+
+local WORDS = {}
+
+WORDS.full = {
+	name = display_name,
+	recast = function(label, count, sources)
+		local out = "again: " .. label
+		if count and count > 1 then out = out .. "  x" .. count end
+		if sources and #sources > 0 then
+			out = out .. "  (copies slot" .. (#sources > 1 and "s " or " ")
+				.. table.concat(sources, ", ") .. ")"
+		end
+		return out
+	end,
+	-- how often a card ran / was applied
+	times = function(n) return " x" .. n end,
+	divisor = function(n) return "Divide by " .. n end,
+	dangling = "  (no projectile)",
+	divides_nothing = "  (nothing to repeat)",
+	silent = function(n) return " (" .. n .. " draw nothing)" end,
+	failure = {
+		no_target       = "  (fails: no spell after it to attach to)",
+		not_carrier     = "  (fails: the next spell can't carry a trigger)",
+		depleted_target = "  (fails: the spell it would carry has no charges left)",
+	},
+	plain = "  (no spell left to carry: fires plain)",
+	skips = function(n) return "  (skips " .. n .. (n == 1 and " spell)" or " spells)") end,
+	clears = function(n) return "  (clears " .. n .. " spells)" end,
+	clears_nothing = "  (nothing left to clear)",
+	effect = {
+		applied  = " (applied)",
+		depleted = " (no charges, no effect)",
+		ignored  = " (no effect)",
+		scanner  = " (no effect)",
+	},
+	swept_lead = { kept = "stepped over, kept in the wand: ", gone = "stepped over, discarded: " },
+	swept_sep = ", ",
+	trigger = {
+		hit = "on hit:", death = "on expiration:", delay = "after a delay:",
+		timer = function(frames) return string.format("after %.2gs:", frames / 60) end,
+	},
+}
+
+WORDS.compact = {
+	name = compact_name,
+	recast = function(label, count, sources)
+		local out = "* " .. label
+		if count and count > 1 then out = out .. " x" .. count end
+		if sources and #sources > 0 then out = out .. " @" .. table.concat(sources, ",") end
+		return out
+	end,
+	-- "x" is the repeat count; a multicast is spelled "draw N" (compact_name),
+	-- so the two never read alike.  (U+00D7 was tried: Noita's font shows it as "?".)
+	times = function(n) return " x" .. n end,
+	divisor = function(n) return "D" .. n end,
+	dangling = " (none)",
+	divides_nothing = " (none)",
+	silent = function(n) return " (" .. n .. " silent)" end,
+	failure = {
+		no_target       = " (! no target)",
+		not_carrier     = " (! no carrier)",
+		depleted_target = " (! no charges)",
+	},
+	plain = " (! plain)",
+	skips = function(n) return " (skip " .. n .. ")" end,
+	clears = function(n) return " (clears " .. n .. ")" end,
+	clears_nothing = " (nothing)",
+	effect = { applied = "+", depleted = "0", ignored = "-", scanner = "-" },
+	swept_lead = { kept = "kept: ", gone = "swept: " },
+	swept_sep = " ",
+	trigger = {
+		hit = "hit:", death = "exp:", delay = "timer:",
+		timer = function(frames) return string.format("%.2gs:", frames / 60) end,
+	},
+	-- one sticky line decoding the symbols, shown only when one is on screen
+	legend = "* re-cast  @ copied slot  + applied  0 no charges  - no effect  ! failed",
+}
+
+-- Leading cards, as names.  Identical neighbours are folded ("Damage x3"): a
+-- Divide By runs the card after it several times, and chained Divide By cards
+-- of the same size read better as a count than as a stutter.  `link_runs`
+-- (wand_structure.lua) says how often a modifier was re-run.
+-- A Divide By chain read as what it adds up to.  "Divide by 10, Divide by 4,
+-- Damage Plus x2, Divide by 10, ..." is the engine's bookkeeping, not what the
+-- player thinks: the chain runs its target `divisor` times.  So every Divide By
+-- becomes ONE entry (at the place of the first) and every other modifier is
+-- counted by name across the whole chain, however the Divide By cards
+-- interleave with it.
+local function divided_names(node, rows, words)
+	local mods, names = node.modifiers or {}, {}
+	local count, order = {}, {}
+	local divisor_placed = false
+	for i, id in ipairs(mods) do
+		if node.divider_at[i] then
+			if not divisor_placed then order[#order + 1] = false end   -- false = the Divide By entry
+			divisor_placed = true
+		else
+			if not count[id] then order[#order + 1] = id; count[id] = 0 end
+			count[id] = count[id] + ((node.link_runs and node.link_runs[i]) or 1)
+		end
+	end
+	for _, id in ipairs(order) do
+		if id == false then
+			names[#names + 1] = words.divisor(node.divisor or 1)
+		else
+			local name = dyn_name(id, rows, node.uncertain_ids, words.name)
+			names[#names + 1] = count[id] > 1 and (name .. words.times(count[id])) or name
+		end
+	end
+	return names
+end
+
+local function modifier_names(node, rows, words)
+	local mods, names = node.modifiers or {}, {}
+	if node.divider_at then return divided_names(node, rows, words) end
+	local i = 1
+	while i <= #mods do
+		local count = (node.link_runs and node.link_runs[i]) or 1
+		local j = i + 1
+		while j <= #mods and mods[j] == mods[i] do
+			count = count + ((node.link_runs and node.link_runs[j]) or 1)
+			j = j + 1
+		end
+		local name = dyn_name(mods[i], rows, node.uncertain_ids, words.name)
+		names[#names + 1] = count > 1 and (name .. words.times(count)) or name
+		i = j
+	end
+	return names
+end
+
+-- One note listing the cards a scan stepped over, with what each did.  When the
+-- scan succeeded they were discarded with the target (charges untouched); when
+-- it failed they are all still in the wand.
+local function swept_note(node, words)
+	local parts = {}
+	for _, card in ipairs(node.swept) do
+		parts[#parts + 1] = words.name(card.id) .. words.effect[card.effect]
+	end
+	local lead = node.trigger_failed and words.swept_lead.kept or words.swept_lead.gone
+	return lead .. table.concat(parts, words.swept_sep)
+end
+
+-- "on hit" / "after 0.33s" / "on expiration": when a trigger's payload fires.
+local function trigger_note(node, words)
+	local t = words.trigger
+	if node.trigger == "timer" then
+		return node.trigger_frames and t.timer(node.trigger_frames) or t.delay
+	elseif node.trigger == "death" then
+		return t.death
+	end
+	return t.hit
+end
+
+local function walk(rows, node, ancestor_colors, depth, words)
+	local mods = ""
+	local names = modifier_names(node, rows, words)
+	if #names > 0 then mods = "[" .. table.concat(names, ", ") .. "] " end
+
+	local name = dyn_name(node.id, rows, node.uncertain_ids, words.name)
 	-- no "xN" / "(trig N)" suffixes (user calls, 2026-06-11): the spell name
 	-- already says it and the indented children below show what was gathered
-	-- or carried as payload
+	-- or carried as payload.  The one count that IS shown is how often the engine
+	-- ran a card: a re-cast copy, or the target of a Divide By chain.
 	local label = mods .. name
-	if node.dangling then label = label .. "  (no projectile)" end
+	if node.dangling then
+		label = label .. (node.divides_nothing and words.divides_nothing or words.dangling)
+	end
+	if node.runs and node.divisor and not node.silent_runs then
+		-- already said by the "Divide by N" entry above
+	elseif node.runs then
+		label = label .. " " .. words.times(node.runs)
+		if node.silent_runs then label = label .. words.silent(node.silent_runs) end
+	end
+	-- A card the engine re-ran (a Greek letter's copy, Alpha's self-copy, ...) is
+	-- not in the deck a second time: say it was re-cast, how often, and from where.
+	if node.recast then
+		label = words.recast(label, node.count, node.sources)
+		rows.any_recast = true
+	end
+	-- Add Trigger family: failed (nothing consumed) or fired its target plainly.
+	if node.trigger_failed then
+		label = label .. words.failure[node.trigger_failed]
+		rows.any_symbol = true
+	elseif node.no_payload then
+		label = label .. words.plain
+		rows.any_symbol = true
+	end
+	-- Cards a spell threw away without casting them (a failed "If ...").
+	if node.skipped and #node.skipped > 0 then
+		label = label .. words.skips(#node.skipped)
+	end
 	if node.kind == "reset" then
 		local n = node.cleared and #node.cleared or 0
-		if n > 0 then
-			label = label .. "  (clears " .. n .. " spells)"
-		else
-			label = label .. "  (nothing left to clear)"
-		end
+		label = label .. (n > 0 and words.clears(n) or words.clears_nothing)
 	end
 	if node.wrap then label = "~ " .. label end
 
 	rows[#rows + 1] = { bars = copy_list(ancestor_colors), label = label, color = type_color(node.atype) }
 
+	local child_colors = copy_list(ancestor_colors)
+	child_colors[#child_colors + 1] = nest_color(depth) -- rainbow even when wrapped
+	local function note(text)
+		rows[#rows + 1] = { bars = copy_list(child_colors), label = text, color = INFO_COLOR }
+	end
+	if node.swept and #node.swept > 0 then
+		note(swept_note(node, words))
+		rows.any_symbol = true
+	end
+	if node.kind == "trigger" and node.trigger then note(trigger_note(node, words)) end
+
 	if node.children and #node.children > 0 then
-		local child_colors = copy_list(ancestor_colors)
-		child_colors[#child_colors + 1] = nest_color(depth) -- rainbow even when wrapped
-		for _, ch in ipairs(node.children) do walk(rows, ch, child_colors, depth + 1) end
+		for _, ch in ipairs(node.children) do walk(rows, ch, child_colors, depth + 1, words) end
 	end
 end
 
@@ -302,16 +541,25 @@ end
 -- Rows for the whole simulation: per-cast headers (when there is more than one
 -- cast, a wrap, or a cast that can never afford itself), the trees, a loud
 -- wrap/recharge banner, and the sticky footnotes ("?" tiers, mana overflow,
--- the bracket-definition legend). `tier_ids` (Track C) are the wand's
--- confidence-tier offenders (files/wand_structure.lua M.wand_tier); nil is
--- fine, old callers keep the generic "?" footnote.
-local function sim_rows(sim, cfg, always, tier_ids)
+-- the bracket-definition legend). `hide_legend` drops the rows that only decode
+-- a symbol (the compact key, "[ ]", the generic "?", "mana"); the warning that
+-- names the uncertain cards stays.  `uncertain_ids` are the cards whose
+-- behaviour the engine had to guess (wand_structure.uncertain_ids); nil is fine.
+local function sim_rows(sim, cfg, always, uncertain_ids, compact, hide_legend)
 	local rows = {}
+	local words = compact and WORDS.compact or WORDS.full
+	if sim.error then
+		rows[1] = { bars = {}, label = "cannot simulate: " .. tostring(sim.error),
+			color = WRAP_COLOR }
+		return rows
+	end
+	local always_uncertain = {}
+	for _, id in ipairs(uncertain_ids or {}) do always_uncertain[id] = true end
 	if #always > 0 then
 		local names = {}
 		-- through dyn_name: an always-cast Random Spell / If is just as
 		-- unpredictable as one in the deck, and must carry the same "?".
-		for _, id in ipairs(always) do names[#names + 1] = dyn_name(id, rows) end
+		for _, id in ipairs(always) do names[#names + 1] = dyn_name(id, rows, always_uncertain, words.name) end
 		rows[#rows + 1] = { bars = {}, label = "always: " .. table.concat(names, ", "),
 			color = COLOR.PASSIVE }
 	end
@@ -355,31 +603,35 @@ local function sim_rows(sim, cfg, always, tier_ids)
 				color = (cast.wrapped or over) and WRAP_COLOR or HEADER_COLOR, header = true }
 		end
 		local spine = show_headers and { HEADER_COLOR } or {}
-		for _, node in ipairs(cast.nodes) do walk(rows, node, spine, 0) end
+		for _, node in ipairs(cast.nodes) do walk(rows, node, spine, 0, words) end
 	end
 	-- sticky: these explain marks/warnings that survive the row clamp, so they
 	-- must outlive the "... +N more" cut rather than being the first lines
 	-- dropped. draw_panel holds back every trailing sticky row, in order.
-	if rows.any_dynamic or (tier_ids and #tier_ids > 0) then
-		if tier_ids and #tier_ids > 0 then
+	if rows.any_dynamic or (uncertain_ids and #uncertain_ids > 0) then
+		if uncertain_ids and #uncertain_ids > 0 then
 			local names = {}
-			for _, id in ipairs(tier_ids) do names[#names + 1] = display_name(id) end
+			for _, id in ipairs(uncertain_ids) do names[#names + 1] = display_name(id) end
 			rows[#rows + 1] = { bars = {},
 				label = "? = " .. table.concat(names, ", ") .. ": structure uncertain",
 				color = COLOR.OTHER, sticky = true }
-		else
+		elseif not hide_legend then
 			rows[#rows + 1] = { bars = {}, label = "? = depends on game state when cast",
 				color = COLOR.OTHER, sticky = true }
 		end
 	end
-	if any_over then
+	if any_over and not hide_legend then
 		rows[#rows + 1] = { bars = {},
 			label = "mana = cost of this cast; > max means part of it is discarded",
 			color = COLOR.OTHER, sticky = true }
 	end
+	-- the compact shorthand needs a key, but only when a symbol is on screen
+	if compact and not hide_legend and (rows.any_recast or rows.any_symbol) then
+		rows[#rows + 1] = { bars = {}, label = words.legend, color = COLOR.OTHER, sticky = true }
+	end
 	-- the bracket-definition legend (Track B, docs/ADVANCED_SCENARIOS_PLAN.md
 	-- 1): always present whenever there's at least one cast to explain.
-	if #sim.casts > 0 then
+	if #sim.casts > 0 and not hide_legend then
 		rows[#rows + 1] = { bars = {}, label = "[ ] = spells this card pulls from the wand",
 			color = COLOR.OTHER, sticky = true }
 	end
@@ -441,6 +693,17 @@ local BOX = {
 	-- LENGTH adds ~0.17u/px (the two h7 wands differ ~1u) -- left out for now,
 	-- add a length term + index if a wand visibly annoys (SPRITE_OVERRIDES is the
 	-- escape hatch). Calibrated on h 7-15.
+	-- FLOOR.  The fit above is calibrated on h 7..15.  Below that the box stops
+	-- shrinking with the sprite -- it has to hold the "Shuffle / Spells per cast"
+	-- header whatever the art does -- so the line is clamped at min_h instead of
+	-- extrapolated (which predicted a box ~1.4u too short at h5 and put every
+	-- bracket on such a wand too high).  Measured on wand_0654 (h5) from two
+	-- debug-mode screenshots, 2026-10-07 (pixel-level: card tops, box borders):
+	-- row_top ~18.7u, box_h ~34.3u.  min_h = 5.9 gives 18.68u / 34.28u, which
+	-- also removes the 1px-per-box drift the stack below it had, and leaves every
+	-- h>=7 wand untouched.  One sample: if another thin wand sits wrong, pin it
+	-- in SPRITE_OVERRIDES.
+	min_h   = 5.9,   -- px: sprite thickness below which the box stops shrinking
 	row_a   = 11.3,  -- units: slot-row offset (box top -> row top) at h=0 (intercept)
 	row_b   = 1.25,  -- units: row-offset growth per px of sprite thickness h
 	below_c = 15.6,  -- units: box bottom sits this far below the row top (measured)
@@ -571,11 +834,10 @@ end
 -- enclosing the whole looping structure -- see wrap_delims.
 local function collect_delims(nodes, depth, cols, rows, out)
 	for _, node in ipairs(nodes) do
-		-- A RESET node has no children -- nothing about the cards it cleared
-		-- ran -- but under the mod's bracket definition its bracket must still
-		-- enclose exactly what it removed (node.cleared), so it is
-		-- bracket-worthy on that alone, same as a node with children.
-		local worthy = (node.children and #node.children > 0)
+		-- `grouped` (wand_structure.lua) is true when the head's brackets enclose
+		-- more than one card.  A RESET has no children -- nothing it cleared ran --
+		-- but its bracket must still enclose exactly what it removed (node.cleared).
+		local worthy = node.grouped
 			or (node.kind == "reset" and node.cleared and #node.cleared > 0)
 		if worthy and node.last then
 			local head = node.head or node.first
@@ -755,6 +1017,66 @@ local function plan_delims(groups)
 	return glyphs
 end
 
+-- ---- slot marks: underlines and strike-throughs (planned by slot_marks.lua) ---
+
+local MARK_UNDERLINE_DROP = 2  -- GUI below the bracket hooks' bottom edge; keeps the line
+                               -- clear of the level-0 hooks it would otherwise touch
+local MARK_INSET = 1           -- GUI trimmed off each end, so neighbouring chains stay apart
+local STRIKE_COLOR = { 1.00, 0.30, 0.30 }
+-- "copied" dots: small, one per KIND of copier, each kind in its own colour so
+-- a card copied by Alpha and Gamma shows two distinguishable dots.  The Greek
+-- letters and Double Spell have fixed colours; a modded copier gets the next
+-- free one from COPY_SPARE, by its id, so the colour is stable between frames.
+local COPY_COLORS = {
+	ALPHA     = { 0.40, 0.90, 0.90 },
+	GAMMA     = { 1.00, 0.80, 0.30 },
+	TAU       = { 0.95, 0.50, 0.95 },
+	OMEGA     = { 1.00, 0.45, 0.45 },
+	PHI       = { 0.50, 0.65, 1.00 },
+	MU        = { 0.55, 0.95, 0.45 },
+	SIGMA     = { 1.00, 0.68, 0.28 },
+	DUPLICATE = { 0.90, 0.90, 0.90 },
+}
+local COPY_SPARE = { { 0.70, 0.55, 1.00 }, { 0.30, 0.80, 0.60 }, { 0.95, 0.60, 0.60 } }
+local COPY_DOT      = 2    -- GUI px, square
+local COPY_DOT_GAP  = 2
+
+local function copy_color(id)
+	if COPY_COLORS[id] then return COPY_COLORS[id] end
+	local sum = 0
+	for i = 1, #id do sum = sum + id:byte(i) end
+	return COPY_SPARE[sum % #COPY_SPARE + 1]
+end
+
+-- Draw what slot_marks.collect planned.  Only geometry lives here: which cards
+-- get a mark, and why, is decided in slot_marks.lua.
+local function draw_marks(gui, marks, refw, rows_geo, idc)
+	local function left_of(col) return refw * (BOX.slot0_x + col * BOX.pitch - BOX.halfw) end
+	local function right_of(col) return refw * (BOX.slot0_x + col * BOX.pitch + BOX.halfw) end
+	for _, mark in ipairs(marks) do
+		local yr = rows_geo[mark.row + 1] or rows_geo[1]
+		idc.n = idc.n + 1
+		if mark.kind == "underline" then
+			local x1, x2 = left_of(mark.ca) + MARK_INSET, right_of(mark.cb) - MARK_INSET
+			local y = yr.bot + BRACKET_EXTEND_BOT + MARK_UNDERLINE_DROP
+			line(gui, 72000 + idc.n, x1, y, x2 - x1, 1, COLOR.MODIFIER, 0.9)
+		elseif mark.kind == "strike" then
+			local x1, x2 = left_of(mark.col) + MARK_INSET + 2, right_of(mark.col) - MARK_INSET - 2
+			line(gui, 72000 + idc.n, x1, (yr.top + yr.bot) / 2, x2 - x1, 1, STRIKE_COLOR, 0.9)
+		elseif mark.kind == "copied" then
+			-- a centred row of dots just above the card's top edge, one per copier kind
+			local dots = #mark.by
+			local width = dots * COPY_DOT + (dots - 1) * COPY_DOT_GAP
+			local centre = (left_of(mark.col) + right_of(mark.col)) / 2
+			for d, id in ipairs(mark.by) do
+				idc.n = idc.n + 1
+				line(gui, 72000 + idc.n, centre - width / 2 + (d - 1) * (COPY_DOT + COPY_DOT_GAP),
+					yr.top - COPY_DOT - 1, COPY_DOT, COPY_DOT, copy_color(id), 0.95)
+			end
+		end
+	end
+end
+
 -- box_right / box_top = the wand box's right and top edges (GUI). They place
 -- the "wraps to front" tag, which is anchored to the BOX rather than to the
 -- bracket it tags -- see the note at the tag below.
@@ -846,12 +1168,16 @@ end
 -- row_top ~22.2.) Leave empty until a specific wand actually misbehaves.
 local SPRITE_OVERRIDES = {
 	-- Starter wands (seen every run) draw an XML sprite with offset_y=3, so the
-	-- slot row sits ~0.6u lower than the thickness model predicts. gen_wand_sprite_meta
-	-- now keys these on png height (h=8) which nails box_h; these measured values
-	-- (middle-click, 2026-06-19: box top->bottom = 36.9u, box top->row top = 21.9u)
-	-- also pin the row exactly. Same sprite on both starters -> identical numbers.
-	["data/items_gfx/handgun.xml"]   = { box_h = 36.9, row_top = 21.9 },
-	["data/items_gfx/bomb_wand.xml"] = { box_h = 36.9, row_top = 21.9 },
+	-- slot row sits lower than the thickness model predicts.  gen_wand_sprite_meta
+	-- keys these on png height (h=8), which nails box_h (36.9u, middle-click
+	-- 2026-06-19); the same sprite on both starters gives identical numbers.
+	-- row_top is the CARD's outer top edge below the box top, the same reference
+	-- the thickness model uses for every other wand.  The first measurement
+	-- (21.9u) was taken to the inside of the frame and left the starter wands'
+	-- brackets 3px low; a pixel read of a debug screenshot (2026-10-07) gives
+	-- 102px = 21.25u for the starter against 96px = 20.0u for an h7 wand.
+	["data/items_gfx/handgun.xml"]   = { box_h = 36.9, row_top = 21.25 },
+	["data/items_gfx/bomb_wand.xml"] = { box_h = 36.9, row_top = 21.25 },
 }
 
 -- Returns the wand art's w+h (drives the box-height model) AND its sprite path
@@ -934,24 +1260,24 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 	local box_top = BOX.top0 -- units; boxes stack, each as tall as its wand needs
 	for _, wd in ipairs(wands) do
 		wd.tokens, wd.always, wd.xs, wd.uses = read_deck(wd.e, ignore_depleted)
-		-- Track C confidence tier: the worst of every card on the wand (deck
-		-- AND always-cast -- an always-cast Greek/random spell is just as
-		-- unfollowable as one in the deck). tier_ids are the offenders, named
-		-- in the panel footnote (sim_rows) and the debug box.
-		local tier_ids_input = {}
-		for _, id in ipairs(wd.tokens) do tier_ids_input[#tier_ids_input + 1] = id end
-		for _, id in ipairs(wd.always) do tier_ids_input[#tier_ids_input + 1] = id end
-		wd.tier, wd.tier_ids = wand_structure.wand_tier(tier_ids_input, emeta, #wd.tokens)
 		wd.cfg = read_config(wd.e)
 		wd.h, wd.sprite = wand_art_wh(gui, wd.e)
 		-- ignore_depleted (default on) is the "model the engine" setting: ON
-		-- hands the live charge counts to the simulator, which retries past a
-		-- depleted card exactly as gun.lua does (no bracket on it, per
-		-- wand_structure.lua's header); OFF omits `uses` entirely and every
-		-- card is simulated as though it fires.
-		wd.sim = wand_structure.simulate(wd.tokens, emeta,
-			{ spells_per_cast = wd.cfg.spells_per_cast,
-			  uses = ignore_depleted and wd.uses or nil })
+		-- hands the live charge counts to the engine, which retries past a
+		-- depleted card exactly as gun.lua does; OFF omits `uses` entirely and
+		-- every card is simulated as though it fires.
+		if sim_cache then
+			wd.sim = sim_cache.get({ tokens = wd.tokens, always = wd.always,
+				spells_per_cast = wd.cfg.spells_per_cast, shuffle = wd.cfg.shuffle,
+				uses = ignore_depleted and wd.uses or nil })
+		else
+			wd.sim = { casts = {}, error = engine_error or "engine not ready" }
+		end
+		wd.uncertain_ids = wand_structure.uncertain_ids(wd.sim)
+		-- A wand is "uncertain" when a CARD on it depended on a guess.  A guess made
+		-- by the cast machinery outside any card (sim.uncertain, shown in the debug
+		-- box) says nothing about this wand's structure, so it does not count.
+		wd.uncertain = #wd.uncertain_ids > 0
 
 		-- displayed slot rows: capacity wraps every per_row slots (fall back
 		-- to the highest occupied slot if the capacity read failed). per_row is
@@ -970,7 +1296,8 @@ local function collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 		-- Extra rows of a multi-row wand (per_row, frozen feature) stack DOWN.
 		-- A per-sprite override wins over the model (SPRITE_OVERRIDES).
 		local ov = wd.sprite and SPRITE_OVERRIDES[wd.sprite]
-		local row_offset = (ov and ov.row_top) or (BOX.row_a + BOX.row_b * wd.h)
+		local row_offset = (ov and ov.row_top)
+			or (BOX.row_a + BOX.row_b * math.max(wd.h, BOX.min_h))
 		wd.box_h = ((ov and ov.box_h) or (row_offset + BOX.below_c))
 			+ (wd.nrows - 1) * BOX.row_step
 		wd.top = box_top
@@ -1058,9 +1385,9 @@ local function draw_uncertain_glyph(gui, wd, refw)
 end
 
 -- `uncertain` is the uncertain_brackets setting ("hide"/"show"). Brackets are
--- withheld from a wand whose tier is worse than "exact" unless the setting is
--- "show" -- Track C, docs/ADVANCED_SCENARIOS_PLAN.md 2.
-local function draw_box_brackets(gui, refw, wands, show_probe, uncertain)
+-- withheld from a wand whose structure depended on a guess unless the setting
+-- is "show" -- Track C, docs/ADVANCED_SCENARIOS_PLAN.md 2.
+local function draw_box_brackets(gui, refw, wands, show_probe, uncertain, show_marks)
 	local idc = { n = 0 }
 	if show_probe then draw_row_probe(gui, refw, wands) end
 	for _, wd in ipairs(wands) do
@@ -1070,7 +1397,7 @@ local function draw_box_brackets(gui, refw, wands, show_probe, uncertain)
 		-- panel still shows the slot-order tree WITH its "order varies!"
 		-- warning -- text can hedge, brackets can't.
 		if #wd.tokens > 0 and not wd.cfg.shuffle then
-			if wd.tier == "exact" or uncertain == "show" then
+			if not wd.uncertain or uncertain == "show" then
 				-- displayed position of each card: wraps every per_row slots
 				local cols, rows = {}, {}
 				for k, x in ipairs(wd.xs) do
@@ -1079,6 +1406,10 @@ local function draw_box_brackets(gui, refw, wands, show_probe, uncertain)
 				end
 				draw_delims(gui, collect_wand_delims(wd.sim, cols, rows),
 					refw, wd.rows_geo, idc, wd.right, wd.top * U * refw)
+				if show_marks ~= false then
+					draw_marks(gui, slot_marks.collect(wd.sim, cols, rows),
+						refw, wd.rows_geo, idc)
+				end
 			else
 				draw_uncertain_glyph(gui, wd, refw)
 			end
@@ -1090,20 +1421,28 @@ end
 
 -- The panel describes the HELD wand (= the selected box), so it stays put
 -- while the user rearranges that wand's spells and live-updates as the cast
--- order changes -- no popping like a hover tooltip would. It docks in the
--- free column right of the wand boxes, top-aligned with the selected wand's
--- own box when there's room, sliding down past wider boxes / up from the
--- screen bottom when there isn't (see placement below). Height is clamped
--- to the screen; overflow folds into one "... +N more" line. It never
--- covers a wand box, so the old z-order fight with the engine's spell
--- frames and our slot brackets can't happen. (No scroll container on
--- purpose: this gui is NonInteractive so hovering it can never block
--- firing or inventory clicks -- see the fire-block fix.)
+-- order changes -- no popping like a hover tooltip would.
+--
+-- SIZE.  A fixed, comfortable width that does not depend on the wand: a big wand
+-- has a wide box, and sizing the panel from what is left of the screen made it
+-- shrink exactly when a long structure needed room.  It may now overlap the
+-- wand box; hiding it (click its title, or Home) is how the slots are
+-- uncovered.  HEIGHT: a short structure pins at the selected wand's height, a
+-- long one takes the full column under the HP/mana bars, and a structure
+-- taller than that SCROLLS (PageUp / PageDown, or click the scroll bar) instead
+-- of being folded into a "+N more" line.
+--
+-- It never needs the mouse to be readable, and its gui is NonInteractive so
+-- hovering it can never block firing or inventory clicks (see the fire-block
+-- fix); clicks are read from the raw pointer instead.
 local RIGHT_MARGIN    = 3    -- GUI kept clear at the right screen edge
-local PANEL_GAP       = 6    -- GUI between the active wand's box edge and the panel
 local TOP_BAR_KEEPOUT = 58   -- panel top stays below the HP/mana/gold bars
 local BOTTOM_MARGIN   = 12   -- GUI kept clear at the screen bottom
-local MAX_PANEL_W     = 220  -- hard cap on panel width (also clamped to sw*0.5)
+local PANEL_W_BASE    = 260  -- GUI: the panel's width at the default 0.6 text scale
+local PANEL_W_MIN     = 180  -- never narrower than this, whatever the screen
+local PANEL_W_MAX_FRAC = 0.45 -- ...nor wider than this share of the screen
+local SCROLLBAR_W     = 2    -- GUI, the scroll bar's width
+local SCROLLBAR_GAP   = 3    -- GUI between the text column and the bar
 local PANEL_BG_Z      = -20  -- lower z = front; beats the slot brackets (z -10)
 local PANEL_TEXT_Z    = -21  -- one layer in front of the panel background
 -- Debug overlays (readout box, measure tool) must sit in FRONT of the cast panel
@@ -1225,15 +1564,52 @@ local function fit_label(gui, text, scale, max_px)
 	return s .. "..."
 end
 
+-- Break a label into lines that each measure within max_px, at word boundaries,
+-- so a long row can be READ in full instead of being cut to "...".  Continuation
+-- lines are indented two spaces.  A single word wider than a line is trimmed
+-- (fit_label) -- there is nowhere else to put it.
+local CONTINUATION = "  "
+local function wrap_label(gui, text, scale, max_px)
+	if (text_dims(gui, text, scale)) <= max_px then return { text } end
+	local lines, line = {}, ""
+	for word in text:gmatch("%S+") do
+		local candidate = (line == "") and word or (line .. " " .. word)
+		local prefixed = (#lines > 0 and CONTINUATION or "") .. candidate
+		if line ~= "" and (text_dims(gui, prefixed, scale)) > max_px then
+			lines[#lines + 1] = (#lines > 0 and CONTINUATION or "") .. line
+			line = word
+		else
+			line = candidate
+		end
+	end
+	if line ~= "" then lines[#lines + 1] = (#lines > 0 and CONTINUATION or "") .. line end
+	return lines
+end
+
 -- Companion cast-structure panel for the held wand, drawn RIGHT-ANCHORED.
--- Overlap with other wands is acceptable (the panel is opaque and topmost), so
--- placement is simple: pin the right edge near the screen edge and grow the
--- panel leftward. Vertically it is HYBRID -- a short structure pins at the
--- selected wand's height (clamped below the HP bars); a long one that won't fit
--- there takes over the full-height right column under the bars (may cover the
--- Wet/Tinker status text, by design). Long labels are truncated to MAX_PANEL_W.
-local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
+-- Overlap with wand boxes is acceptable (the panel is opaque and topmost, and
+-- can be hidden), so placement is simple: pin the right edge near the screen
+-- edge at a fixed width.  Vertically it is HYBRID -- a short structure pins at
+-- the selected wand's height (clamped below the HP bars); a long one that won't
+-- fit there takes over the full-height right column under the bars (may cover
+-- the Wet/Tinker status text, by design) and scrolls.  Rows wider than the
+-- panel are cut with "..." (hover for the full text, click to wrap them).
+-- `opts` (optional) is the panel's view state, owned by the caller so it survives
+-- from frame to frame:
+--   opts.hidden    true = draw only a small "show" tab.  Toggled here by a click
+--                on the title (or the tab); the caller toggles it for the Home key.
+--   opts.scroll    first visible content row, 0-based; clamped here and written
+--                back.  Only used when the structure does not fit.
+--   opts.expanded  { [label] = true } rows the reader opened by clicking them;
+--                wrapped in full.  Written by this function.
+--   opts.mouse     { x, y, click } in GUI coordinates (nil = no pointer): a row cut
+--                short with "..." shows its full text in a tooltip while hovered,
+--                and a click opens / closes it; a click on the title hides the
+--                panel; a click on the scroll bar jumps there.  The panel's gui
+--                stays non-interactive, so this reads the raw pointer instead.
+local function draw_panel(gui, rows, title, sw, sh, anchor, scale, opts)
 	if #rows == 0 then return end
+	opts = opts or {}
 
 	-- Under a font that ignores fractional scale this snaps to 1.0; the whole
 	-- rest of the function then measures and draws at the same size. Must come
@@ -1248,31 +1624,13 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	local _, th = text_dims(gui, title, scale)
 	local line_h = th + 2
 	local bar_w = (text_dims(gui, "| ", scale)) -- advance per nesting spine
-
-	-- width budget: cap at MAX_PANEL_W (and half-screen), AND keep the panel's
-	-- LEFT edge clear of the active wand's box right edge so its spell slots stay
-	-- clickable (the panel right-anchors and grows leftward). Truncate labels past
-	-- the budget, then hug the widest KEPT label. The title is never truncated, so
-	-- the panel never collapses even if every label is over-long.
-	local sel_right = (anchor.sel and anchor.boxes[anchor.sel])
-		and anchor.boxes[anchor.sel].right or 0
-	local avail = sw - RIGHT_MARGIN - PANEL_GAP - sel_right
-	local max_panel_w = math.min(MAX_PANEL_W, sw * 0.5, avail)
-	if max_panel_w < 60 then max_panel_w = 60 end -- floor for a near-full-width active wand
-	local max_w = (text_dims(gui, title, scale))
-	for _, r in ipairs(rows) do
-		local bars_w = (r.header and 0 or #r.bars) * bar_w
-		r.label = fit_label(gui, r.label, scale, max_panel_w - pad * 2 - bars_w)
-		local w = bars_w + (text_dims(gui, r.label, scale))
-		if w > max_w then max_w = w end
+	local mouse = opts.mouse
+	local function over(x, y, w, h)
+		return mouse and mouse.x >= x and mouse.x <= x + w and mouse.y >= y and mouse.y < y + h
 	end
-	local panel_w = max_w + pad * 2
 
-	-- vertical placement (hybrid) --------------------------------------------
+	-- ---- where the panel sits ------------------------------------------------
 	local screen_bot = sh - BOTTOM_MARGIN
-	local function rows_at(y, bot)
-		return math.floor((bot - y - pad - 2 - line_h) / line_h)
-	end
 	local stack_top = anchor.boxes[1].top
 	for _, b in ipairs(anchor.boxes) do
 		if b.top < stack_top then stack_top = b.top end
@@ -1282,54 +1640,149 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 	-- candidate top: the selected wand's box top, never above the stack top and
 	-- never over the HP/mana/gold bars.
 	local cand_top = math.floor(math.max(TOP_BAR_KEEPOUT, stack_top, sel_top))
+
+	-- Width: fixed, in proportion to the text size, so it neither hugs the
+	-- longest row (jumping as you scroll) nor shrinks next to a wide wand.
+	local panel_w = PANEL_W_BASE * scale / 0.6
+	panel_w = math.min(panel_w, sw * PANEL_W_MAX_FRAC)
+	panel_w = math.max(panel_w, PANEL_W_MIN)
+	panel_w = math.min(panel_w, sw - RIGHT_MARGIN - 8)
+	-- the box starts one pad left of the text column; right-aligned to the screen
+	local px = math.floor(sw - RIGHT_MARGIN - panel_w + pad)
+	local box_x = px - pad
+
+	-- ---- hidden: just a tab to bring it back ---------------------------------
+	if opts.hidden then
+		local tab = "[+] " .. title
+		local tab_w = (text_dims(gui, tab, scale)) + pad * 2
+		local tx = math.floor(sw - RIGHT_MARGIN - tab_w + pad)
+		if mouse and mouse.click and over(tx - pad, cand_top - pad, tab_w, line_h + pad * 2) then
+			opts.hidden = false
+			mouse.click = false
+		end
+		GuiZSet(gui, PANEL_BG_Z)
+		GuiImageNinePiece(gui, 90210, tx - pad, cand_top - pad, tab_w, line_h + pad * 2, 1.0)
+		GuiZSet(gui, PANEL_TEXT_Z)
+		GuiColorSetForNextWidget(gui, HEADER_COLOR[1], HEADER_COLOR[2], HEADER_COLOR[3], 1)
+		GuiText(gui, tx, cand_top, tab, scale)
+		GuiZSet(gui, 1)
+		return
+	end
+
+	-- ---- rows: wrap the ones the reader opened, cut the rest -----------------
+	-- The text column leaves room for the scroll bar, always, so toggling the bar
+	-- never reflows anything.
+	local label_budget = panel_w - pad * 2 - SCROLLBAR_W - SCROLLBAR_GAP
+	opts.expanded = opts.expanded or {}
+	do
+		local expanded = {}
+		for _, r in ipairs(rows) do
+			local open = opts.expanded[r.label]
+			local bars_w = (r.header and 0 or #r.bars) * bar_w
+			local lines = open and wrap_label(gui, r.label, scale, label_budget - bars_w)
+				or { r.label }
+			for _, text in ipairs(lines) do
+				local copy = {}
+				for k, v in pairs(r) do copy[k] = v end
+				copy.key, copy.full = r.label, r.label
+				copy.opened = #lines > 1 and opts.expanded[r.label] or nil
+				copy.label = text
+				expanded[#expanded + 1] = copy
+			end
+		end
+		rows = expanded
+	end
+	for _, r in ipairs(rows) do
+		local bars_w = (r.header and 0 or #r.bars) * bar_w
+		r.label = fit_label(gui, r.label, scale, label_budget - bars_w)
+		r.cut = (r.label ~= r.full) and not r.opened
+	end
+
+	-- ---- vertical placement and the scroll window ---------------------------
+	local function rows_at(y)
+		return math.floor((screen_bot - y - pad - 2 - line_h) / line_h)
+	end
 	local y0
-	if rows_at(cand_top, screen_bot) >= #rows then
+	if rows_at(cand_top) >= #rows then
 		y0 = cand_top                    -- short: pin at the wand's height
 	else
 		y0 = math.floor(TOP_BAR_KEEPOUT) -- long: take over the full-height column
 	end
-	local bot_limit = screen_bot
+	local max_rows = math.max(2, rows_at(y0))
 
-	-- right-align: right edge = sw - RIGHT_MARGIN, panel grows leftward
-	local px = math.floor(sw - RIGHT_MARGIN - panel_w)
-	if px < 4 then px = 4 end
+	-- Trailing sticky rows (the "?" footnotes, the bracket legend) stay put under
+	-- the scrolling part: they explain marks that are on screen above them.
+	local n_sticky = 0
+	while rows[#rows - n_sticky] and rows[#rows - n_sticky].sticky do n_sticky = n_sticky + 1 end
+	local content = #rows - n_sticky
 
-	-- clamp rows to the band: keep what fits, fold the rest into "... +N more"
-	local max_rows = math.floor((bot_limit - y0 - pad - 2 - line_h) / line_h)
-	if max_rows < 2 then max_rows = 2 end
-	if #rows > max_rows then
-		-- Every trailing sticky row (the "?" tier/mana footnotes, the bracket
-		-- legend) is held back from the cut and re-appended after it, in order:
-		-- dropping one while the marks/warnings it explains stay visible above
-		-- would leave them unexplained. They cost one line of the budget each,
-		-- so the "+N more" count is over the CONTENT rows only.
-		local n_sticky = 0
-		while rows[#rows - n_sticky] and rows[#rows - n_sticky].sticky do
-			n_sticky = n_sticky + 1
-		end
-		local budget = math.max(1, max_rows - n_sticky)
-		local content = #rows - n_sticky
-		local kept = {}
-		for i = 1, budget - 1 do kept[i] = rows[i] end
-		kept[budget] = { bars = {},
-			label = "... +" .. (content - budget + 1) .. " more",
-			color = HEADER_COLOR }
-		for i = content + 1, #rows do kept[#kept + 1] = rows[i] end
-		rows = kept
+	local scrolls = #rows > max_rows
+	local visible, scroll = content, 0
+	if scrolls then
+		-- one line is kept for the key hint
+		visible = math.max(1, max_rows - n_sticky - 1)
+		local max_scroll = math.max(0, content - visible)
+		scroll = math.max(0, math.min(math.floor(opts.scroll or 0), max_scroll))
+	end
+	opts.scroll = scroll
+
+	local shown = {}
+	for i = scroll + 1, scroll + visible do shown[#shown + 1] = rows[i] end
+	for i = content + 1, #rows do shown[#shown + 1] = rows[i] end
+	if scrolls then
+		shown[#shown + 1] = { bars = {}, label = "PgUp/PgDn: scroll   Home: hide",
+			color = COLOR.OTHER, hint = true }
+	end
+	local panel_h = (#shown + 1) * line_h + pad * 2
+
+	-- ---- clicks on the title (hide) and the scroll bar (jump) ---------------
+	local title_hit = over(box_x, y0 - pad, panel_w, line_h + pad)
+	if mouse and mouse.click and title_hit then
+		opts.hidden = true
+		mouse.click = false   -- consumed: the tab drawn next must not take the same click
 	end
 
-	local panel_h = (#rows + 1) * line_h + pad * 2
+	local bar_x = box_x + panel_w - pad - SCROLLBAR_W
+	local bar_y = y0 + line_h + 2
+	local bar_h = visible * line_h
+	if scrolls and mouse and mouse.click and over(bar_x - 2, bar_y, SCROLLBAR_W + 4, bar_h) then
+		local target = (mouse.y - bar_y) / bar_h * content - visible / 2
+		scroll = math.max(0, math.min(math.floor(target + 0.5), content - visible))
+		opts.scroll = scroll
+		shown = {}
+		for i = scroll + 1, scroll + visible do shown[#shown + 1] = rows[i] end
+		for i = content + 1, #rows do shown[#shown + 1] = rows[i] end
+		shown[#shown + 1] = { bars = {}, label = "PgUp/PgDn: scroll   Home: hide",
+			color = COLOR.OTHER, hint = true }
+	end
+	if opts.hidden then return draw_panel(gui, rows, title, sw, sh, anchor, scale, opts) end
 
+	-- ---- draw ----------------------------------------------------------------
 	-- opaque + topmost: lower z draws in front, so the panel sits over any wand
 	-- boxes/brackets it overlaps and stays readable.
 	GuiZSet(gui, PANEL_BG_Z)
-	GuiImageNinePiece(gui, 90210, px - pad, y0 - pad, panel_w, panel_h, 1.0)
+	GuiImageNinePiece(gui, 90210, box_x, y0 - pad, panel_w, panel_h, 1.0)
 
 	GuiZSet(gui, PANEL_TEXT_Z)
 	GuiText(gui, px, y0, title, scale)
+	local close = "[-]"
+	local close_w = (text_dims(gui, close, scale))
+	GuiColorSetForNextWidget(gui, HEADER_COLOR[1], HEADER_COLOR[2], HEADER_COLOR[3], 1)
+	GuiText(gui, box_x + panel_w - pad - SCROLLBAR_W - close_w, y0, close, scale)
+
 	local y = y0 + line_h + 2
-	for _, r in ipairs(rows) do
+	local tooltip
+	for _, r in ipairs(shown) do
 		local x = px
+		-- a row that was cut short (or that the reader opened) answers the pointer
+		if mouse and (r.cut or r.opened) and r.key
+			and over(box_x, y, panel_w, line_h) and not over(bar_x - 2, y, SCROLLBAR_W + 4, line_h) then
+			if mouse.click then
+				opts.expanded[r.key] = (not opts.expanded[r.key]) or nil
+			elseif r.cut then
+				tooltip = r.full
+			end
+		end
 		local bars = r.bars
 		if r.header then bars = {} end -- headers sit flush left
 		for _, bc in ipairs(bars) do   -- rainbow nesting spines
@@ -1340,6 +1793,33 @@ local function draw_panel(gui, rows, title, sw, sh, anchor, scale)
 		GuiColorSetForNextWidget(gui, r.color[1], r.color[2], r.color[3], 1)
 		GuiText(gui, x, y, r.label, scale)
 		y = y + line_h
+	end
+
+	-- the scroll bar: a thin track and a thumb showing where the window is
+	if scrolls then
+		local thumb_h = math.max(4, bar_h * visible / content)
+		local thumb_y = bar_y + (bar_h - thumb_h) * scroll / math.max(1, content - visible)
+		line(gui, 90301, bar_x, bar_y, SCROLLBAR_W, bar_h, COLOR.OTHER, 0.25)
+		line(gui, 90302, bar_x, thumb_y, SCROLLBAR_W, thumb_h, HEADER_COLOR, 0.9)
+	end
+
+	-- the full text of the hovered row, next to the pointer, in front of everything
+	if tooltip then
+		local tip_w = math.min(sw * 0.6, 280)
+		local lines = wrap_label(gui, tooltip, scale, tip_w - pad * 2)
+		local widest = 0
+		for _, l in ipairs(lines) do
+			widest = math.max(widest, (text_dims(gui, l, scale)))
+		end
+		local box_w, box_h = widest + pad * 2, #lines * line_h + pad * 2
+		local tx = math.max(4, math.min(mouse.x + 8, sw - box_w - 4))
+		local ty = math.max(4, math.min(mouse.y + 12, sh - box_h - 4))
+		GuiZSet(gui, PANEL_BG_Z - 2)
+		GuiImageNinePiece(gui, 90211, tx - pad, ty - pad, box_w, box_h, 1.0)
+		GuiZSet(gui, PANEL_TEXT_Z - 2)
+		for i, l in ipairs(lines) do
+			GuiText(gui, tx, ty + (i - 1) * line_h, l, scale)
+		end
 	end
 	GuiZSet(gui, 1)
 end
@@ -1371,9 +1851,7 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 		lines[#lines + 1] = string.format(
 			"rows modeled=%d   cast-wraps=%s",
 			wd.nrows, (wd.sim and wd.sim.wrapped) and "yes" or "no")
-		-- T1.7: depleted cards the simulator retried past this cast, per cast
-		-- (replaces the old "greek=" line -- the simulator models depleted
-		-- cards itself now, so there's nothing Greek-specific left to report).
+		-- Depleted cards the engine retried past this cast, per cast.
 		do
 			local spents = {}
 			if wd.sim then
@@ -1384,9 +1862,27 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 			end
 			lines[#lines + 1] = "spent slots: " .. table.concat(spents, " | ")
 		end
-		-- Track C: the wand's confidence tier and the ids responsible.
+		-- Which cards made the engine guess (empty when the answer is certain).
 		lines[#lines + 1] = string.format(
-			"tier=%s (%s)", wd.tier or "exact", table.concat(wd.tier_ids or {}, ", "))
+			"uncertain=%s (%s)", wd.uncertain and "yes" or "no",
+			table.concat(wd.uncertain_ids or {}, ", "))
+		if wd.sim and wd.sim.error then lines[#lines + 1] = "engine: " .. wd.sim.error end
+		for _, problem in ipairs(wd.sim and wd.sim.problems or {}) do
+			lines[#lines + 1] = "error: " .. problem
+		end
+		-- What exactly the engine had to guess (the usual reason brackets are hidden).
+		local guesses = wd.sim and wd.sim.uncertain
+		if guesses then
+			local function counted(set)
+				local names = {}
+				for name, n in pairs(set or {}) do names[#names + 1] = name .. " x" .. n end
+				table.sort(names)
+				return table.concat(names, ", ")
+			end
+			lines[#lines + 1] = "guess: random=" .. (guesses.random and "yes" or "no")
+				.. "  world: " .. counted(guesses.world)
+			lines[#lines + 1] = "guess: unknown engine calls: " .. counted(guesses.unknown)
+		end
 		-- Track E1: the wand's mana ceiling/regen and what each cast costs.
 		lines[#lines + 1] = string.format(
 			"mana_max=%s charge=%s",
@@ -1401,11 +1897,9 @@ local function draw_debug_info(gui, sw, sh, wd, per_row)
 	else
 		lines[#lines + 1] = "wand:  (none held -- select/hold a wand)"
 	end
-	-- Modded-spell fallback layer (3 A1): how many spells the live `actions`
-	-- table yielded, or why the read failed.
-	if runtime_meta then
-		lines[#lines + 1] = runtime_meta.status_line()
-	end
+	lines[#lines + 1] = engine
+		and ("engine: ok, " .. engine.spell_count() .. " spells")
+		or ("engine: UNAVAILABLE (" .. tostring(engine_error) .. ")")
 	-- Font probe: RAW engine readings, no floors. The width ratio is the whole
 	-- diagnosis (docs/FONT_COMPAT.md) -- with the vanilla pixel font it equals
 	-- the requested 0.6, so "x0.60 ok" prints; under a font that ignores
@@ -1536,15 +2030,15 @@ function M.update()
 	local get = (type(ModSettingGet) == "function") and ModSettingGet or function() return nil end
 	local show_panel = get("spell_bracket_visualizer.show_grouping") ~= false
 	local show_slots = get("spell_bracket_visualizer.show_slot_brackets") ~= false
+	local show_marks = get("spell_bracket_visualizer.show_slot_marks") ~= false
 	local show_debug = get("spell_bracket_visualizer.show_debug") == true
 	if not show_panel and not show_slots and not show_debug then return end
 	-- Model depleted (0-use) spells the way gun.lua does: ON (default) hands the
-	-- simulator the live charge counts, so a depleted card is retried past (no
-	-- bracket on it, per wand_structure.lua's header); OFF pretends every card
-	-- fires. greek_keeps_depleted no longer does anything -- the simulator now
-	-- models depleted cards itself, so Greek spells see the right positions
-	-- automatically; see settings.lua.
+	-- engine the live charge counts, so a depleted card is retried past (no
+	-- bracket on it); OFF pretends every card fires.
 	local ignore_depleted = get("spell_bracket_visualizer.ignore_depleted_spells") ~= false
+	local compact_text = get("spell_bracket_visualizer.compact_panel") == true
+	local hide_legend = get("spell_bracket_visualizer.show_legend") == false
 	local panel_scale = PANEL_SCALE_MAP[get("spell_bracket_visualizer.panel_text_size") or "small"] or 0.6
 	-- Track C: "hide" (default) withholds slot brackets on a wand whose tier
 	-- is worse than exact; "show" draws them anyway. See draw_box_brackets.
@@ -1564,16 +2058,18 @@ function M.update()
 	-- one measure/read pass shared by the brackets and the panel's dock anchor.
 	-- per_row is the aspect-calibrated wrap column (99 = no wrap at >= 16:9)
 	local per_row = wrap_columns(sw, sh)
-	-- First frame only: fold the game's live `actions` table in under
-	-- structure_meta so modded spells simulate (and get named) correctly.
-	ensure_runtime_meta()
+	-- First frame only: build the cast engine now that every mod's spells exist.
+	ensure_engine()
+	-- What the "If ..." spells check (HP, enemies nearby, every-other toggle...)
+	-- is read from the live game once per frame, so those wands stay certain.
+	if engine then engine.set_world(live_world.read()) end
 	local boxes = collect_wand_boxes(gui, refw, per_row, ignore_depleted)
 
 	if show_slots then -- brackets on every wand box (independent of active wand)
 		-- strongly negative z = "bring to front": lower z draws on top, and
 		-- this must beat the engine's spell-frame layer, not just our own gui
 		GuiZSet(gui, -10)
-		draw_box_brackets(gui, refw, boxes, show_debug, uncertain_brackets)
+		draw_box_brackets(gui, refw, boxes, show_debug, uncertain_brackets, show_marks)
 		GuiZSet(gui, 1)
 	end
 
@@ -1609,7 +2105,12 @@ function M.update()
 				boxes = geo,
 				sel   = sel,
 			}
-			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.tier_ids), title, sw, sh, anchor, panel_scale)
+			if key_pressed(KEY_PAGEDOWN) then panel_view.scroll = panel_view.scroll + SCROLL_STEP end
+			if key_pressed(KEY_PAGEUP) then panel_view.scroll = panel_view.scroll - SCROLL_STEP end
+			if key_pressed(KEY_HOME) then panel_view.hidden = not panel_view.hidden end
+			panel_view.mouse = read_pointer(sw, sh)
+			draw_panel(gui, sim_rows(wd.sim, wd.cfg, wd.always, wd.uncertain_ids, compact_text, hide_legend),
+				title, sw, sh, anchor, panel_scale, panel_view)
 		end
 	end
 
@@ -1636,6 +2137,7 @@ M._test = {
 	text_dims       = text_dims,
 	faithful_scale  = faithful_scale,
 	fit_label       = fit_label,
+	wrap_label      = wrap_label,
 	draw_panel      = draw_panel,
 	PANEL_SCALE_MAP = PANEL_SCALE_MAP,
 	collect_delims  = collect_delims,
@@ -1644,7 +2146,8 @@ M._test = {
 	collect_wand_delims  = collect_wand_delims,
 	plan_delims     = plan_delims,
 	draw_delims     = draw_delims, -- pixel-level check with a recording Gui stub
-	draw_box_brackets = draw_box_brackets, -- Track C tier suppression, at the draw level
+	draw_box_brackets = draw_box_brackets, -- uncertainty suppression, at the draw level
+	draw_marks      = draw_marks,
 
 	nest_color      = nest_color,
 	WRAP_COLOR      = WRAP_COLOR,
@@ -1653,9 +2156,8 @@ M._test = {
 	read_deck       = read_deck,
 	read_config     = read_config,
 
-	-- runtime (modded-spell) metadata layer, 3 A1
-	ensure_runtime_meta = ensure_runtime_meta,
-	effective_meta      = function() return emeta end,
+	ensure_engine = ensure_engine,
+	set_engine    = function(e) engine = e end, -- tests inject a stand-in engine
 }
 
 return M
